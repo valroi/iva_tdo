@@ -6,11 +6,13 @@ export type UserRole =
   | "contractor_author"
   | "viewer";
 
+export type CompanyType = "admin" | "owner" | "contractor";
+
 export interface User {
   id: number;
   email: string;
   full_name: string;
-  company_type: "admin" | "owner" | "contractor";
+  company_type: CompanyType;
   role: UserRole;
   is_active: boolean;
   created_at: string;
@@ -88,4 +90,17 @@ export interface WorkflowStatus {
   is_final: boolean;
   editable: boolean;
   created_at: string;
+}
+
+export interface RegistrationRequest {
+  id: number;
+  email: string;
+  full_name: string;
+  company_type: CompanyType;
+  requested_role: UserRole | null;
+  status: "PENDING" | "APPROVED" | "REJECTED";
+  review_note: string | null;
+  reviewed_by_id: number | null;
+  created_at: string;
+  reviewed_at: string | null;
 }

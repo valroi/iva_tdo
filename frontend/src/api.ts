@@ -1,10 +1,13 @@
 import type {
   CommentItem,
+  CompanyType,
   DocumentItem,
   MDRRecord,
   NotificationItem,
+  RegistrationRequest,
   Revision,
   User,
+  UserRole,
   WorkflowStatus,
 } from "./types";
 
@@ -141,4 +144,62 @@ export function markNotificationRead(notificationId: number): Promise<Notificati
 
 export function listWorkflowStatuses(): Promise<WorkflowStatus[]> {
   return request<WorkflowStatus[]>("/workflow/statuses");
+}
+
+export function listUsers(): Promise<User[]> {
+  return request<User[]>("/users");
+}
+
+export function createUser(payload: {
+  email: string;
+  password: string;
+  full_name: string;
+  company_type: CompanyType;
+  role: UserRole;
+}): Promise<User> {
+  return request<User>("/users", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateUserRole(userId: number, role: UserRole): Promise<User> {
+  return request<User>(`/users/${userId}/role`, {
+    method: "PUT",
+    body: JSON.stringify({ role }),
+  });
+}
+
+export function setUserActive(userId: number, isActive: boolean): Promise<User> {
+  return request<User>(`/users/${userId}/active`, {
+    method: "PUT",
+    body: JSON.stringify({ is_active: isActive }),
+  });
+}
+
+export function deleteUser(userId: number): Promise<void> {
+  return request<void>(`/users/${userId}`, {
+    method: "DELETE",
+  });
+}
+
+export function listRegistrationRequests(): Promise<RegistrationRequest[]> {
+  return request<RegistrationRequest[]>("/users/registration-requests");
+}
+
+export function approveRegistrationRequest(
+  requestId: number,
+  payload: { role: UserRole; company_type: CompanyType; is_active: boolean },
+): Promise<User> {
+  return request<User>(`/users/registration-requests/${requestId}/approve`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function rejectRegistrationRequest(requestId: number, reviewNote: string): Promise<RegistrationRequest> {
+  return request<RegistrationRequest>(`/users/registration-requests/${requestId}/reject`, {
+    method: "POST",
+    body: JSON.stringify({ review_note: reviewNote }),
+  });
 }

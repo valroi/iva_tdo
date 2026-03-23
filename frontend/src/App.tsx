@@ -1,4 +1,4 @@
-import { BellOutlined, DatabaseOutlined, FileOutlined, HomeOutlined, LogoutOutlined } from "@ant-design/icons";
+import { BellOutlined, DatabaseOutlined, FileOutlined, HomeOutlined, LogoutOutlined, TeamOutlined } from "@ant-design/icons";
 import { Button, Layout, Menu, Space, Spin, Typography, message } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -8,11 +8,12 @@ import DashboardPage from "./pages/DashboardPage";
 import DocumentsPage from "./pages/DocumentsPage";
 import MdrPage from "./pages/MdrPage";
 import NotificationsPage from "./pages/NotificationsPage";
+import AdminPage from "./pages/AdminPage";
 import type { DocumentItem, MDRRecord, NotificationItem, User, WorkflowStatus } from "./types";
 
 const { Header, Sider, Content } = Layout;
 
-type Section = "dashboard" | "mdr" | "documents" | "notifications";
+type Section = "dashboard" | "mdr" | "documents" | "notifications" | "admin";
 
 export default function App(): JSX.Element {
   const [authenticated, setAuthenticated] = useState(hasAccessToken());
@@ -56,15 +57,20 @@ export default function App(): JSX.Element {
     }
   }, [authenticated, loadInitialData]);
 
-  const menuItems = useMemo(
-    () => [
+  const menuItems = useMemo(() => {
+    const baseItems = [
       { key: "dashboard", icon: <HomeOutlined />, label: "Dashboard" },
       { key: "mdr", icon: <DatabaseOutlined />, label: "MDR" },
       { key: "documents", icon: <FileOutlined />, label: "Documents" },
       { key: "notifications", icon: <BellOutlined />, label: "Notifications" },
-    ],
-    [],
-  );
+    ];
+
+    if (user?.role === "admin") {
+      baseItems.push({ key: "admin", icon: <TeamOutlined />, label: "Admin users" });
+    }
+
+    return baseItems;
+  }, [user?.role]);
 
   if (!authenticated) {
     return <LoginForm onLoggedIn={() => setAuthenticated(true)} />;
@@ -120,6 +126,7 @@ export default function App(): JSX.Element {
               {activeSection === "notifications" && (
                 <NotificationsPage notifications={notifications} onReload={loadInitialData} />
               )}
+              {activeSection === "admin" && user?.role === "admin" && <AdminPage currentUser={user} />}
             </>
           )}
         </Content>
