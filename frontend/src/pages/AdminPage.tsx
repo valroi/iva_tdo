@@ -17,6 +17,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   approveRegistrationRequest,
+  createQuickDemoSetup,
   createUser,
   deleteUser,
   listRegistrationRequests,
@@ -25,7 +26,7 @@ import {
   setUserActive,
   updateUserRole,
 } from "../api";
-import type { CompanyType, RegistrationRequest, User, UserRole } from "../types";
+import type { CompanyType, QuickDemoSetupResult, RegistrationRequest, User, UserRole } from "../types";
 
 interface Props {
   currentUser: User;
@@ -65,6 +66,10 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
 
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectForm] = Form.useForm();
+
+  const [quickOpen, setQuickOpen] = useState(false);
+  const [quickForm] = Form.useForm();
+  const [quickResult, setQuickResult] = useState<QuickDemoSetupResult | null>(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -225,9 +230,25 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
         <Typography.Title level={4} style={{ margin: 0 }}>
           Admin: Users and access
         </Typography.Title>
-        <Button type="primary" onClick={() => setCreateOpen(true)}>
-          + Create user
-        </Button>
+        <Space>
+          <Button
+            onClick={() => {
+              setQuickResult(null);
+              quickForm.setFieldsValue({
+                contractor_email: "contractor.demo@ivamaris.io",
+                owner_email: "owner.demo@ivamaris.io",
+                password: "DemoPass123!",
+              });
+              setQuickOpen(true);
+            }}
+            disabled={!isMainAdmin}
+          >
+            Quick demo setup
+          </Button>
+          <Button type="primary" onClick={() => setCreateOpen(true)}>
+            + Create user
+          </Button>
+        </Space>
       </Space>
 
       {!isMainAdmin && (
@@ -353,6 +374,52 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
             <Input.TextArea rows={3} />
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        open={quickOpen}
+        title="Quick demo setup"
+        onCancel={() => setQuickOpen(false)}
+        onOk={async () => {
+          const values = await quickForm.validateFields();
+          const result = await createQuickDemoSetup(values);
+          setQuickResult(result);
+          message.success("Demo workflow created");
+          await loadData();
+        }}
+        okText="Create demo flow"
+      >
+        <Typography.Paragraph>
+          Создаст подрядчика, заказчика и готовую демо-цепочку:
+          MDR → Document → Revision → Comment → Response.
+        </Typography.Paragraph>
+        <Form form={quickForm} layout="vertical">
+          <Form.Item
+            name="contractor_email"
+            label="Contractor email"
+            rules={[{ required: true, type: "email" }]}
+          >
+            <Input />
+          </Form.Item>
+          <Form.Item name="owner_email" label="Owner email" rules={[{ required: true, type: "email" }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="password" label="Password for both users" rules={[{ required: true, min: 6 }]}>
+            <Input.Password />
+          </Form.Item>
+        </Form>
+
+        {quickResult && (
+          <div style={{ marginTop: 12, background: "#fafafa", border: "1px solid #f0f0f0", padding: 12 }}>
+            <Typography.Text strong>Created demo credentials:</Typography.Text>
+            <div>Contractor: {quickResult.contractor_email}</div>
+            <div>Owner: {quickResult.owner_email}</div>
+            <div>Password: {quickResult.password}</div>
+            <div style={{ marginTop: 8 }}>
+              IDs: MDR #{quickResult.mdr_id}, Document #{quickResult.document_id}, Revision #{quickResult.revision_id}
+            </div>
+          </div>
+        )}
       </Modal>
     </>
   );

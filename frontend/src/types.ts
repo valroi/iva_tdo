@@ -104,3 +104,13 @@ export interface RegistrationRequest {
   created_at: string;
   reviewed_at: string | null;
 }
+
+export interface QuickDemoSetupResult {
+  contractor_email: string;
+  owner_email: string;
+  password: string;
+  mdr_id: number;
+  document_id: number;
+  revision_id: number;
+  comment_id: number;
+}

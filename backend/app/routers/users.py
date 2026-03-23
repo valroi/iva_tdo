@@ -8,14 +8,21 @@ from app.config import get_settings
 from app.database import get_db
 from app.deps import is_main_admin, require_main_admin, require_user_manager
 from app.models import (
+    Comment,
+    CommentStatus,
     CompanyType,
+    Document,
+    MDRRecord,
     Notification,
     RegistrationRequest,
     RegistrationRequestStatus,
+    Revision,
     User,
     UserRole,
 )
 from app.schemas import (
+    QuickDemoSetupRequest,
+    QuickDemoSetupResponse,
     RegistrationApprovePayload,
     RegistrationRejectPayload,
     RegistrationRequestRead,
@@ -41,6 +48,21 @@ def _validate_admin_constraints(actor: User, role: UserRole, company_type: Compa
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Admin role requires company_type=admin",
         )
+
+
+def _next_available_email(db: Session, base_email: str) -> str:
+    email = base_email.lower()
+    if db.query(User).filter(User.email == email).first() is None:
+        return email
+
+    local_part, domain = email.split("@", 1)
+    suffix = 1
+    while True:
+        candidate = f"{local_part}+{suffix}@{domain}"
+        exists = db.query(User).filter(User.email == candidate).first()
+        if exists is None:
+            return candidate
+        suffix += 1
 
 
 @router.get("", response_model=list[UserRead])
@@ -76,6 +98,122 @@ def create_user(
     db.commit()
     db.refresh(user)
     return user
+
+
+@router.post("/quick-demo-setup", response_model=QuickDemoSetupResponse, status_code=status.HTTP_201_CREATED)
+def quick_demo_setup(
+    payload: QuickDemoSetupRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_main_admin),
+):
+    contractor_email = _next_available_email(db, payload.contractor_email)
+    owner_email = _next_available_email(
+        db,
+        payload.owner_email if payload.owner_email.lower() != contractor_email else f"owner+1@{payload.owner_email.split('@', 1)[1]}",
+    )
+
+    contractor = User(
+        email=contractor_email,
+        hashed_password=get_password_hash(payload.password),
+        full_name="Demo Contractor",
+        company_type=CompanyType.contractor,
+        role=UserRole.contractor_manager,
+        is_active=True,
+    )
+    owner = User(
+        email=owner_email,
+        hashed_password=get_password_hash(payload.password),
+        full_name="Demo Owner",
+        company_type=CompanyType.owner,
+        role=UserRole.owner_reviewer,
+        is_active=True,
+    )
+    db.add(contractor)
+    db.add(owner)
+    db.flush()
+
+    suffix = datetime.utcnow().strftime("%y%m%d%H%M%S%f")
+    doc_number = f"DEMO-PD-{suffix[-8:]}"
+    mdr = MDRRecord(
+        document_key=f"DEMO-{suffix[-10:]}",
+        project_code="DEMO",
+        originator_code="CTR",
+        category="PIPING",
+        title_object="Demo Unit",
+        discipline_code="PD",
+        doc_type="DRAWING",
+        serial_number=suffix[-4:],
+        doc_number=doc_number,
+        doc_name="Demo drawing for workflow",
+        progress_percent=70.0,
+        doc_weight=1.0,
+        issue_purpose="IFR",
+        revision="A",
+        dates={},
+        status="IN_REVIEW",
+        contractor_responsible_id=contractor.id,
+        owner_responsible_id=owner.id,
+        is_confidential=False,
+    )
+    db.add(mdr)
+    db.flush()
+
+    document = Document(
+        mdr_id=mdr.id,
+        document_num=doc_number,
+        title="Demo drawing",
+        discipline="Piping",
+        weight=1.0,
+        created_by_id=contractor.id,
+    )
+    db.add(document)
+    db.flush()
+
+    revision = Revision(
+        document_id=document.id,
+        revision_code="A",
+        issue_purpose="IFR",
+        status="SUBMITTED",
+        trm_number=f"TRM-DEMO-{suffix[-6:]}",
+        file_path=f"DEMO/{doc_number}/A/demo.pdf",
+    )
+    db.add(revision)
+    db.flush()
+
+    comment = Comment(
+        revision_id=revision.id,
+        author_id=owner.id,
+        text="Please verify demo dimensions on page 2",
+        status=CommentStatus.IN_PROGRESS,
+        page=2,
+        area_x=120,
+        area_y=180,
+        area_w=260,
+        area_h=80,
+    )
+    db.add(comment)
+    db.flush()
+
+    response = Comment(
+        revision_id=revision.id,
+        parent_id=comment.id,
+        author_id=contractor.id,
+        text="Corrected in next revision draft",
+        status=CommentStatus.IN_PROGRESS,
+    )
+    db.add(response)
+
+    db.commit()
+
+    return QuickDemoSetupResponse(
+        contractor_email=contractor.email,
+        owner_email=owner.email,
+        password=payload.password,
+        mdr_id=mdr.id,
+        document_id=document.id,
+        revision_id=revision.id,
+        comment_id=comment.id,
+    )
 
 
 @router.get("/registration-requests", response_model=list[RegistrationRequestRead])

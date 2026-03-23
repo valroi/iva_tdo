@@ -32,6 +32,24 @@ def test_main_flow_and_user_governance():
         assert login.status_code == 200, login.text
         main_admin_access = login.json()["access_token"]
 
+        quick_demo = client.post(
+            "/api/v1/users/quick-demo-setup",
+            json={
+                "contractor_email": "quick.contractor@example.com",
+                "owner_email": "quick.owner@example.com",
+                "password": "QuickPass123!",
+            },
+            headers=_auth_header(main_admin_access),
+        )
+        assert quick_demo.status_code == 201, quick_demo.text
+        quick_payload = quick_demo.json()
+
+        quick_owner_login = client.post(
+            "/api/v1/auth/login",
+            json={"email": quick_payload["owner_email"], "password": quick_payload["password"]},
+        )
+        assert quick_owner_login.status_code == 200, quick_owner_login.text
+
         secondary_admin = client.post(
             "/api/v1/users",
             json={

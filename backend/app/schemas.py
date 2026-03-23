@@ -260,3 +260,19 @@ class RegistrationApprovePayload(BaseModel):
 
 class RegistrationRejectPayload(BaseModel):
     review_note: str | None = None
+
+
+class QuickDemoSetupRequest(BaseModel):
+    contractor_email: EmailStr = "contractor.demo@ivamaris.io"
+    owner_email: EmailStr = "owner.demo@ivamaris.io"
+    password: str = Field(default="DemoPass123!", min_length=6)
+
+
+class QuickDemoSetupResponse(BaseModel):
+    contractor_email: EmailStr
+    owner_email: EmailStr
+    password: str
+    mdr_id: int
+    document_id: int
+    revision_id: int
+    comment_id: int

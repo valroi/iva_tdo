@@ -4,6 +4,7 @@ import type {
   DocumentItem,
   MDRRecord,
   NotificationItem,
+  QuickDemoSetupResult,
   RegistrationRequest,
   Revision,
   User,
@@ -201,5 +202,16 @@ export function rejectRegistrationRequest(requestId: number, reviewNote: string)
   return request<RegistrationRequest>(`/users/registration-requests/${requestId}/reject`, {
     method: "POST",
     body: JSON.stringify({ review_note: reviewNote }),
+  });
+}
+
+export function createQuickDemoSetup(payload: {
+  contractor_email: string;
+  owner_email: string;
+  password: string;
+}): Promise<QuickDemoSetupResult> {
+  return request<QuickDemoSetupResult>("/users/quick-demo-setup", {
+    method: "POST",
+    body: JSON.stringify(payload),
   });
 }
