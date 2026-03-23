@@ -276,3 +276,10 @@ class QuickDemoSetupResponse(BaseModel):
     document_id: int
     revision_id: int
     comment_id: int
+
+
+class FileUploadResponse(BaseModel):
+    file_name: str
+    file_path: str
+    content_type: str
+    file_size: int

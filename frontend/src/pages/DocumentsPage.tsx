@@ -11,9 +11,11 @@ import {
   Table,
   Tag,
   Typography,
+  Upload,
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
+import { UploadOutlined } from "@ant-design/icons";
 import { useEffect, useMemo, useState } from "react";
 
 import {
@@ -23,6 +25,7 @@ import {
   listComments,
   listRevisions,
   respondToComment,
+  uploadRevisionPdf,
 } from "../api";
 import type { CommentItem, DocumentItem, MDRRecord, Revision } from "../types";
 
@@ -33,9 +36,7 @@ interface Props {
 }
 
 export default function DocumentsPage({ documents, mdr, onReloadDocuments }: Props): JSX.Element {
-  const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(
-    documents[0]?.id ?? null,
-  );
+  const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(documents[0]?.id ?? null);
   const [selectedRevisionId, setSelectedRevisionId] = useState<number | null>(null);
   const [revisions, setRevisions] = useState<Revision[]>([]);
   const [comments, setComments] = useState<CommentItem[]>([]);
@@ -44,17 +45,16 @@ export default function DocumentsPage({ documents, mdr, onReloadDocuments }: Pro
   const [revModalOpen, setRevModalOpen] = useState(false);
   const [commentModalOpen, setCommentModalOpen] = useState(false);
   const [responseModalOpen, setResponseModalOpen] = useState(false);
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [selectedCommentId, setSelectedCommentId] = useState<number | null>(null);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
 
   const [docForm] = Form.useForm();
   const [revForm] = Form.useForm();
   const [commentForm] = Form.useForm();
   const [responseForm] = Form.useForm();
 
-  const documentRows = useMemo(
-    () => documents.map((d) => ({ ...d, key: d.id })),
-    [documents],
-  );
+  const documentRows = useMemo(() => documents.map((d) => ({ ...d, key: d.id })), [documents]);
 
   useEffect(() => {
     if (!selectedDocumentId) {
@@ -69,7 +69,7 @@ export default function DocumentsPage({ documents, mdr, onReloadDocuments }: Pro
         setSelectedRevisionId(items[0]?.id ?? null);
       })
       .catch((error: unknown) => {
-        const text = error instanceof Error ? error.message : "Failed to load revisions";
+        const text = error instanceof Error ? error.message : "Ошибка загрузки ревизий";
         message.error(text);
       });
   }, [selectedDocumentId]);
@@ -83,52 +83,65 @@ export default function DocumentsPage({ documents, mdr, onReloadDocuments }: Pro
     listComments(selectedRevisionId)
       .then(setComments)
       .catch((error: unknown) => {
-        const text = error instanceof Error ? error.message : "Failed to load comments";
+        const text = error instanceof Error ? error.message : "Ошибка загрузки комментариев";
         message.error(text);
       });
   }, [selectedRevisionId]);
 
   const documentColumns: ColumnsType<DocumentItem> = [
-    { title: "Doc #", dataIndex: "document_num", key: "document_num" },
-    { title: "Title", dataIndex: "title", key: "title" },
-    { title: "Discipline", dataIndex: "discipline", key: "discipline" },
+    { title: "Шифр", dataIndex: "document_num", key: "document_num" },
+    { title: "Название", dataIndex: "title", key: "title" },
+    { title: "Дисциплина", dataIndex: "discipline", key: "discipline" },
     {
-      title: "Action",
+      title: "Действие",
       key: "action",
       render: (_, row) => (
         <Button size="small" onClick={() => setSelectedDocumentId(row.id)}>
-          Open
+          Открыть
         </Button>
       ),
     },
   ];
 
   const revisionColumns: ColumnsType<Revision> = [
-    { title: "Rev", dataIndex: "revision_code", key: "revision_code" },
-    { title: "Purpose", dataIndex: "issue_purpose", key: "issue_purpose" },
-    { title: "Status", dataIndex: "status", key: "status" },
+    { title: "Рев", dataIndex: "revision_code", key: "revision_code" },
+    { title: "Цель", dataIndex: "issue_purpose", key: "issue_purpose" },
+    { title: "Статус", dataIndex: "status", key: "status" },
     {
-      title: "TRM",
-      dataIndex: "trm_number",
-      key: "trm_number",
-      render: (value: string | null) => value ?? "-",
+      title: "Файл",
+      dataIndex: "file_path",
+      key: "file_path",
+      render: (value: string | null) => (value ? value.split("/").slice(-1)[0] : "—"),
     },
     {
-      title: "Action",
+      title: "Действие",
       key: "action",
       render: (_, row) => (
-        <Button size="small" onClick={() => setSelectedRevisionId(row.id)}>
-          Comments
-        </Button>
+        <Space>
+          <Button size="small" onClick={() => setSelectedRevisionId(row.id)}>
+            Комментарии
+          </Button>
+          <Button
+            size="small"
+            icon={<UploadOutlined />}
+            onClick={() => {
+              setSelectedRevisionId(row.id);
+              setUploadFile(null);
+              setUploadModalOpen(true);
+            }}
+          >
+            PDF
+          </Button>
+        </Space>
       ),
     },
   ];
 
   const commentColumns: ColumnsType<CommentItem> = [
     { title: "ID", dataIndex: "id", key: "id" },
-    { title: "Text", dataIndex: "text", key: "text" },
+    { title: "Текст", dataIndex: "text", key: "text" },
     {
-      title: "Status",
+      title: "Статус",
       dataIndex: "status",
       key: "status",
       render: (value: CommentItem["status"]) => {
@@ -141,9 +154,9 @@ export default function DocumentsPage({ documents, mdr, onReloadDocuments }: Pro
         return <Tag color={colorMap[value]}>{value}</Tag>;
       },
     },
-    { title: "Page", dataIndex: "page", key: "page", render: (value: number | null) => value ?? "-" },
+    { title: "Лист", dataIndex: "page", key: "page", render: (value: number | null) => value ?? "—" },
     {
-      title: "Action",
+      title: "Действие",
       key: "action",
       render: (_, row) => (
         <Button
@@ -153,7 +166,7 @@ export default function DocumentsPage({ documents, mdr, onReloadDocuments }: Pro
             setResponseModalOpen(true);
           }}
         >
-          Respond
+          Ответить
         </Button>
       ),
     },
@@ -169,7 +182,7 @@ export default function DocumentsPage({ documents, mdr, onReloadDocuments }: Pro
 
   const submitNewRevision = async () => {
     if (!selectedDocumentId) {
-      message.warning("Select document first");
+      message.warning("Сначала выберите документ");
       return;
     }
     const values = await revForm.validateFields();
@@ -182,7 +195,7 @@ export default function DocumentsPage({ documents, mdr, onReloadDocuments }: Pro
 
   const submitComment = async () => {
     if (!selectedRevisionId) {
-      message.warning("Select revision first");
+      message.warning("Сначала выберите ревизию");
       return;
     }
     const values = await commentForm.validateFields();
@@ -195,7 +208,7 @@ export default function DocumentsPage({ documents, mdr, onReloadDocuments }: Pro
 
   const submitResponse = async () => {
     if (!selectedCommentId || !selectedRevisionId) {
-      message.warning("Select comment first");
+      message.warning("Сначала выберите комментарий");
       return;
     }
     const values = await responseForm.validateFields();
@@ -206,44 +219,60 @@ export default function DocumentsPage({ documents, mdr, onReloadDocuments }: Pro
     setComments(items);
   };
 
+  const submitUpload = async () => {
+    if (!selectedRevisionId || !uploadFile) {
+      message.warning("Выберите ревизию и PDF файл");
+      return;
+    }
+
+    const result = await uploadRevisionPdf(selectedRevisionId, uploadFile);
+    message.success(`Файл загружен: ${result.file_name}`);
+    setUploadModalOpen(false);
+
+    if (selectedDocumentId) {
+      const items = await listRevisions(selectedDocumentId);
+      setRevisions(items);
+    }
+  };
+
   return (
     <>
       <Space style={{ marginBottom: 12 }}>
         <Typography.Title level={4} style={{ margin: 0 }}>
-          Documents, Revisions, Comments
+          Документы, ревизии, комментарии
         </Typography.Title>
         <Button type="primary" onClick={() => setDocModalOpen(true)}>
-          + Document
+          + Документ
         </Button>
         <Button onClick={() => setRevModalOpen(true)} disabled={!selectedDocumentId}>
-          + Revision
+          + Ревизия
         </Button>
         <Button onClick={() => setCommentModalOpen(true)} disabled={!selectedRevisionId}>
-          + Comment
+          + Комментарий
         </Button>
       </Space>
 
       <Row gutter={16}>
         <Col span={8}>
-          <Card title="Documents">
+          <Card title="Документы">
             <Table rowKey="id" size="small" columns={documentColumns} dataSource={documentRows} pagination={false} />
           </Card>
         </Col>
         <Col span={8}>
-          <Card title={`Revisions (Doc: ${selectedDocumentId ?? "-"})`}>
+          <Card title={`Ревизии (документ: ${selectedDocumentId ?? "—"})`}>
             <Table rowKey="id" size="small" columns={revisionColumns} dataSource={revisions} pagination={false} />
           </Card>
         </Col>
         <Col span={8}>
-          <Card title={`Comments (Rev: ${selectedRevisionId ?? "-"})`}>
+          <Card title={`Комментарии (ревизия: ${selectedRevisionId ?? "—"})`}>
             <Table rowKey="id" size="small" columns={commentColumns} dataSource={comments} pagination={false} />
           </Card>
         </Col>
       </Row>
 
-      <Modal open={docModalOpen} onCancel={() => setDocModalOpen(false)} onOk={submitNewDocument} title="Create Document">
+      <Modal open={docModalOpen} onCancel={() => setDocModalOpen(false)} onOk={submitNewDocument} title="Создать документ">
         <Form form={docForm} layout="vertical">
-          <Form.Item name="mdr_id" label="MDR" rules={[{ required: true }]}> 
+          <Form.Item name="mdr_id" label="MDR" rules={[{ required: true }]}>
             <Select
               options={mdr.map((item) => ({
                 value: item.id,
@@ -251,70 +280,70 @@ export default function DocumentsPage({ documents, mdr, onReloadDocuments }: Pro
               }))}
             />
           </Form.Item>
-          <Form.Item name="document_num" label="Document number" rules={[{ required: true }]}>
+          <Form.Item name="document_num" label="Шифр документа" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
-          <Form.Item name="title" label="Title" rules={[{ required: true }]}>
+          <Form.Item name="title" label="Название" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
-          <Form.Item name="discipline" label="Discipline" rules={[{ required: true }]}>
+          <Form.Item name="discipline" label="Дисциплина" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
-          <Form.Item name="weight" label="Weight" initialValue={1}>
+          <Form.Item name="weight" label="Вес" initialValue={1}>
             <Input type="number" />
           </Form.Item>
         </Form>
       </Modal>
 
-      <Modal open={revModalOpen} onCancel={() => setRevModalOpen(false)} onOk={submitNewRevision} title="Create Revision">
+      <Modal open={revModalOpen} onCancel={() => setRevModalOpen(false)} onOk={submitNewRevision} title="Создать ревизию">
         <Form form={revForm} layout="vertical">
-          <Form.Item name="revision_code" label="Revision code" rules={[{ required: true }]}>
+          <Form.Item name="revision_code" label="Код ревизии" rules={[{ required: true }]}>
             <Input placeholder="A" />
           </Form.Item>
-          <Form.Item name="issue_purpose" label="Issue purpose" rules={[{ required: true }]}>
+          <Form.Item name="issue_purpose" label="Цель выпуска" rules={[{ required: true }]}>
             <Input placeholder="IFR" />
           </Form.Item>
-          <Form.Item name="status" label="Status" initialValue="SUBMITTED" rules={[{ required: true }]}>
+          <Form.Item name="status" label="Статус" initialValue="SUBMITTED" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
-          <Form.Item name="trm_number" label="TRM number">
+          <Form.Item name="trm_number" label="Номер TRM">
             <Input placeholder="TRM-001" />
           </Form.Item>
-          <Form.Item name="file_path" label="File path (S3/local)">
-            <Input placeholder="IVA/IVA-PD-0001/A/drawing.pdf" />
+          <Form.Item name="file_path" label="Путь к файлу (если уже есть)">
+            <Input placeholder="DEMO/DOC/A/file.pdf" />
           </Form.Item>
         </Form>
       </Modal>
 
-      <Modal open={commentModalOpen} onCancel={() => setCommentModalOpen(false)} onOk={submitComment} title="Add Comment">
+      <Modal open={commentModalOpen} onCancel={() => setCommentModalOpen(false)} onOk={submitComment} title="Добавить комментарий">
         <Form form={commentForm} layout="vertical">
-          <Form.Item name="text" label="Comment text" rules={[{ required: true }]}>
+          <Form.Item name="text" label="Комментарий" rules={[{ required: true }]}>
             <Input.TextArea rows={3} />
           </Form.Item>
-          <Form.Item name="page" label="Page">
+          <Form.Item name="page" label="Лист">
             <Input type="number" />
           </Form.Item>
-          <Form.Item name="area_x" label="Area X">
+          <Form.Item name="area_x" label="Координата X">
             <Input type="number" />
           </Form.Item>
-          <Form.Item name="area_y" label="Area Y">
+          <Form.Item name="area_y" label="Координата Y">
             <Input type="number" />
           </Form.Item>
-          <Form.Item name="area_w" label="Area Width">
+          <Form.Item name="area_w" label="Ширина области">
             <Input type="number" />
           </Form.Item>
-          <Form.Item name="area_h" label="Area Height">
+          <Form.Item name="area_h" label="Высота области">
             <Input type="number" />
           </Form.Item>
         </Form>
       </Modal>
 
-      <Modal open={responseModalOpen} onCancel={() => setResponseModalOpen(false)} onOk={submitResponse} title="Respond to Comment">
+      <Modal open={responseModalOpen} onCancel={() => setResponseModalOpen(false)} onOk={submitResponse} title="Ответ на комментарий">
         <Form form={responseForm} layout="vertical" initialValues={{ status: "IN_PROGRESS" }}>
-          <Form.Item name="text" label="Response" rules={[{ required: true }]}>
+          <Form.Item name="text" label="Ответ" rules={[{ required: true }]}>
             <Input.TextArea rows={3} />
           </Form.Item>
-          <Form.Item name="status" label="New status" rules={[{ required: true }]}>
+          <Form.Item name="status" label="Новый статус" rules={[{ required: true }]}>
             <Select
               options={[
                 { value: "IN_PROGRESS", label: "IN_PROGRESS" },
@@ -324,6 +353,26 @@ export default function DocumentsPage({ documents, mdr, onReloadDocuments }: Pro
             />
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal open={uploadModalOpen} onCancel={() => setUploadModalOpen(false)} onOk={submitUpload} title="Загрузить PDF в ревизию">
+        <Typography.Paragraph>
+          Выбранная ревизия: {selectedRevisionId ?? "—"}. Поддерживается только PDF.
+        </Typography.Paragraph>
+        <Upload
+          beforeUpload={(file) => {
+            if (file.type !== "application/pdf") {
+              message.error("Можно загружать только PDF");
+              return Upload.LIST_IGNORE;
+            }
+            setUploadFile(file as File);
+            return false;
+          }}
+          maxCount={1}
+          onRemove={() => setUploadFile(null)}
+        >
+          <Button icon={<UploadOutlined />}>Выбрать PDF</Button>
+        </Upload>
       </Modal>
     </>
   );

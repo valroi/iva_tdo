@@ -41,13 +41,14 @@ export function hasAccessToken(): boolean {
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getAccessToken();
-  const headers: HeadersInit = {
-    "Content-Type": "application/json",
-    ...(init.headers ?? {}),
-  };
+  const headers = new Headers(init.headers ?? {});
 
   if (token) {
-    headers.Authorization = `Bearer ${token}`;
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  if (!(init.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
   }
 
   const response = await fetch(`${PREFIX}${path}`, {
@@ -213,5 +214,20 @@ export function createQuickDemoSetup(payload: {
   return request<QuickDemoSetupResult>("/users/quick-demo-setup", {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export function uploadRevisionPdf(revisionId: number, file: File): Promise<{
+  file_name: string;
+  file_path: string;
+  content_type: string;
+  file_size: number;
+}> {
+  const body = new FormData();
+  body.append("file", file);
+  body.append("revision_id", String(revisionId));
+  return request("/documents/upload", {
+    method: "POST",
+    body,
   });
 }

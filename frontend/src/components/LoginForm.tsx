@@ -27,7 +27,7 @@ export default function LoginForm({ onLoggedIn }: Props): JSX.Element {
   return (
     <Card style={{ maxWidth: 420, margin: "120px auto" }}>
       <Typography.Title level={3} style={{ marginTop: 0 }}>
-        IvaMaris TDO Login
+        IvaMaris TDO
       </Typography.Title>
       <Typography.Paragraph>
         Вход по email/паролю. Демо админ: admin@ivamaris.io / admin123

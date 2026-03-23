@@ -1,11 +1,28 @@
-import { BellOutlined, DatabaseOutlined, FileOutlined, HomeOutlined, LogoutOutlined, TeamOutlined } from "@ant-design/icons";
-import { Button, Layout, Menu, Space, Spin, Typography, message } from "antd";
+import {
+  BellOutlined,
+  DatabaseOutlined,
+  FileOutlined,
+  HomeOutlined,
+  LogoutOutlined,
+  ReadOutlined,
+  TeamOutlined,
+} from "@ant-design/icons";
+import { Avatar, Breadcrumb, Button, Layout, Menu, Space, Spin, Typography, message } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { clearTokens, hasAccessToken, listDocuments, listMdr, listNotifications, listWorkflowStatuses, me } from "./api";
+import {
+  clearTokens,
+  hasAccessToken,
+  listDocuments,
+  listMdr,
+  listNotifications,
+  listWorkflowStatuses,
+  me,
+} from "./api";
 import LoginForm from "./components/LoginForm";
 import DashboardPage from "./pages/DashboardPage";
 import DocumentsPage from "./pages/DocumentsPage";
+import HelpPage from "./pages/HelpPage";
 import MdrPage from "./pages/MdrPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import AdminPage from "./pages/AdminPage";
@@ -13,7 +30,7 @@ import type { DocumentItem, MDRRecord, NotificationItem, User, WorkflowStatus } 
 
 const { Header, Sider, Content } = Layout;
 
-type Section = "dashboard" | "mdr" | "documents" | "notifications" | "admin";
+type Section = "dashboard" | "mdr" | "documents" | "notifications" | "admin" | "help";
 
 export default function App(): JSX.Element {
   const [authenticated, setAuthenticated] = useState(hasAccessToken());
@@ -42,7 +59,7 @@ export default function App(): JSX.Element {
       setNotifications(notificationsResp);
       setWorkflowStatuses(statusResp);
     } catch (error) {
-      const text = error instanceof Error ? error.message : "Failed to load";
+      const text = error instanceof Error ? error.message : "Ошибка загрузки";
       message.error(text);
       clearTokens();
       setAuthenticated(false);
@@ -58,19 +75,29 @@ export default function App(): JSX.Element {
   }, [authenticated, loadInitialData]);
 
   const menuItems = useMemo(() => {
-    const baseItems = [
-      { key: "dashboard", icon: <HomeOutlined />, label: "Dashboard" },
-      { key: "mdr", icon: <DatabaseOutlined />, label: "MDR" },
-      { key: "documents", icon: <FileOutlined />, label: "Documents" },
-      { key: "notifications", icon: <BellOutlined />, label: "Notifications" },
+    const items = [
+      { key: "dashboard", icon: <HomeOutlined />, label: "Обзор" },
+      { key: "mdr", icon: <DatabaseOutlined />, label: "Реестр MDR" },
+      { key: "documents", icon: <FileOutlined />, label: "Документы" },
+      { key: "notifications", icon: <BellOutlined />, label: "Уведомления" },
+      { key: "help", icon: <ReadOutlined />, label: "Инструкция" },
     ];
 
     if (user?.role === "admin") {
-      baseItems.push({ key: "admin", icon: <TeamOutlined />, label: "Admin users" });
+      items.push({ key: "admin", icon: <TeamOutlined />, label: "Администрирование" });
     }
 
-    return baseItems;
+    return items;
   }, [user?.role]);
+
+  const sectionTitleMap: Record<Section, string> = {
+    dashboard: "Обзор",
+    mdr: "Реестр MDR",
+    documents: "Документы",
+    notifications: "Уведомления",
+    admin: "Администрирование",
+    help: "Инструкция",
+  };
 
   if (!authenticated) {
     return <LoginForm onLoggedIn={() => setAuthenticated(true)} />;
@@ -78,35 +105,52 @@ export default function App(): JSX.Element {
 
   return (
     <Layout style={{ minHeight: "100vh" }}>
-      <Sider>
-        <div style={{ color: "white", fontWeight: 700, padding: 16 }}>IvaMaris TDO</div>
+      <Sider width={260} className="app-sider" theme="light">
+        <div className="app-logo">IvaMaris TDO</div>
         <Menu
-          theme="dark"
+          theme="light"
           mode="inline"
           items={menuItems}
           selectedKeys={[activeSection]}
           onSelect={(item) => setActiveSection(item.key as Section)}
         />
+
+        <div className="sider-user-card">
+          <Avatar>{user?.full_name?.slice(0, 1).toUpperCase() ?? "U"}</Avatar>
+          <div className="sider-user-info">
+            <div className="name">{user?.full_name}</div>
+            <div className="email">{user?.email}</div>
+          </div>
+        </div>
       </Sider>
 
       <Layout>
-        <Header style={{ background: "#fff", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <Space>
-            <Typography.Text strong>{user?.full_name}</Typography.Text>
-            <Typography.Text type="secondary">{user?.role}</Typography.Text>
+        <Header className="app-header">
+          <Space style={{ justifyContent: "space-between", width: "100%" }}>
+            <div>
+              <Breadcrumb
+                items={[
+                  { title: "Проекты" },
+                  { title: sectionTitleMap[activeSection] },
+                ]}
+              />
+              <Typography.Title level={4} style={{ margin: 0 }}>
+                {sectionTitleMap[activeSection]}
+              </Typography.Title>
+            </div>
+            <Button
+              icon={<LogoutOutlined />}
+              onClick={() => {
+                clearTokens();
+                setAuthenticated(false);
+              }}
+            >
+              Выйти
+            </Button>
           </Space>
-          <Button
-            icon={<LogoutOutlined />}
-            onClick={() => {
-              clearTokens();
-              setAuthenticated(false);
-            }}
-          >
-            Logout
-          </Button>
         </Header>
 
-        <Content style={{ margin: 16 }}>
+        <Content className="app-content">
           {loading ? (
             <Spin />
           ) : (
@@ -127,6 +171,7 @@ export default function App(): JSX.Element {
                 <NotificationsPage notifications={notifications} onReload={loadInitialData} />
               )}
               {activeSection === "admin" && user?.role === "admin" && <AdminPage currentUser={user} />}
+              {activeSection === "help" && <HelpPage />}
             </>
           )}
         </Content>

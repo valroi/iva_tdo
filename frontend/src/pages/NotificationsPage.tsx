@@ -11,16 +11,16 @@ interface Props {
 
 export default function NotificationsPage({ notifications, onReload }: Props): JSX.Element {
   const columns: ColumnsType<NotificationItem> = [
-    { title: "Type", dataIndex: "event_type", key: "event_type" },
-    { title: "Message", dataIndex: "message", key: "message" },
+    { title: "Тип", dataIndex: "event_type", key: "event_type" },
+    { title: "Сообщение", dataIndex: "message", key: "message" },
     {
-      title: "Read",
+      title: "Прочитано",
       dataIndex: "is_read",
       key: "is_read",
       render: (value: boolean) => (value ? <Tag color="green">YES</Tag> : <Tag color="red">NO</Tag>),
     },
     {
-      title: "Action",
+      title: "Действие",
       key: "action",
       render: (_, row) => (
         <Button
@@ -31,7 +31,7 @@ export default function NotificationsPage({ notifications, onReload }: Props): J
             await onReload();
           }}
         >
-          Mark read
+          Отметить
         </Button>
       ),
     },
@@ -41,7 +41,7 @@ export default function NotificationsPage({ notifications, onReload }: Props): J
     <>
       <Space style={{ marginBottom: 12 }}>
         <Typography.Title level={4} style={{ margin: 0 }}>
-          Notifications
+          Уведомления
         </Typography.Title>
       </Space>
       <Table rowKey="id" columns={columns} dataSource={notifications} />

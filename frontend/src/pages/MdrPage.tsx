@@ -16,16 +16,16 @@ export default function MdrPage({ mdr, onCreated }: Props): JSX.Element {
   const [form] = Form.useForm();
 
   const columns: ColumnsType<MDRRecord> = [
-    { title: "Doc Number", dataIndex: "doc_number", key: "doc_number" },
-    { title: "Name", dataIndex: "doc_name", key: "doc_name" },
-    { title: "Discipline", dataIndex: "discipline_code", key: "discipline_code" },
+    { title: "Шифр", dataIndex: "doc_number", key: "doc_number" },
+    { title: "Название", dataIndex: "doc_name", key: "doc_name" },
+    { title: "Дисциплина", dataIndex: "discipline_code", key: "discipline_code" },
     {
-      title: "Review",
+      title: "Рассмотрение",
       dataIndex: "review_code",
       key: "review_code",
       render: (value: MDRRecord["review_code"]) => (value ? <Tag>{value}</Tag> : <Tag>n/a</Tag>),
     },
-    { title: "Status", dataIndex: "status", key: "status" },
+    { title: "Статус", dataIndex: "status", key: "status" },
   ];
 
   const submit = async () => {
@@ -55,7 +55,7 @@ export default function MdrPage({ mdr, onCreated }: Props): JSX.Element {
           Реестр MDR
         </Typography.Title>
         <Button type="primary" onClick={() => setOpen(true)}>
-          + Add MDR
+          + Добавить MDR
         </Button>
       </Space>
       <Table rowKey="id" columns={columns} dataSource={mdr} />
@@ -68,34 +68,34 @@ export default function MdrPage({ mdr, onCreated }: Props): JSX.Element {
         okButtonProps={{ loading: submitting }}
       >
         <Form form={form} layout="vertical">
-          <Form.Item name="document_key" label="Document key" rules={[{ required: true }]}>
+          <Form.Item name="document_key" label="Ключ документа" rules={[{ required: true }]}>
             <Input placeholder="DOC-001" />
           </Form.Item>
-          <Form.Item name="project_code" label="Project code" rules={[{ required: true }]}>
+          <Form.Item name="project_code" label="Код проекта" rules={[{ required: true }]}>
             <Input placeholder="IVA" />
           </Form.Item>
-          <Form.Item name="originator_code" label="Originator code" rules={[{ required: true }]}>
+          <Form.Item name="originator_code" label="Код разработчика" rules={[{ required: true }]}>
             <Input placeholder="CTR" />
           </Form.Item>
-          <Form.Item name="category" label="Category" rules={[{ required: true }]}>
+          <Form.Item name="category" label="Категория" rules={[{ required: true }]}>
             <Input placeholder="PIPING" />
           </Form.Item>
-          <Form.Item name="title_object" label="Title object" rules={[{ required: true }]}>
+          <Form.Item name="title_object" label="Титульный объект" rules={[{ required: true }]}>
             <Input placeholder="Unit-1" />
           </Form.Item>
-          <Form.Item name="discipline_code" label="Discipline" rules={[{ required: true }]}>
+          <Form.Item name="discipline_code" label="Дисциплина" rules={[{ required: true }]}>
             <Input placeholder="PD" />
           </Form.Item>
-          <Form.Item name="doc_type" label="Doc type" rules={[{ required: true }]}>
+          <Form.Item name="doc_type" label="Тип документа" rules={[{ required: true }]}>
             <Input placeholder="DRAWING" />
           </Form.Item>
-          <Form.Item name="serial_number" label="Serial" rules={[{ required: true }]}>
+          <Form.Item name="serial_number" label="Порядковый номер" rules={[{ required: true }]}>
             <Input placeholder="0001" />
           </Form.Item>
-          <Form.Item name="doc_number" label="Doc number" rules={[{ required: true }]}>
+          <Form.Item name="doc_number" label="Шифр документа" rules={[{ required: true }]}>
             <Input placeholder="IVA-PD-0001" />
           </Form.Item>
-          <Form.Item name="doc_name" label="Doc name" rules={[{ required: true }]}>
+          <Form.Item name="doc_name" label="Наименование" rules={[{ required: true }]}>
             <Input placeholder="Piping layout" />
           </Form.Item>
         </Form>

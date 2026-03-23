@@ -182,6 +182,15 @@ def test_main_flow_and_user_governance():
         assert revision.status_code == 201, revision.text
         revision_id = revision.json()["id"]
 
+        upload = client.post(
+            "/api/v1/documents/upload",
+            headers=_auth_header(contractor_access),
+            files={"file": ("demo.pdf", b"%PDF-1.4 demo", "application/pdf")},
+            data={"revision_id": str(revision_id)},
+        )
+        assert upload.status_code == 201, upload.text
+        assert upload.json()["file_path"]
+
         comment = client.post(
             "/api/v1/comments",
             json={

@@ -37,7 +37,7 @@ export default function DashboardPage({
       key: "code",
       render: (value: string) => <Tag color="blue">{value}</Tag>,
     },
-    { title: "Name", dataIndex: "name", key: "name" },
+    { title: "Название", dataIndex: "name", key: "name" },
   ];
 
   return (
@@ -45,27 +45,27 @@ export default function DashboardPage({
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={6}>
           <Card>
-            <Statistic title="MDR records" value={mdr.length} />
+            <Statistic title="Записи MDR" value={mdr.length} />
           </Card>
         </Col>
         <Col span={6}>
           <Card>
-            <Statistic title="Documents" value={documents.length} />
+            <Statistic title="Документы" value={documents.length} />
           </Card>
         </Col>
         <Col span={6}>
           <Card>
-            <Statistic title="Notifications" value={notifications.length} />
+            <Statistic title="Уведомления" value={notifications.length} />
           </Card>
         </Col>
         <Col span={6}>
           <Card>
-            <Statistic title="Unread" value={unread} valueStyle={{ color: unread > 0 ? "#cf1322" : "#3f8600" }} />
+            <Statistic title="Непрочитанные" value={unread} valueStyle={{ color: unread > 0 ? "#cf1322" : "#3f8600" }} />
           </Card>
         </Col>
       </Row>
 
-      <Card title="Review codes (editable from backend)">
+      <Card title="Коды рассмотрения (редактируются в backend)">
         <Table columns={columns} dataSource={statusRows} pagination={false} />
       </Card>
     </>

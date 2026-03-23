@@ -1,4 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import datetime
+from pathlib import Path
+from uuid import uuid4
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -18,11 +22,13 @@ from app.schemas import (
     CommentResponse,
     DocumentCreate,
     DocumentRead,
+    FileUploadResponse,
     RevisionCreate,
     RevisionRead,
 )
 
 router = APIRouter()
+UPLOAD_ROOT = Path("/tmp/tdo_uploads")
 
 
 @router.get("/documents", response_model=list[DocumentRead])
@@ -56,6 +62,49 @@ def create_document(
     db.commit()
     db.refresh(doc)
     return doc
+
+
+@router.post("/documents/upload", response_model=FileUploadResponse, status_code=status.HTTP_201_CREATED)
+def upload_document_file(
+    file: UploadFile = File(...),
+    revision_id: int | None = Form(default=None),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    revision: Revision | None = None
+    if revision_id is not None:
+        revision = db.query(Revision).filter(Revision.id == revision_id).first()
+        if revision is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
+
+    original_name = file.filename or "document.pdf"
+    extension = Path(original_name).suffix.lower()
+    if extension != ".pdf":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only PDF files are allowed")
+
+    day_folder = datetime.utcnow().strftime("%Y%m%d")
+    destination_dir = UPLOAD_ROOT / day_folder
+    destination_dir.mkdir(parents=True, exist_ok=True)
+
+    safe_name = f"{uuid4().hex}_{Path(original_name).name.replace(' ', '_')}"
+    destination = destination_dir / safe_name
+
+    file_bytes = file.file.read()
+    destination.write_bytes(file_bytes)
+
+    storage_path = str(destination)
+
+    if revision is not None:
+        revision.file_path = storage_path
+        db.add(revision)
+        db.commit()
+
+    return FileUploadResponse(
+        file_name=original_name,
+        file_path=storage_path,
+        content_type=file.content_type or "application/pdf",
+        file_size=len(file_bytes),
+    )
 
 
 @router.get("/documents/{document_id}/revisions", response_model=list[RevisionRead])
