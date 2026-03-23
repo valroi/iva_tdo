@@ -252,6 +252,12 @@ export function createProject(payload: {
   });
 }
 
+export function deleteProject(projectId: number): Promise<void> {
+  return request<void>(`/projects/${projectId}`, {
+    method: "DELETE",
+  });
+}
+
 export function listProjectMembers(projectId: number): Promise<ProjectMember[]> {
   return request<ProjectMember[]>(`/projects/${projectId}/members`);
 }
@@ -263,6 +269,12 @@ export function addProjectMember(
   return request<ProjectMember>(`/projects/${projectId}/members`, {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export function deleteProjectMember(projectId: number, memberId: number): Promise<void> {
+  return request<void>(`/projects/${projectId}/members/${memberId}`, {
+    method: "DELETE",
   });
 }
 

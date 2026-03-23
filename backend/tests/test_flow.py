@@ -124,13 +124,28 @@ def test_main_flow_and_user_governance():
             headers=_auth_header(main_admin_access),
         )
         assert project.status_code == 201, project.text
+        project_id = project.json()["id"]
+
+        add_owner_member = client.post(
+            f"/api/v1/projects/{project_id}/members",
+            json={"user_id": owner_id, "member_role": "owner_member"},
+            headers=_auth_header(main_admin_access),
+        )
+        assert add_owner_member.status_code == 201, add_owner_member.text
+        owner_member_id = add_owner_member.json()["id"]
 
         refs = client.get(
-            f"/api/v1/projects/{project.json()['id']}/references",
+            f"/api/v1/projects/{project_id}/references",
             headers=_auth_header(main_admin_access),
         )
         assert refs.status_code == 200, refs.text
         assert len(refs.json()) >= 1
+
+        delete_owner_member = client.delete(
+            f"/api/v1/projects/{project_id}/members/{owner_member_id}",
+            headers=_auth_header(main_admin_access),
+        )
+        assert delete_owner_member.status_code == 204, delete_owner_member.text
 
         contractor_login = client.post(
             "/api/v1/auth/login",
@@ -171,6 +186,12 @@ def test_main_flow_and_user_governance():
         )
         assert mdr.status_code == 201, mdr.text
         mdr_id = mdr.json()["id"]
+
+        delete_project_with_mdr = client.delete(
+            f"/api/v1/projects/{project_id}",
+            headers=_auth_header(main_admin_access),
+        )
+        assert delete_project_with_mdr.status_code == 400, delete_project_with_mdr.text
 
         document = client.post(
             "/api/v1/documents",

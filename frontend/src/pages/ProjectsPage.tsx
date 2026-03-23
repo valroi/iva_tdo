@@ -1,4 +1,18 @@
-import { Button, Card, Form, Input, Modal, Select, Space, Table, Tabs, Tag, Typography, message } from "antd";
+import {
+  Button,
+  Card,
+  Form,
+  Input,
+  Modal,
+  Popconfirm,
+  Select,
+  Space,
+  Table,
+  Tabs,
+  Tag,
+  Typography,
+  message,
+} from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
 
@@ -6,6 +20,8 @@ import {
   addProjectMember,
   createProject,
   createProjectReference,
+  deleteProject,
+  deleteProjectMember,
   listProjectMembers,
   listProjectReferences,
   listUsers,
@@ -93,9 +109,30 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
       title: "Действие",
       key: "action",
       render: (_, row) => (
-        <Button size="small" onClick={() => setSelectedProjectId(row.id)}>
-          Открыть
-        </Button>
+        <Space>
+          <Button size="small" onClick={() => setSelectedProjectId(row.id)}>
+            Открыть
+          </Button>
+          <Popconfirm
+            title="Удалить проект?"
+            description="Проект удалится только если в нем нет MDR"
+            onConfirm={async () => {
+              await deleteProject(row.id);
+              message.success("Проект удален");
+              if (selectedProjectId === row.id) {
+                setSelectedProjectId(null);
+                setMembers([]);
+                setReferences([]);
+              }
+              await onReload();
+            }}
+            disabled={currentUser.role !== "admin"}
+          >
+            <Button size="small" danger disabled={currentUser.role !== "admin"}>
+              Удалить
+            </Button>
+          </Popconfirm>
+        </Space>
       ),
     },
   ];
@@ -121,6 +158,25 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
       dataIndex: "can_manage_contractor_users",
       key: "can_manage_contractor_users",
       render: (value: boolean) => (value ? <Tag color="green">Да</Tag> : <Tag>Нет</Tag>),
+    },
+    {
+      title: "Действие",
+      key: "action",
+      render: (_, row) => (
+        <Popconfirm
+          title="Удалить участника?"
+          onConfirm={async () => {
+            if (!selectedProjectId) return;
+            await deleteProjectMember(selectedProjectId, row.id);
+            message.success("Участник удален");
+            await reloadProjectData();
+          }}
+        >
+          <Button size="small" danger>
+            Удалить
+          </Button>
+        </Popconfirm>
+      ),
     },
   ];
 
@@ -295,9 +351,14 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
           <Form.Item name="ref_type" label="Тип" rules={[{ required: true }]}>
             <Select
               options={[
+                { value: "document_category", label: "document_category" },
+                { value: "numbering_attribute", label: "numbering_attribute" },
                 { value: "discipline", label: "discipline" },
                 { value: "document_type", label: "document_type" },
-                { value: "document_class", label: "document_class" },
+                { value: "se_reporting_type", label: "se_reporting_type" },
+                { value: "procurement_request_type", label: "procurement_request_type" },
+                { value: "equipment_type", label: "equipment_type" },
+                { value: "identifier_pattern", label: "identifier_pattern" },
                 { value: "other", label: "other" },
               ]}
             />

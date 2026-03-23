@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth import get_password_hash
@@ -14,6 +15,7 @@ from app.models import (
     Document,
     MDRRecord,
     Notification,
+    ProjectMember,
     RegistrationRequest,
     RegistrationRequestStatus,
     Revision,
@@ -373,5 +375,25 @@ def delete_user(
             detail="Main admin cannot be deleted",
         )
 
-    db.delete(user)
-    db.commit()
+    db.query(ProjectMember).filter(ProjectMember.user_id == user.id).delete()
+    db.query(Notification).filter(Notification.user_id == user.id).delete()
+    db.query(RegistrationRequest).filter(RegistrationRequest.reviewed_by_id == user.id).update(
+        {RegistrationRequest.reviewed_by_id: None}
+    )
+    db.query(MDRRecord).filter(MDRRecord.contractor_responsible_id == user.id).update(
+        {MDRRecord.contractor_responsible_id: None}
+    )
+    db.query(MDRRecord).filter(MDRRecord.owner_responsible_id == user.id).update(
+        {MDRRecord.owner_responsible_id: None}
+    )
+
+    try:
+        db.delete(user)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        user.is_active = False
+        if "(архив)" not in user.full_name:
+            user.full_name = f"{user.full_name} (архив)"
+        db.add(user)
+        db.commit()

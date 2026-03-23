@@ -27,7 +27,7 @@ const matrixRows: MatrixRow[] = [
   },
   {
     key: "p2",
-    process: "Назначение руководителя ТДО подрядчика",
+    process: "Удаление карточки проекта (если нет MDR)",
     main_admin: true,
     admin: false,
     contractor_tdo_lead: false,
@@ -38,6 +38,17 @@ const matrixRows: MatrixRow[] = [
   },
   {
     key: "p3",
+    process: "Назначение руководителя ТДО подрядчика",
+    main_admin: true,
+    admin: false,
+    contractor_tdo_lead: false,
+    contractor_author: false,
+    owner_manager: false,
+    owner_reviewer: false,
+    viewer: false,
+  },
+  {
+    key: "p4",
     process: "Приглашение участников подрядчика в проект",
     main_admin: true,
     admin: false,
@@ -48,7 +59,18 @@ const matrixRows: MatrixRow[] = [
     viewer: false,
   },
   {
-    key: "p4",
+    key: "p5",
+    process: "Удаление участников подрядчика из проекта",
+    main_admin: true,
+    admin: false,
+    contractor_tdo_lead: true,
+    contractor_author: false,
+    owner_manager: false,
+    owner_reviewer: false,
+    viewer: false,
+  },
+  {
+    key: "p6",
     process: "Редактирование справочников проекта",
     main_admin: true,
     admin: false,
@@ -59,7 +81,7 @@ const matrixRows: MatrixRow[] = [
     viewer: false,
   },
   {
-    key: "p5",
+    key: "p7",
     process: "Создание MDR",
     main_admin: true,
     admin: true,
@@ -70,7 +92,7 @@ const matrixRows: MatrixRow[] = [
     viewer: false,
   },
   {
-    key: "p6",
+    key: "p8",
     process: "Загрузка PDF в ревизию",
     main_admin: true,
     admin: true,
@@ -81,7 +103,7 @@ const matrixRows: MatrixRow[] = [
     viewer: false,
   },
   {
-    key: "p7",
+    key: "p9",
     process: "Создание комментария",
     main_admin: true,
     admin: true,
@@ -92,7 +114,7 @@ const matrixRows: MatrixRow[] = [
     viewer: false,
   },
   {
-    key: "p8",
+    key: "p10",
     process: "Ответ на комментарий",
     main_admin: true,
     admin: true,
