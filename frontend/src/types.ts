@@ -27,6 +27,7 @@ export interface MDRRecord {
   discipline_code: string;
   doc_type: string;
   progress_percent: number;
+  doc_weight: number;
   review_code: "AP" | "AN" | "CO" | "RJ" | null;
   status: string;
   created_at: string;
@@ -150,4 +151,15 @@ export interface ProjectReference {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface ReviewMatrixMember {
+  id: number;
+  project_id: number;
+  user_id: number;
+  discipline_code: string;
+  doc_type: string;
+  level: 1 | 2;
+  state: "LR" | "R";
+  created_at: string;
 }

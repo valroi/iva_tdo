@@ -18,16 +18,20 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   addProjectMember,
+  createReviewMatrixItem,
   createProject,
   createProjectReference,
+  deleteReviewMatrixItem,
   deleteProject,
   deleteProjectMember,
   listProjectMembers,
   listProjectReferences,
+  listReviewMatrix,
   listUsers,
   updateProjectReference,
+  updateReviewMatrixItem,
 } from "../api";
-import type { ProjectItem, ProjectMember, ProjectMemberRole, ProjectReference, User } from "../types";
+import type { ProjectItem, ProjectMember, ProjectMemberRole, ProjectReference, ReviewMatrixMember, User } from "../types";
 
 interface Props {
   currentUser: User;
@@ -43,11 +47,24 @@ const projectMemberRoleOptions: { value: ProjectMemberRole; label: string }[] = 
   { value: "observer", label: "observer" },
 ];
 
+const referenceTabs: { key: string; label: string }[] = [
+  { key: "document_category", label: "Категории документов" },
+  { key: "discipline", label: "Дисциплины" },
+  { key: "document_type", label: "Типы документов" },
+  { key: "identifier_pattern", label: "Шаблоны шифрования" },
+  { key: "numbering_attribute", label: "Атрибуты нумерации" },
+  { key: "se_reporting_type", label: "SE отчеты" },
+  { key: "procurement_request_type", label: "Типы запросов закупки" },
+  { key: "equipment_type", label: "Типы оборудования" },
+  { key: "other", label: "Прочее" },
+];
+
 export default function ProjectsPage({ currentUser, projects, onReload }: Props): JSX.Element {
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(projects[0]?.id ?? null);
   const [members, setMembers] = useState<ProjectMember[]>([]);
   const [references, setReferences] = useState<ProjectReference[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [reviewMatrix, setReviewMatrix] = useState<ReviewMatrixMember[]>([]);
 
   const [projectOpen, setProjectOpen] = useState(false);
   const [projectForm] = Form.useForm();
@@ -61,6 +78,12 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
   const [referenceEditOpen, setReferenceEditOpen] = useState(false);
   const [referenceEditForm] = Form.useForm();
   const [selectedReference, setSelectedReference] = useState<ProjectReference | null>(null);
+  const [activeReferenceType, setActiveReferenceType] = useState<string>(referenceTabs[0].key);
+  const [matrixOpen, setMatrixOpen] = useState(false);
+  const [matrixEditOpen, setMatrixEditOpen] = useState(false);
+  const [matrixForm] = Form.useForm();
+  const [matrixEditForm] = Form.useForm();
+  const [selectedMatrixItem, setSelectedMatrixItem] = useState<ReviewMatrixMember | null>(null);
 
   useEffect(() => {
     if (!selectedProjectId && projects.length > 0) {
@@ -80,12 +103,14 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
     if (!selectedProjectId) return;
 
     try {
-      const [membersResp, refsResp] = await Promise.all([
+      const [membersResp, refsResp, matrixResp] = await Promise.all([
         listProjectMembers(selectedProjectId),
         listProjectReferences(selectedProjectId),
+        listReviewMatrix(selectedProjectId),
       ]);
       setMembers(membersResp);
       setReferences(refsResp);
+      setReviewMatrix(matrixResp);
     } catch (error) {
       const text = error instanceof Error ? error.message : "Ошибка загрузки проекта";
       message.error(text);
@@ -209,6 +234,44 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
     },
   ];
 
+  const matrixColumns: ColumnsType<ReviewMatrixMember> = [
+    { title: "Дисциплина", dataIndex: "discipline_code", key: "discipline_code" },
+    { title: "Тип документа", dataIndex: "doc_type", key: "doc_type" },
+    { title: "Пользователь", key: "user_id", render: (_, row) => userById.get(row.user_id)?.full_name ?? row.user_id },
+    { title: "Уровень", dataIndex: "level", key: "level" },
+    { title: "Состояние", dataIndex: "state", key: "state", render: (v: "LR" | "R") => <Tag>{v}</Tag> },
+    {
+      title: "Действие",
+      key: "action",
+      render: (_, row) => (
+        <Space>
+          <Button
+            size="small"
+            onClick={() => {
+              setSelectedMatrixItem(row);
+              matrixEditForm.setFieldsValue({ level: row.level, state: row.state });
+              setMatrixEditOpen(true);
+            }}
+          >
+            Изменить
+          </Button>
+          <Popconfirm
+            title="Удалить строку матрицы?"
+            onConfirm={async () => {
+              await deleteReviewMatrixItem(row.id);
+              message.success("Строка матрицы удалена");
+              await reloadProjectData();
+            }}
+          >
+            <Button size="small" danger>
+              Удалить
+            </Button>
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ];
+
   const contractorUsers = users.filter((u) => u.company_type === "contractor");
 
   return (
@@ -247,6 +310,20 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
               ),
             },
             {
+              key: "matrix",
+              label: "Матрица проверки",
+              children: (
+                <>
+                  <Space style={{ marginBottom: 12 }}>
+                    <Button onClick={() => setMatrixOpen(true)} disabled={!selectedProjectId}>
+                      + Добавить строку матрицы
+                    </Button>
+                  </Space>
+                  <Table rowKey="id" columns={matrixColumns} dataSource={reviewMatrix} pagination={false} />
+                </>
+              ),
+            },
+            {
               key: "references",
               label: "Справочники проекта",
               children: (
@@ -259,7 +336,22 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
                       + Добавить значение
                     </Button>
                   </Space>
-                  <Table rowKey="id" columns={referenceColumns} dataSource={references} pagination={false} />
+                  <Tabs
+                    activeKey={activeReferenceType}
+                    onChange={setActiveReferenceType}
+                    items={referenceTabs.map((tab) => ({
+                      key: tab.key,
+                      label: tab.label,
+                      children: (
+                        <Table
+                          rowKey="id"
+                          columns={referenceColumns}
+                          dataSource={references.filter((ref) => ref.ref_type === tab.key)}
+                          pagination={false}
+                        />
+                      ),
+                    }))}
+                  />
                 </>
               ),
             },
@@ -347,7 +439,7 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
           await reloadProjectData();
         }}
       >
-        <Form form={referenceForm} layout="vertical" initialValues={{ is_active: true }}>
+        <Form form={referenceForm} layout="vertical" initialValues={{ is_active: true, ref_type: activeReferenceType }}>
           <Form.Item name="ref_type" label="Тип" rules={[{ required: true }]}>
             <Select
               options={[
@@ -394,6 +486,62 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
           </Form.Item>
           <Form.Item name="is_active" label="Активен" rules={[{ required: true }]}>
             <Select options={[{ value: true, label: "Да" }, { value: false, label: "Нет" }]} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        open={matrixOpen}
+        title="Добавить строку матрицы проверки"
+        onCancel={() => setMatrixOpen(false)}
+        onOk={async () => {
+          if (!selectedProjectId) return;
+          const values = await matrixForm.validateFields();
+          await createReviewMatrixItem(selectedProjectId, values);
+          message.success("Строка матрицы добавлена");
+          setMatrixOpen(false);
+          matrixForm.resetFields();
+          await reloadProjectData();
+        }}
+      >
+        <Form form={matrixForm} layout="vertical" initialValues={{ level: 1, state: "R" }}>
+          <Form.Item name="discipline_code" label="Дисциплина" rules={[{ required: true }]}>
+            <Input placeholder="PI" />
+          </Form.Item>
+          <Form.Item name="doc_type" label="Тип документа" rules={[{ required: true }]}>
+            <Input placeholder="DWG" />
+          </Form.Item>
+          <Form.Item name="user_id" label="Сотрудник" rules={[{ required: true }]}>
+            <Select options={users.map((u) => ({ value: u.id, label: `${u.full_name} (${u.email})` }))} />
+          </Form.Item>
+          <Form.Item name="level" label="Уровень" rules={[{ required: true }]}>
+            <Select options={[{ value: 1, label: "1" }, { value: 2, label: "2" }]} />
+          </Form.Item>
+          <Form.Item name="state" label="Состояние" rules={[{ required: true }]}>
+            <Select options={[{ value: "R", label: "R" }, { value: "LR", label: "LR" }]} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        open={matrixEditOpen}
+        title="Изменить строку матрицы"
+        onCancel={() => setMatrixEditOpen(false)}
+        onOk={async () => {
+          if (!selectedMatrixItem) return;
+          const values = await matrixEditForm.validateFields();
+          await updateReviewMatrixItem(selectedMatrixItem.id, values);
+          message.success("Строка матрицы обновлена");
+          setMatrixEditOpen(false);
+          await reloadProjectData();
+        }}
+      >
+        <Form form={matrixEditForm} layout="vertical">
+          <Form.Item name="level" label="Уровень" rules={[{ required: true }]}>
+            <Select options={[{ value: 1, label: "1" }, { value: 2, label: "2" }]} />
+          </Form.Item>
+          <Form.Item name="state" label="Состояние" rules={[{ required: true }]}>
+            <Select options={[{ value: "R", label: "R" }, { value: "LR", label: "LR" }]} />
           </Form.Item>
         </Form>
       </Modal>

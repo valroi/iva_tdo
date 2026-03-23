@@ -143,6 +143,29 @@ class ProjectReference(Base):
     )
 
 
+class ReviewMatrixMember(Base):
+    __tablename__ = "review_matrix_members"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "discipline_code",
+            "doc_type",
+            "user_id",
+            "level",
+            name="uq_review_matrix_member",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    discipline_code: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    doc_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    level: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    state: Mapped[str] = mapped_column(String(2), nullable=False, default="R")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class MDRRecord(Base):
     __tablename__ = "mdr_records"
 

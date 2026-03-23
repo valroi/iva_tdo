@@ -119,6 +119,32 @@ class ProjectReferenceRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ReviewMatrixMemberCreate(BaseModel):
+    user_id: int
+    discipline_code: str
+    doc_type: str
+    level: int = Field(ge=1, le=2, default=1)
+    state: str = Field(default="R", pattern="^(LR|R)$")
+
+
+class ReviewMatrixMemberUpdate(BaseModel):
+    level: int | None = Field(default=None, ge=1, le=2)
+    state: str | None = Field(default=None, pattern="^(LR|R)$")
+
+
+class ReviewMatrixMemberRead(BaseModel):
+    id: int
+    project_id: int
+    user_id: int
+    discipline_code: str
+    doc_type: str
+    level: int
+    state: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class MDRBase(BaseModel):
     document_key: str
     project_code: str

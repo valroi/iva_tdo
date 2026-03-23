@@ -12,6 +12,8 @@ from app.models import (
     Document,
     MDRRecord,
     Notification,
+    Project,
+    ReviewMatrixMember,
     Revision,
     User,
     UserRole,
@@ -143,20 +145,54 @@ def create_revision(
     if not doc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
+    duplicate = (
+        db.query(Revision.id)
+        .filter(Revision.document_id == payload.document_id, Revision.revision_code == payload.revision_code)
+        .first()
+    )
+    if duplicate is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Revision code already exists for document")
+
     rev = Revision(**payload.model_dump())
     db.add(rev)
     db.flush()
 
-    owner_receivers = users_by_company_roles(
-        db,
-        company_roles=[UserRole.owner_manager, UserRole.owner_reviewer],
+    mdr = db.query(MDRRecord).filter(MDRRecord.id == doc.mdr_id).first()
+    if mdr is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="MDR link not found for document")
+    project = db.query(Project).filter(Project.code == mdr.project_code).first()
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project not found for document")
+
+    matrix_level_1 = (
+        db.query(ReviewMatrixMember)
+        .filter(
+            ReviewMatrixMember.project_id == project.id,
+            ReviewMatrixMember.discipline_code == mdr.discipline_code,
+            ReviewMatrixMember.doc_type == mdr.doc_type,
+            ReviewMatrixMember.level == 1,
+        )
+        .all()
     )
-    for receiver in owner_receivers:
+
+    if matrix_level_1:
+        receiver_ids = {item.user_id for item in matrix_level_1}
+    else:
+        fallback = users_by_company_roles(
+            db,
+            company_roles=[UserRole.owner_manager, UserRole.owner_reviewer],
+        )
+        receiver_ids = {user.id for user in fallback}
+
+    for receiver_id in receiver_ids:
         db.add(
             Notification(
-                user_id=receiver.id,
+                user_id=receiver_id,
                 event_type="NEW_REVISION",
-                message=f"New revision {rev.revision_code} for document {doc.document_num}",
+                message=(
+                    f"Выпущен документ {doc.document_num}, ревизия {rev.revision_code}. "
+                    f"Дисциплина: {mdr.discipline_code}, тип: {mdr.doc_type}"
+                ),
             )
         )
 

@@ -8,6 +8,7 @@ import type {
   ProjectMember,
   ProjectMemberRole,
   ProjectReference,
+  ReviewMatrixMember,
   QuickDemoSetupResult,
   RegistrationRequest,
   Revision,
@@ -93,6 +94,27 @@ export function createMdr(payload: Record<string, unknown>): Promise<MDRRecord> 
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export function composeMdrCipher(payload: {
+  project_code: string;
+  originator_code: string;
+  category: string;
+  title_object: string;
+  discipline_code: string;
+  doc_type: string;
+  serial_number: string;
+}): Promise<{ cipher: string; rule: string }> {
+  return request<{ cipher: string; rule: string }>("/mdr/compose-cipher", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function checkMdrCipher(projectCode: string, value: string): Promise<{ exists: boolean }> {
+  return request<{ exists: boolean }>(
+    `/mdr/check-cipher?project_code=${encodeURIComponent(projectCode)}&value=${encodeURIComponent(value)}`,
+  );
 }
 
 export function listDocuments(): Promise<DocumentItem[]> {
@@ -300,5 +322,35 @@ export function updateProjectReference(
   return request<ProjectReference>(`/projects/references/${referenceId}`, {
     method: "PUT",
     body: JSON.stringify(payload),
+  });
+}
+
+export function listReviewMatrix(projectId: number): Promise<ReviewMatrixMember[]> {
+  return request<ReviewMatrixMember[]>(`/projects/${projectId}/review-matrix`);
+}
+
+export function createReviewMatrixItem(
+  projectId: number,
+  payload: { user_id: number; discipline_code: string; doc_type: string; level: 1 | 2; state: "LR" | "R" },
+): Promise<ReviewMatrixMember> {
+  return request<ReviewMatrixMember>(`/projects/${projectId}/review-matrix`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateReviewMatrixItem(
+  itemId: number,
+  payload: { level?: 1 | 2; state?: "LR" | "R" },
+): Promise<ReviewMatrixMember> {
+  return request<ReviewMatrixMember>(`/projects/review-matrix/${itemId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteReviewMatrixItem(itemId: number): Promise<void> {
+  return request<void>(`/projects/review-matrix/${itemId}`, {
+    method: "DELETE",
   });
 }

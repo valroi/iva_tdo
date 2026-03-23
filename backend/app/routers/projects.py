@@ -10,6 +10,7 @@ from app.models import (
     ProjectMember,
     ProjectMemberRole,
     ProjectReference,
+    ReviewMatrixMember,
     User,
 )
 from app.schemas import (
@@ -21,6 +22,9 @@ from app.schemas import (
     ProjectReferenceRead,
     ProjectReferenceUpdate,
     ProjectUpdate,
+    ReviewMatrixMemberCreate,
+    ReviewMatrixMemberRead,
+    ReviewMatrixMemberUpdate,
 )
 
 router = APIRouter()
@@ -278,6 +282,12 @@ def _is_contractor_tdo_lead(db: Session, project_id: int, user_id: int) -> bool:
     if member is None:
         return False
     return member.member_role == ProjectMemberRole.contractor_tdo_lead or member.can_manage_contractor_users
+
+
+def _can_manage_project_matrix(db: Session, project_id: int, user: User) -> bool:
+    if is_main_admin(user):
+        return True
+    return _is_contractor_tdo_lead(db, project_id, user.id)
 
 
 @router.get("", response_model=list[ProjectRead])
@@ -583,3 +593,98 @@ def update_project_reference(
     db.commit()
     db.refresh(item)
     return item
+
+
+@router.get("/{project_id}/review-matrix", response_model=list[ReviewMatrixMemberRead])
+def list_review_matrix(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _ensure_project_access(db, project_id, current_user)
+    _get_project_or_404(db, project_id)
+    return (
+        db.query(ReviewMatrixMember)
+        .filter(ReviewMatrixMember.project_id == project_id)
+        .order_by(
+            ReviewMatrixMember.discipline_code.asc(),
+            ReviewMatrixMember.doc_type.asc(),
+            ReviewMatrixMember.level.asc(),
+            ReviewMatrixMember.id.asc(),
+        )
+        .all()
+    )
+
+
+@router.post("/{project_id}/review-matrix", response_model=ReviewMatrixMemberRead, status_code=status.HTTP_201_CREATED)
+def create_review_matrix_item(
+    project_id: int,
+    payload: ReviewMatrixMemberCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not _can_manage_project_matrix(db, project_id, current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No rights to manage review matrix")
+    _get_project_or_404(db, project_id)
+
+    user = db.query(User).filter(User.id == payload.user_id).first()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    exists = (
+        db.query(ReviewMatrixMember)
+        .filter(
+            ReviewMatrixMember.project_id == project_id,
+            ReviewMatrixMember.discipline_code == payload.discipline_code,
+            ReviewMatrixMember.doc_type == payload.doc_type,
+            ReviewMatrixMember.user_id == payload.user_id,
+            ReviewMatrixMember.level == payload.level,
+        )
+        .first()
+    )
+    if exists is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Matrix row already exists")
+
+    item = ReviewMatrixMember(project_id=project_id, **payload.model_dump())
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.put("/review-matrix/{item_id}", response_model=ReviewMatrixMemberRead)
+def update_review_matrix_item(
+    item_id: int,
+    payload: ReviewMatrixMemberUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    item = db.query(ReviewMatrixMember).filter(ReviewMatrixMember.id == item_id).first()
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Matrix row not found")
+    if not _can_manage_project_matrix(db, item.project_id, current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No rights to manage review matrix")
+
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(item, field, value)
+
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.delete("/review-matrix/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_review_matrix_item(
+    item_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    item = db.query(ReviewMatrixMember).filter(ReviewMatrixMember.id == item_id).first()
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Matrix row not found")
+    if not _can_manage_project_matrix(db, item.project_id, current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No rights to manage review matrix")
+
+    db.delete(item)
+    db.commit()
