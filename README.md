@@ -34,6 +34,7 @@ docker compose up --build
 
 - Архитектура: [`docs/ARCHITECTURE_RU.md`](docs/ARCHITECTURE_RU.md)
 - Тестирование: [`docs/TESTING_GUIDE_RU.md`](docs/TESTING_GUIDE_RU.md)
+- Бесплатный веб-деплой: [`docs/DEPLOY_FREE_RU.md`](docs/DEPLOY_FREE_RU.md)
 
 ## Backend тесты
 
