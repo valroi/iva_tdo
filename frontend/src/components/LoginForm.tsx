@@ -30,7 +30,7 @@ export default function LoginForm({ onLoggedIn }: Props): JSX.Element {
         IvaMaris TDO Login
       </Typography.Title>
       <Typography.Paragraph>
-        Вход по email/паролю. Демо админ: admin@ivamaris.local / admin123
+        Вход по email/паролю. Демо админ: admin@ivamaris.io / admin123
       </Typography.Paragraph>
 
       {error && (
@@ -44,7 +44,7 @@ export default function LoginForm({ onLoggedIn }: Props): JSX.Element {
 
       <Form layout="vertical" onFinish={handleFinish}>
         <Form.Item name="email" label="Email" rules={[{ required: true, type: "email" }]}>
-          <Input placeholder="admin@ivamaris.local" />
+          <Input placeholder="admin@ivamaris.io" />
         </Form.Item>
         <Form.Item name="password" label="Пароль" rules={[{ required: true }]}>
           <Input.Password placeholder="Введите пароль" />

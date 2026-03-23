@@ -23,7 +23,7 @@ docker compose up --build
 - Backend Swagger: `http://localhost:8000/docs`
 
 4. Войдите в систему:
-- email: `admin@ivamaris.local`
+- email: `admin@ivamaris.io`
 - password: `admin123`
 
 ---
@@ -61,10 +61,18 @@ docker compose up --build
 
 ```bash
 cd backend
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 pytest -q
+```
+
+Если `venv` недоступен в вашей системе, используйте fallback:
+
+```bash
+cd backend
+python3 -m pip install --user -r requirements.txt
+python3 -m pytest -q
 ```
 
 Тест покрывает: login → user create → MDR → document → revision → comment → response → notifications.

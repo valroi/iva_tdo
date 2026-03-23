@@ -23,7 +23,7 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3000",
     ]
 
-    first_admin_email: str = "admin@ivamaris.local"
+    first_admin_email: str = "admin@ivamaris.io"
     first_admin_password: str = "admin123"
     first_admin_full_name: str = "System Administrator"
 

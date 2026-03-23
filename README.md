@@ -27,7 +27,7 @@ docker compose up --build
 - Health: http://localhost:8000/health
 
 Демо-логин:
-- email: `admin@ivamaris.local`
+- email: `admin@ivamaris.io`
 - password: `admin123`
 
 ## Документация
@@ -39,7 +39,7 @@ docker compose up --build
 
 ```bash
 cd backend
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 pytest -q

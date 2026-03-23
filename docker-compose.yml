@@ -32,7 +32,7 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://user:pass@db:5432/tdms}
       SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
-      FIRST_ADMIN_EMAIL: ${FIRST_ADMIN_EMAIL:-admin@ivamaris.local}
+      FIRST_ADMIN_EMAIL: ${FIRST_ADMIN_EMAIL:-admin@ivamaris.io}
       FIRST_ADMIN_PASSWORD: ${FIRST_ADMIN_PASSWORD:-admin123}
       FIRST_ADMIN_FULL_NAME: ${FIRST_ADMIN_FULL_NAME:-System Administrator}
       CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:3000"]}

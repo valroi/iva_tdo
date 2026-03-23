@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 
 os.environ["DATABASE_URL"] = "sqlite:///./test_tdo.db"
-os.environ["FIRST_ADMIN_EMAIL"] = "admin@test.local"
+os.environ["FIRST_ADMIN_EMAIL"] = "admin@example.com"
 os.environ["FIRST_ADMIN_PASSWORD"] = "admin123"
 os.environ["SECRET_KEY"] = "test-secret"
 
@@ -26,7 +26,7 @@ def test_main_flow():
     with TestClient(app) as client:
         login = client.post(
             "/api/v1/auth/login",
-            json={"email": "admin@test.local", "password": "admin123"},
+            json={"email": "admin@example.com", "password": "admin123"},
         )
         assert login.status_code == 200, login.text
         admin_access = login.json()["access_token"]
@@ -34,7 +34,7 @@ def test_main_flow():
         contractor = client.post(
             "/api/v1/users",
             json={
-                "email": "contractor@test.local",
+                "email": "contractor@example.com",
                 "password": "password1",
                 "full_name": "Contractor User",
                 "company_type": "contractor",
@@ -48,7 +48,7 @@ def test_main_flow():
         owner = client.post(
             "/api/v1/users",
             json={
-                "email": "owner@test.local",
+                "email": "owner@example.com",
                 "password": "password1",
                 "full_name": "Owner User",
                 "company_type": "owner",
@@ -61,14 +61,14 @@ def test_main_flow():
 
         contractor_login = client.post(
             "/api/v1/auth/login",
-            json={"email": "contractor@test.local", "password": "password1"},
+            json={"email": "contractor@example.com", "password": "password1"},
         )
         assert contractor_login.status_code == 200
         contractor_access = contractor_login.json()["access_token"]
 
         owner_login = client.post(
             "/api/v1/auth/login",
-            json={"email": "owner@test.local", "password": "password1"},
+            json={"email": "owner@example.com", "password": "password1"},
         )
         assert owner_login.status_code == 200
         owner_access = owner_login.json()["access_token"]
