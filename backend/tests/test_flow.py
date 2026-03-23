@@ -4,6 +4,7 @@ from pathlib import Path
 os.environ["DATABASE_URL"] = "sqlite:///./test_tdo.db"
 os.environ["FIRST_ADMIN_EMAIL"] = "admin@example.com"
 os.environ["FIRST_ADMIN_PASSWORD"] = "admin123"
+os.environ["MAIN_ADMIN_EMAIL"] = "admin@example.com"
 os.environ["SECRET_KEY"] = "test-secret"
 
 from fastapi.testclient import TestClient
@@ -16,7 +17,7 @@ def _auth_header(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_main_flow():
+def test_main_flow_and_user_governance():
     db_file = Path("test_tdo.db")
     if db_file.exists():
         db_file.unlink()
@@ -29,8 +30,29 @@ def test_main_flow():
             json={"email": "admin@example.com", "password": "admin123"},
         )
         assert login.status_code == 200, login.text
-        admin_access = login.json()["access_token"]
+        main_admin_access = login.json()["access_token"]
 
+        secondary_admin = client.post(
+            "/api/v1/users",
+            json={
+                "email": "admin2@example.com",
+                "password": "password1",
+                "full_name": "Secondary Admin",
+                "company_type": "admin",
+                "role": "admin",
+            },
+            headers=_auth_header(main_admin_access),
+        )
+        assert secondary_admin.status_code == 201, secondary_admin.text
+
+        secondary_login = client.post(
+            "/api/v1/auth/login",
+            json={"email": "admin2@example.com", "password": "password1"},
+        )
+        assert secondary_login.status_code == 200, secondary_login.text
+        secondary_access = secondary_login.json()["access_token"]
+
+        # Secondary admin can create regular users.
         contractor = client.post(
             "/api/v1/users",
             json={
@@ -40,10 +62,24 @@ def test_main_flow():
                 "company_type": "contractor",
                 "role": "contractor_manager",
             },
-            headers=_auth_header(admin_access),
+            headers=_auth_header(secondary_access),
         )
         assert contractor.status_code == 201, contractor.text
         contractor_id = contractor.json()["id"]
+
+        # Secondary admin cannot grant admin role.
+        forbidden_admin = client.post(
+            "/api/v1/users",
+            json={
+                "email": "bad-admin@example.com",
+                "password": "password1",
+                "full_name": "Bad Admin",
+                "company_type": "admin",
+                "role": "admin",
+            },
+            headers=_auth_header(secondary_access),
+        )
+        assert forbidden_admin.status_code == 403, forbidden_admin.text
 
         owner = client.post(
             "/api/v1/users",
@@ -54,7 +90,7 @@ def test_main_flow():
                 "company_type": "owner",
                 "role": "owner_reviewer",
             },
-            headers=_auth_header(admin_access),
+            headers=_auth_header(main_admin_access),
         )
         assert owner.status_code == 201, owner.text
         owner_id = owner.json()["id"]
@@ -151,6 +187,53 @@ def test_main_flow():
             headers=_auth_header(contractor_access),
         )
         assert response.status_code == 200, response.text
+
+        # Self-registration + main admin approval flow.
+        registration_request = client.post(
+            "/api/v1/auth/register-request",
+            json={
+                "email": "newuser@example.com",
+                "password": "password1",
+                "full_name": "New User",
+                "company_type": "owner",
+                "requested_role": "owner_reviewer",
+            },
+        )
+        assert registration_request.status_code == 201, registration_request.text
+
+        pending = client.get(
+            "/api/v1/users/registration-requests",
+            headers=_auth_header(main_admin_access),
+        )
+        assert pending.status_code == 200, pending.text
+        pending_requests = pending.json()
+        request_id = next(item["id"] for item in pending_requests if item["email"] == "newuser@example.com")
+
+        approved = client.post(
+            f"/api/v1/users/registration-requests/{request_id}/approve",
+            json={"role": "owner_reviewer", "company_type": "owner", "is_active": True},
+            headers=_auth_header(main_admin_access),
+        )
+        assert approved.status_code == 201, approved.text
+
+        new_user_login = client.post(
+            "/api/v1/auth/login",
+            json={"email": "newuser@example.com", "password": "password1"},
+        )
+        assert new_user_login.status_code == 200, new_user_login.text
+
+        deactivate = client.put(
+            f"/api/v1/users/{contractor_id}/active",
+            json={"is_active": False},
+            headers=_auth_header(main_admin_access),
+        )
+        assert deactivate.status_code == 200, deactivate.text
+
+        deactivated_login = client.post(
+            "/api/v1/auth/login",
+            json={"email": "contractor@example.com", "password": "password1"},
+        )
+        assert deactivated_login.status_code == 401, deactivated_login.text
 
         notifications = client.get(
             "/api/v1/notifications",

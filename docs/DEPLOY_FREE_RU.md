@@ -57,6 +57,7 @@ postgresql+psycopg://USER:PASSWORD@HOST/DB?sslmode=require
    - `FIRST_ADMIN_EMAIL` = `admin@ivamaris.io`
    - `FIRST_ADMIN_PASSWORD` = придумайте свой пароль
    - `FIRST_ADMIN_FULL_NAME` = `System Administrator`
+   - `MAIN_ADMIN_EMAIL` = `admin@ivamaris.io`
    - `CORS_ORIGINS` = временно:
      ```text
      ["https://YOUR-FRONTEND.onrender.com"]

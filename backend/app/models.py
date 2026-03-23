@@ -47,6 +47,12 @@ class CommentStatus(str, enum.Enum):
     REJECTED = "REJECTED"
 
 
+class RegistrationRequestStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -58,6 +64,26 @@ class User(Base):
     role: Mapped[UserRole] = mapped_column(Enum(UserRole), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class RegistrationRequest(Base):
+    __tablename__ = "registration_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    full_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    company_type: Mapped[CompanyType] = mapped_column(Enum(CompanyType), nullable=False)
+    requested_role: Mapped[UserRole | None] = mapped_column(Enum(UserRole), nullable=True)
+    status: Mapped[RegistrationRequestStatus] = mapped_column(
+        Enum(RegistrationRequestStatus),
+        default=RegistrationRequestStatus.PENDING,
+        nullable=False,
+    )
+    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class MDRRecord(Base):

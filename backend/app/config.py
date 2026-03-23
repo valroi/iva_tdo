@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     first_admin_email: str = "admin@ivamaris.io"
     first_admin_password: str = "admin123"
     first_admin_full_name: str = "System Administrator"
+    main_admin_email: str = "admin@ivamaris.io"
 
 
 @lru_cache

@@ -35,6 +35,7 @@ services:
       FIRST_ADMIN_EMAIL: ${FIRST_ADMIN_EMAIL:-admin@ivamaris.io}
       FIRST_ADMIN_PASSWORD: ${FIRST_ADMIN_PASSWORD:-admin123}
       FIRST_ADMIN_FULL_NAME: ${FIRST_ADMIN_FULL_NAME:-System Administrator}
+      MAIN_ADMIN_EMAIL: ${MAIN_ADMIN_EMAIL:-admin@ivamaris.io}
       CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:3000"]}
     ports:
       - "8000:8000"

@@ -19,6 +19,30 @@ def seed_default_data(db: Session) -> None:
             is_active=True,
         )
         db.add(admin)
+    else:
+        admin.role = UserRole.admin
+        admin.company_type = CompanyType.admin
+        admin.is_active = True
+        db.add(admin)
+
+    if settings.main_admin_email != settings.first_admin_email:
+        main_admin = db.query(User).filter(User.email == settings.main_admin_email).first()
+        if main_admin is None:
+            db.add(
+                User(
+                    email=settings.main_admin_email,
+                    hashed_password=get_password_hash(settings.first_admin_password),
+                    full_name="Main Administrator",
+                    company_type=CompanyType.admin,
+                    role=UserRole.admin,
+                    is_active=True,
+                )
+            )
+        else:
+            main_admin.role = UserRole.admin
+            main_admin.company_type = CompanyType.admin
+            main_admin.is_active = True
+            db.add(main_admin)
 
     statuses = [
         ("AP", "Approved", "#52c41a", True),

@@ -2,7 +2,13 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from app.models import CommentStatus, CompanyType, ReviewCode, UserRole
+from app.models import (
+    CommentStatus,
+    CompanyType,
+    RegistrationRequestStatus,
+    ReviewCode,
+    UserRole,
+)
 
 
 class TokenPair(BaseModel):
@@ -18,6 +24,14 @@ class LoginRequest(BaseModel):
 
 class RefreshRequest(BaseModel):
     refresh_token: str
+
+
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=6)
+    full_name: str
+    company_type: CompanyType
+    requested_role: UserRole | None = None
 
 
 class UserBase(BaseModel):
@@ -213,3 +227,36 @@ class NotificationRead(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class UserRoleUpdate(BaseModel):
+    role: UserRole
+
+
+class UserActivationUpdate(BaseModel):
+    is_active: bool
+
+
+class RegistrationRequestRead(BaseModel):
+    id: int
+    email: EmailStr
+    full_name: str
+    company_type: CompanyType
+    requested_role: UserRole | None
+    status: RegistrationRequestStatus
+    review_note: str | None
+    reviewed_by_id: int | None
+    created_at: datetime
+    reviewed_at: datetime | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RegistrationApprovePayload(BaseModel):
+    role: UserRole = UserRole.viewer
+    company_type: CompanyType | None = None
+    is_active: bool = True
+
+
+class RegistrationRejectPayload(BaseModel):
+    review_note: str | None = None
