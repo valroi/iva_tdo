@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import get_current_user, require_roles
-from app.models import MDRRecord, User, UserRole
+from app.models import MDRRecord, Project, User, UserRole
 from app.schemas import MDRCreate, MDRRead, MDRUpdate
 
 router = APIRouter()
@@ -13,8 +13,12 @@ router = APIRouter()
 def list_mdr(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
+    project_code: str | None = Query(default=None),
 ):
-    return db.query(MDRRecord).order_by(MDRRecord.id.desc()).all()
+    query = db.query(MDRRecord)
+    if project_code:
+        query = query.filter(MDRRecord.project_code == project_code)
+    return query.order_by(MDRRecord.id.desc()).all()
 
 
 @router.get("/{mdr_id}", response_model=MDRRead)
@@ -35,6 +39,10 @@ def create_mdr(
     db: Session = Depends(get_db),
     _: User = Depends(require_roles(UserRole.admin, UserRole.contractor_manager)),
 ):
+    project = db.query(Project).filter(Project.code == payload.project_code).first()
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown project_code")
+
     exists = db.query(MDRRecord).filter(MDRRecord.document_key == payload.document_key).first()
     if exists:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="document_key already exists")

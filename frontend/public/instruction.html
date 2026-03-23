@@ -3,66 +3,68 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>IvaMaris TDO — Инструкция</title>
+    <title>IvaMaris TDO — Инструкция пользователя</title>
     <style>
       body { font-family: Inter, Arial, sans-serif; margin: 0; background: #f5f6f8; color: #1f2937; }
-      .wrap { max-width: 980px; margin: 24px auto; padding: 0 16px; }
+      .wrap { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
       .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
       h1 { font-size: 24px; margin: 0 0 12px; }
       h2 { font-size: 18px; margin: 0 0 10px; }
       li { margin: 6px 0; }
       table { width: 100%; border-collapse: collapse; }
-      th, td { border: 1px solid #e5e7eb; padding: 8px; text-align: left; }
-      .ok { color: #059669; font-weight: 600; }
-      .todo { color: #d97706; font-weight: 600; }
+      th, td { border: 1px solid #e5e7eb; padding: 8px; text-align: left; font-size: 13px; }
       .muted { color: #6b7280; }
+      .yes { color: #059669; font-weight: 600; }
+      .no { color: #dc2626; font-weight: 600; }
     </style>
   </head>
   <body>
     <div class="wrap">
       <div class="card">
-        <h1>IvaMaris TDO — рабочая инструкция</h1>
-        <p class="muted">Обновляйте эту страницу на каждой итерации разработки.</p>
+        <h1>IvaMaris TDO — инструкция пользователя</h1>
+        <p class="muted">Страница для рабочих пользователей проекта (не для разработчиков).</p>
       </div>
 
       <div class="card">
-        <h2>Последовательность проверки (быстрый сценарий)</h2>
+        <h2>Основной процесс работы</h2>
         <ol>
-          <li>Войти как главный админ.</li>
-          <li>Открыть раздел <b>Admin users</b>.</li>
-          <li>Нажать <b>Быстрый мастер</b> и создать демо-процесс.</li>
-          <li>Открыть систему в двух окнах и войти под подрядчиком и заказчиком.</li>
-          <li>Проверить процесс: MDR → Document → Revision → Comment → Response.</li>
-          <li>Проверить раздел <b>Уведомления</b>.</li>
+          <li>Главный админ создает карточку проекта: код, название, описание.</li>
+          <li>Главный админ назначает руководителя ТДО подрядчика.</li>
+          <li>Руководитель ТДО подрядчика добавляет участников подрядчика в проект.</li>
+          <li>Главный админ настраивает справочники проекта (дисциплины, типы, классы документов).</li>
+          <li>Подрядчик формирует MDR и создает документы/ревизии.</li>
+          <li>Подрядчик загружает PDF в ревизию кнопкой «PDF».</li>
+          <li>Заказчик проверяет ревизию и оставляет комментарии.</li>
+          <li>Подрядчик отвечает на комментарии до согласования.</li>
         </ol>
       </div>
 
       <div class="card">
-        <h2>Матрица процессов</h2>
+        <h2>Матрица ролей и процессов</h2>
         <table>
           <thead>
-            <tr><th>Процесс</th><th>Главный админ</th><th>Обычный админ</th></tr>
+            <tr>
+              <th>Процесс</th>
+              <th>Главный админ</th>
+              <th>Админ</th>
+              <th>Рук. ТДО подрядчика</th>
+              <th>Автор подрядчика</th>
+              <th>Owner manager</th>
+              <th>Owner reviewer</th>
+              <th>Viewer</th>
+            </tr>
           </thead>
           <tbody>
-            <tr><td>Создание пользователей</td><td>Да</td><td>Да</td></tr>
-            <tr><td>Выдача роли admin</td><td>Да</td><td>Нет</td></tr>
-            <tr><td>Деактивация/удаление</td><td>Да</td><td>Нет</td></tr>
-            <tr><td>Одобрение заявок регистрации</td><td>Да</td><td>Нет</td></tr>
-            <tr><td>Быстрый мастер</td><td>Да</td><td>Нет</td></tr>
+            <tr><td>Создание карточки проекта</td><td class="yes">Да</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td></tr>
+            <tr><td>Назначение руководителя ТДО</td><td class="yes">Да</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td></tr>
+            <tr><td>Добавление подрядчиков в проект</td><td class="yes">Да</td><td class="no">Нет</td><td class="yes">Да</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td></tr>
+            <tr><td>Редактирование справочников проекта</td><td class="yes">Да</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td></tr>
+            <tr><td>Создание MDR</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td></tr>
+            <tr><td>Загрузка PDF в ревизию</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td></tr>
+            <tr><td>Комментарий к ревизии</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="no">Нет</td></tr>
+            <tr><td>Ответ на комментарий</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td></tr>
           </tbody>
         </table>
-      </div>
-
-      <div class="card">
-        <h2>Прогресс системы</h2>
-        <ul>
-          <li class="ok">✅ Реестр MDR + документы + ревизии + комментарии</li>
-          <li class="ok">✅ Администрирование пользователей во frontend</li>
-          <li class="ok">✅ Саморегистрация и апрув</li>
-          <li class="ok">✅ Быстрый мастер тестового процесса</li>
-          <li class="ok">✅ Загрузка PDF в ревизию (MVP)</li>
-          <li class="todo">🔄 PDF viewer с аннотациями (в работе)</li>
-        </ul>
       </div>
     </div>
   </body>

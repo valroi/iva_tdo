@@ -114,3 +114,40 @@ export interface QuickDemoSetupResult {
   revision_id: number;
   comment_id: number;
 }
+
+export type ProjectMemberRole =
+  | "main_admin"
+  | "contractor_tdo_lead"
+  | "contractor_member"
+  | "owner_member"
+  | "observer";
+
+export interface ProjectItem {
+  id: number;
+  code: string;
+  name: string;
+  description: string | null;
+  created_by_id: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectMember {
+  id: number;
+  project_id: number;
+  user_id: number;
+  member_role: ProjectMemberRole;
+  can_manage_contractor_users: boolean;
+  created_at: string;
+}
+
+export interface ProjectReference {
+  id: number;
+  project_id: number;
+  ref_type: string;
+  code: string;
+  value: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}

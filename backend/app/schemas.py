@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from app.models import (
     CommentStatus,
     CompanyType,
+    ProjectMemberRole,
     RegistrationRequestStatus,
     ReviewCode,
     UserRole,
@@ -49,6 +50,71 @@ class UserRead(UserBase):
     id: int
     is_active: bool
     created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProjectCreate(BaseModel):
+    code: str
+    name: str
+    description: str | None = None
+    contractor_tdo_manager_user_id: int | None = None
+
+
+class ProjectUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+
+
+class ProjectRead(BaseModel):
+    id: int
+    code: str
+    name: str
+    description: str | None
+    created_by_id: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProjectMemberCreate(BaseModel):
+    user_id: int
+    member_role: ProjectMemberRole
+
+
+class ProjectMemberRead(BaseModel):
+    id: int
+    project_id: int
+    user_id: int
+    member_role: ProjectMemberRole
+    can_manage_contractor_users: bool
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProjectReferenceCreate(BaseModel):
+    ref_type: str
+    code: str
+    value: str
+    is_active: bool = True
+
+
+class ProjectReferenceUpdate(BaseModel):
+    value: str | None = None
+    is_active: bool | None = None
+
+
+class ProjectReferenceRead(BaseModel):
+    id: int
+    project_id: int
+    ref_type: str
+    code: str
+    value: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -4,6 +4,7 @@ import {
   FileOutlined,
   HomeOutlined,
   LogoutOutlined,
+  ProjectOutlined,
   ReadOutlined,
   TeamOutlined,
 } from "@ant-design/icons";
@@ -16,6 +17,7 @@ import {
   listDocuments,
   listMdr,
   listNotifications,
+  listProjects,
   listWorkflowStatuses,
   me,
 } from "./api";
@@ -26,11 +28,12 @@ import HelpPage from "./pages/HelpPage";
 import MdrPage from "./pages/MdrPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import AdminPage from "./pages/AdminPage";
-import type { DocumentItem, MDRRecord, NotificationItem, User, WorkflowStatus } from "./types";
+import ProjectsPage from "./pages/ProjectsPage";
+import type { DocumentItem, MDRRecord, NotificationItem, ProjectItem, User, WorkflowStatus } from "./types";
 
 const { Header, Sider, Content } = Layout;
 
-type Section = "dashboard" | "mdr" | "documents" | "notifications" | "admin" | "help";
+type Section = "dashboard" | "projects" | "mdr" | "documents" | "notifications" | "admin" | "help";
 
 export default function App(): JSX.Element {
   const [authenticated, setAuthenticated] = useState(hasAccessToken());
@@ -40,22 +43,25 @@ export default function App(): JSX.Element {
   const [user, setUser] = useState<User | null>(null);
   const [mdr, setMdr] = useState<MDRRecord[]>([]);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [workflowStatuses, setWorkflowStatuses] = useState<WorkflowStatus[]>([]);
 
   const loadInitialData = useCallback(async () => {
     setLoading(true);
     try {
-      const [userResp, mdrResp, docsResp, notificationsResp, statusResp] = await Promise.all([
+      const [userResp, mdrResp, docsResp, projectsResp, notificationsResp, statusResp] = await Promise.all([
         me(),
         listMdr(),
         listDocuments(),
+        listProjects(),
         listNotifications(),
         listWorkflowStatuses(),
       ]);
       setUser(userResp);
       setMdr(mdrResp);
       setDocuments(docsResp);
+      setProjects(projectsResp);
       setNotifications(notificationsResp);
       setWorkflowStatuses(statusResp);
     } catch (error) {
@@ -77,6 +83,7 @@ export default function App(): JSX.Element {
   const menuItems = useMemo(() => {
     const items = [
       { key: "dashboard", icon: <HomeOutlined />, label: "Обзор" },
+      { key: "projects", icon: <ProjectOutlined />, label: "Проекты" },
       { key: "mdr", icon: <DatabaseOutlined />, label: "Реестр MDR" },
       { key: "documents", icon: <FileOutlined />, label: "Документы" },
       { key: "notifications", icon: <BellOutlined />, label: "Уведомления" },
@@ -92,6 +99,7 @@ export default function App(): JSX.Element {
 
   const sectionTitleMap: Record<Section, string> = {
     dashboard: "Обзор",
+    projects: "Проекты",
     mdr: "Реестр MDR",
     documents: "Документы",
     notifications: "Уведомления",
@@ -163,7 +171,10 @@ export default function App(): JSX.Element {
                   workflowStatuses={workflowStatuses}
                 />
               )}
-              {activeSection === "mdr" && <MdrPage mdr={mdr} onCreated={loadInitialData} />}
+              {activeSection === "projects" && user && (
+                <ProjectsPage currentUser={user} projects={projects} onReload={loadInitialData} />
+              )}
+              {activeSection === "mdr" && <MdrPage mdr={mdr} projects={projects} onCreated={loadInitialData} />}
               {activeSection === "documents" && (
                 <DocumentsPage documents={documents} mdr={mdr} onReloadDocuments={loadInitialData} />
               )}

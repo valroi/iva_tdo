@@ -6,77 +6,163 @@ interface MatrixRow {
   process: string;
   main_admin: boolean;
   admin: boolean;
+  contractor_tdo_lead: boolean;
+  contractor_author: boolean;
+  owner_manager: boolean;
+  owner_reviewer: boolean;
+  viewer: boolean;
 }
 
 const matrixRows: MatrixRow[] = [
-  { key: "1", process: "Создание пользователей", main_admin: true, admin: true },
-  { key: "2", process: "Выдача роли admin", main_admin: true, admin: false },
-  { key: "3", process: "Деактивация/удаление пользователей", main_admin: true, admin: false },
-  { key: "4", process: "Одобрение заявок регистрации", main_admin: true, admin: false },
-  { key: "5", process: "Quick demo setup", main_admin: true, admin: false },
+  {
+    key: "p1",
+    process: "Создание карточки проекта",
+    main_admin: true,
+    admin: false,
+    contractor_tdo_lead: false,
+    contractor_author: false,
+    owner_manager: false,
+    owner_reviewer: false,
+    viewer: false,
+  },
+  {
+    key: "p2",
+    process: "Назначение руководителя ТДО подрядчика",
+    main_admin: true,
+    admin: false,
+    contractor_tdo_lead: false,
+    contractor_author: false,
+    owner_manager: false,
+    owner_reviewer: false,
+    viewer: false,
+  },
+  {
+    key: "p3",
+    process: "Приглашение участников подрядчика в проект",
+    main_admin: true,
+    admin: false,
+    contractor_tdo_lead: true,
+    contractor_author: false,
+    owner_manager: false,
+    owner_reviewer: false,
+    viewer: false,
+  },
+  {
+    key: "p4",
+    process: "Редактирование справочников проекта",
+    main_admin: true,
+    admin: false,
+    contractor_tdo_lead: false,
+    contractor_author: false,
+    owner_manager: false,
+    owner_reviewer: false,
+    viewer: false,
+  },
+  {
+    key: "p5",
+    process: "Создание MDR",
+    main_admin: true,
+    admin: true,
+    contractor_tdo_lead: true,
+    contractor_author: true,
+    owner_manager: false,
+    owner_reviewer: false,
+    viewer: false,
+  },
+  {
+    key: "p6",
+    process: "Загрузка PDF в ревизию",
+    main_admin: true,
+    admin: true,
+    contractor_tdo_lead: true,
+    contractor_author: true,
+    owner_manager: false,
+    owner_reviewer: false,
+    viewer: false,
+  },
+  {
+    key: "p7",
+    process: "Создание комментария",
+    main_admin: true,
+    admin: true,
+    contractor_tdo_lead: true,
+    contractor_author: true,
+    owner_manager: true,
+    owner_reviewer: true,
+    viewer: false,
+  },
+  {
+    key: "p8",
+    process: "Ответ на комментарий",
+    main_admin: true,
+    admin: true,
+    contractor_tdo_lead: true,
+    contractor_author: true,
+    owner_manager: false,
+    owner_reviewer: false,
+    viewer: false,
+  },
 ];
 
+const yesNo = (value: boolean): JSX.Element =>
+  value ? <Tag color="green">Да</Tag> : <Tag color="red">Нет</Tag>;
+
 const columns: ColumnsType<MatrixRow> = [
-  { title: "Процесс", dataIndex: "process", key: "process" },
+  { title: "Процесс", dataIndex: "process", key: "process", width: 320, fixed: "left" },
+  { title: "Главный админ", dataIndex: "main_admin", key: "main_admin", render: yesNo },
+  { title: "Админ", dataIndex: "admin", key: "admin", render: yesNo },
   {
-    title: "Главный админ",
-    dataIndex: "main_admin",
-    key: "main_admin",
-    render: (value: boolean) => (value ? <Tag color="green">Да</Tag> : <Tag color="red">Нет</Tag>),
+    title: "Рук. ТДО подрядчика",
+    dataIndex: "contractor_tdo_lead",
+    key: "contractor_tdo_lead",
+    render: yesNo,
   },
-  {
-    title: "Обычный админ",
-    dataIndex: "admin",
-    key: "admin",
-    render: (value: boolean) => (value ? <Tag color="green">Да</Tag> : <Tag color="red">Нет</Tag>),
-  },
+  { title: "Автор подрядчика", dataIndex: "contractor_author", key: "contractor_author", render: yesNo },
+  { title: "Owner manager", dataIndex: "owner_manager", key: "owner_manager", render: yesNo },
+  { title: "Owner reviewer", dataIndex: "owner_reviewer", key: "owner_reviewer", render: yesNo },
+  { title: "Viewer", dataIndex: "viewer", key: "viewer", render: yesNo },
 ];
 
 export default function HelpPage(): JSX.Element {
   return (
     <Space direction="vertical" style={{ width: "100%" }} size={16}>
-      <Card title="Инструкция: быстрый запуск проверки">
+      <Card title="Инструкция для пользователей (как работать в системе)">
         <ol style={{ marginBottom: 0 }}>
-          <li>Войдите как главный админ.</li>
-          <li>Откройте раздел "Admin users".</li>
-          <li>Нажмите "Быстрый мастер".</li>
-          <li>Заполните email подрядчика, заказчика и пароль.</li>
-          <li>Нажмите "Создать демо-процесс".</li>
-          <li>Откройте сайт в двух окнах (обычное + инкогнито) и войдите под созданными ролями.</li>
-          <li>Проверьте цепочку: MDR → Document → Revision → Comment → Response.</li>
+          <li>Главный админ создает карточку проекта в разделе «Проекты».</li>
+          <li>Главный админ назначает руководителя ТДО от подрядчика.</li>
+          <li>Руководитель ТДО подрядчика добавляет участников подрядчика в проект.</li>
+          <li>Главный админ настраивает справочники проекта (дисциплины, типы и классы документов).</li>
+          <li>Команда подрядчика формирует MDR и создает документы/ревизии.</li>
+          <li>Подрядчик загружает PDF в ревизию кнопкой «PDF».</li>
+          <li>Заказчик проверяет и оставляет комментарии.</li>
+          <li>Подрядчик отвечает на замечания, процесс согласования продолжается до AP/AN.</li>
         </ol>
       </Card>
 
-      <Card title="Открытая инструкция">
+      <Card title="Публичная страница инструкции">
         <Typography.Paragraph>
-          Публичная страница инструкции доступна по ссылке ниже (без логина):
+          Эту инструкцию можно открыть без авторизации и передать пользователям проекта:
         </Typography.Paragraph>
         <Button href="/instruction.html" target="_blank">
           Открыть публичную инструкцию
         </Button>
       </Card>
 
-      <Card title="Матрица разделения процессов">
-        <Table columns={columns} dataSource={matrixRows} pagination={false} rowKey="key" />
-      </Card>
-
-      <Card title="Прогресс внедрения">
-        <ul style={{ marginBottom: 0 }}>
-          <li>✅ Реестр MDR, документы, ревизии, комментарии</li>
-          <li>✅ Админ-панель управления пользователями через фронт</li>
-          <li>✅ Главный админ / обычный админ с ограничениями</li>
-          <li>✅ Саморегистрация и апрув</li>
-          <li>✅ Быстрый мастер тестового процесса</li>
-          <li>✅ Загрузка PDF в ревизию (MVP, без viewer-аннотаций)</li>
-          <li>🔄 Следующий шаг: полноценный PDF viewer с выделением областей</li>
-        </ul>
+      <Card title="Матрица разделения процессов (все роли)">
+        <Table
+          columns={columns}
+          dataSource={matrixRows}
+          pagination={false}
+          rowKey="key"
+          scroll={{ x: 1400 }}
+        />
       </Card>
 
       <Alert
         type="info"
         showIcon
         message="Как сейчас работает загрузка документов"
-        description="В разделе Документы у ревизии есть кнопка PDF. Вы загружаете файл PDF, backend сохраняет его и прикрепляет путь к выбранной ревизии. На следующем этапе добавим полноценный просмотр и аннотации прямо в PDF."
+        description="На вкладке «Документы» у каждой ревизии есть кнопка «PDF». Файл загружается и прикрепляется к выбранной ревизии. На следующем этапе будет добавлен полноценный просмотр PDF с аннотациями по областям."
       />
     </Space>
   );

@@ -113,6 +113,25 @@ def test_main_flow_and_user_governance():
         assert owner.status_code == 201, owner.text
         owner_id = owner.json()["id"]
 
+        project = client.post(
+            "/api/v1/projects",
+            json={
+                "code": "IVA",
+                "name": "Проект IVA",
+                "description": "Тестовый проект",
+                "contractor_tdo_manager_user_id": contractor_id,
+            },
+            headers=_auth_header(main_admin_access),
+        )
+        assert project.status_code == 201, project.text
+
+        refs = client.get(
+            f"/api/v1/projects/{project.json()['id']}/references",
+            headers=_auth_header(main_admin_access),
+        )
+        assert refs.status_code == 200, refs.text
+        assert len(refs.json()) >= 1
+
         contractor_login = client.post(
             "/api/v1/auth/login",
             json={"email": "contractor@example.com", "password": "password1"},

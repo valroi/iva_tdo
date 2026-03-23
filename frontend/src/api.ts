@@ -4,6 +4,10 @@ import type {
   DocumentItem,
   MDRRecord,
   NotificationItem,
+  ProjectItem,
+  ProjectMember,
+  ProjectMemberRole,
+  ProjectReference,
   QuickDemoSetupResult,
   RegistrationRequest,
   Revision,
@@ -229,5 +233,60 @@ export function uploadRevisionPdf(revisionId: number, file: File): Promise<{
   return request("/documents/upload", {
     method: "POST",
     body,
+  });
+}
+
+export function listProjects(): Promise<ProjectItem[]> {
+  return request<ProjectItem[]>("/projects");
+}
+
+export function createProject(payload: {
+  code: string;
+  name: string;
+  description?: string;
+  contractor_tdo_manager_user_id?: number;
+}): Promise<ProjectItem> {
+  return request<ProjectItem>("/projects", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function listProjectMembers(projectId: number): Promise<ProjectMember[]> {
+  return request<ProjectMember[]>(`/projects/${projectId}/members`);
+}
+
+export function addProjectMember(
+  projectId: number,
+  payload: { user_id: number; member_role: ProjectMemberRole },
+): Promise<ProjectMember> {
+  return request<ProjectMember>(`/projects/${projectId}/members`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function listProjectReferences(projectId: number, refType?: string): Promise<ProjectReference[]> {
+  const suffix = refType ? `?ref_type=${encodeURIComponent(refType)}` : "";
+  return request<ProjectReference[]>(`/projects/${projectId}/references${suffix}`);
+}
+
+export function createProjectReference(
+  projectId: number,
+  payload: { ref_type: string; code: string; value: string; is_active?: boolean },
+): Promise<ProjectReference> {
+  return request<ProjectReference>(`/projects/${projectId}/references`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateProjectReference(
+  referenceId: number,
+  payload: { value?: string; is_active?: boolean },
+): Promise<ProjectReference> {
+  return request<ProjectReference>(`/projects/references/${referenceId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
   });
 }

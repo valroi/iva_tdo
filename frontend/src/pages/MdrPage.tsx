@@ -1,22 +1,24 @@
-import { Button, Form, Input, Modal, Space, Table, Tag, Typography } from "antd";
+import { Button, Form, Input, Modal, Select, Space, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useState } from "react";
 
 import { createMdr } from "../api";
-import type { MDRRecord } from "../types";
+import type { MDRRecord, ProjectItem } from "../types";
 
 interface Props {
   mdr: MDRRecord[];
+  projects: ProjectItem[];
   onCreated: () => Promise<void>;
 }
 
-export default function MdrPage({ mdr, onCreated }: Props): JSX.Element {
+export default function MdrPage({ mdr, projects, onCreated }: Props): JSX.Element {
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm();
 
   const columns: ColumnsType<MDRRecord> = [
     { title: "Шифр", dataIndex: "doc_number", key: "doc_number" },
+    { title: "Проект", dataIndex: "project_code", key: "project_code" },
     { title: "Название", dataIndex: "doc_name", key: "doc_name" },
     { title: "Дисциплина", dataIndex: "discipline_code", key: "discipline_code" },
     {
@@ -72,7 +74,14 @@ export default function MdrPage({ mdr, onCreated }: Props): JSX.Element {
             <Input placeholder="DOC-001" />
           </Form.Item>
           <Form.Item name="project_code" label="Код проекта" rules={[{ required: true }]}>
-            <Input placeholder="IVA" />
+            <Select
+              showSearch
+              optionFilterProp="label"
+              options={projects.map((project) => ({
+                value: project.code,
+                label: `${project.code} — ${project.name}`,
+              }))}
+            />
           </Form.Item>
           <Form.Item name="originator_code" label="Код разработчика" rules={[{ required: true }]}>
             <Input placeholder="CTR" />

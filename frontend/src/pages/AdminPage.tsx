@@ -47,15 +47,6 @@ const companyOptions: { value: CompanyType; label: string }[] = [
   { value: "contractor", label: "contractor" },
 ];
 
-const matrixRows = [
-  { key: "create_users", process: "Создавать пользователей", main_admin: true, admin: true },
-  { key: "grant_admin", process: "Выдавать роль admin", main_admin: true, admin: false },
-  { key: "deactivate_users", process: "Деактивировать пользователей", main_admin: true, admin: false },
-  { key: "delete_users", process: "Удалять пользователей", main_admin: true, admin: false },
-  { key: "approve_requests", process: "Одобрять заявки на регистрацию", main_admin: true, admin: false },
-  { key: "quick_setup", process: "Запускать быстрый мастер", main_admin: true, admin: false },
-];
-
 export default function AdminPage({ currentUser }: Props): JSX.Element {
   const [users, setUsers] = useState<User[]>([]);
   const [requests, setRequests] = useState<RegistrationRequest[]>([]);
@@ -233,22 +224,6 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
     },
   ];
 
-  const matrixColumns: ColumnsType<(typeof matrixRows)[number]> = [
-    { title: "Процесс", dataIndex: "process", key: "process" },
-    {
-      title: "Главный админ",
-      dataIndex: "main_admin",
-      key: "main_admin",
-      render: (value: boolean) => (value ? <Tag color="green">Да</Tag> : <Tag color="red">Нет</Tag>),
-    },
-    {
-      title: "Обычный админ",
-      dataIndex: "admin",
-      key: "admin",
-      render: (value: boolean) => (value ? <Tag color="green">Да</Tag> : <Tag color="red">Нет</Tag>),
-    },
-  ];
-
   return (
     <>
       <Space style={{ marginBottom: 12, width: "100%", justifyContent: "space-between" }}>
@@ -294,26 +269,6 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
             key: "requests",
             label: "Заявки на регистрацию",
             children: <Table rowKey="id" loading={loading} columns={requestColumns} dataSource={requests} />,
-          },
-          {
-            key: "matrix",
-            label: "Матрица процессов",
-            children: (
-              <>
-                <Table rowKey="key" columns={matrixColumns} dataSource={matrixRows} pagination={false} />
-                <Typography.Title level={5} style={{ marginTop: 16 }}>
-                  Прогресс внедрения
-                </Typography.Title>
-                <ul>
-                  <li>✅ Главный/обычный админ и ограничения прав</li>
-                  <li>✅ Создание, деактивация, удаление пользователей</li>
-                  <li>✅ Саморегистрация и апрув заявок</li>
-                  <li>✅ Быстрый мастер demo-flow</li>
-                  <li>✅ Загрузка PDF в ревизию (MVP)</li>
-                  <li>🔄 Полноценный PDF viewer с аннотациями (следующая итерация)</li>
-                </ul>
-              </>
-            ),
           },
         ]}
       />
