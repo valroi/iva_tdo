@@ -20,6 +20,7 @@ from app.models import (
     RegistrationRequestStatus,
     Revision,
     User,
+    UserPermission,
     UserRole,
 )
 from app.schemas import (
@@ -30,6 +31,7 @@ from app.schemas import (
     RegistrationRequestRead,
     UserActivationUpdate,
     UserCreate,
+    UserPermissionUpdate,
     UserRead,
     UserRoleUpdate,
 )
@@ -97,6 +99,16 @@ def create_user(
         is_active=True,
     )
     db.add(user)
+    db.flush()
+
+    db.add(
+        UserPermission(
+            user_id=user.id,
+            originator_code=(payload.originator_code or "").strip().upper() or None,
+            can_manage_mdr=payload.can_manage_mdr,
+            can_manage_project_members=payload.can_manage_project_members,
+        )
+    )
     db.commit()
     db.refresh(user)
     return user
@@ -133,17 +145,33 @@ def quick_demo_setup(
     db.add(contractor)
     db.add(owner)
     db.flush()
+    db.add(
+        UserPermission(
+            user_id=contractor.id,
+            originator_code="CTR",
+            can_manage_mdr=True,
+            can_manage_project_members=False,
+        )
+    )
+    db.add(
+        UserPermission(
+            user_id=owner.id,
+            originator_code=None,
+            can_manage_mdr=False,
+            can_manage_project_members=False,
+        )
+    )
 
     suffix = datetime.utcnow().strftime("%y%m%d%H%M%S%f")
-    doc_number = f"DEMO-PD-{suffix[-8:]}"
+    doc_number = f"DEM-CTR-SE-1100000-SE-IGD-{suffix[-5:]}"
     mdr = MDRRecord(
         document_key=f"DEMO-{suffix[-10:]}",
         project_code="DEMO",
         originator_code="CTR",
-        category="PIPING",
-        title_object="Demo Unit",
-        discipline_code="PD",
-        doc_type="DRAWING",
+        category="SE",
+        title_object="1100000",
+        discipline_code="SE",
+        doc_type="IGD",
         serial_number=suffix[-4:],
         doc_number=doc_number,
         doc_name="Demo drawing for workflow",
@@ -271,6 +299,15 @@ def approve_registration_request(
     db.flush()
 
     db.add(
+        UserPermission(
+            user_id=user.id,
+            originator_code=None,
+            can_manage_mdr=False,
+            can_manage_project_members=False,
+        )
+    )
+
+    db.add(
         Notification(
             user_id=user.id,
             event_type="REGISTRATION_APPROVED",
@@ -335,6 +372,31 @@ def update_user_role(
     return user
 
 
+@router.put("/{user_id}/permissions", response_model=UserRead)
+def update_user_permissions(
+    user_id: int,
+    payload: UserPermissionUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_main_admin),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    permission = db.query(UserPermission).filter(UserPermission.user_id == user.id).first()
+    if permission is None:
+        permission = UserPermission(user_id=user.id)
+
+    permission.originator_code = (payload.originator_code or "").strip().upper() or None
+    permission.can_manage_mdr = payload.can_manage_mdr
+    permission.can_manage_project_members = payload.can_manage_project_members
+
+    db.add(permission)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 @router.put("/{user_id}/active", response_model=UserRead)
 def set_user_active(
     user_id: int,
@@ -376,6 +438,7 @@ def delete_user(
         )
 
     db.query(ProjectMember).filter(ProjectMember.user_id == user.id).delete()
+    db.query(UserPermission).filter(UserPermission.user_id == user.id).delete()
     db.query(Notification).filter(Notification.user_id == user.id).delete()
     db.query(RegistrationRequest).filter(RegistrationRequest.reviewed_by_id == user.id).update(
         {RegistrationRequest.reviewed_by_id: None}

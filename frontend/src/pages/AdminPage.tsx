@@ -9,6 +9,7 @@ import {
   Table,
   Tabs,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from "antd";
@@ -24,8 +25,10 @@ import {
   listUsers,
   rejectRegistrationRequest,
   setUserActive,
+  updateUserPermissions,
   updateUserRole,
 } from "../api";
+import { roleDisplayRuEn, roleTooltipRuEn } from "../roles";
 import type { CompanyType, QuickDemoSetupResult, RegistrationRequest, User, UserRole } from "../types";
 
 interface Props {
@@ -33,12 +36,12 @@ interface Props {
 }
 
 const roleOptions: { value: UserRole; label: string }[] = [
-  { value: "admin", label: "admin" },
-  { value: "owner_manager", label: "owner_manager" },
-  { value: "owner_reviewer", label: "owner_reviewer" },
-  { value: "contractor_manager", label: "contractor_manager" },
-  { value: "contractor_author", label: "contractor_author" },
-  { value: "viewer", label: "viewer" },
+  { value: "admin", label: roleDisplayRuEn("admin") },
+  { value: "owner_manager", label: roleDisplayRuEn("owner_manager") },
+  { value: "owner_reviewer", label: roleDisplayRuEn("owner_reviewer") },
+  { value: "contractor_manager", label: roleDisplayRuEn("contractor_manager") },
+  { value: "contractor_author", label: roleDisplayRuEn("contractor_author") },
+  { value: "viewer", label: roleDisplayRuEn("viewer") },
 ];
 
 const companyOptions: { value: CompanyType; label: string }[] = [

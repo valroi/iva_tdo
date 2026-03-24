@@ -1,16 +1,18 @@
+import re
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.deps import get_current_user, is_main_admin
+from app.deps import get_current_user, has_project_member_management_rights, is_main_admin
 from app.models import (
-    CompanyType,
     MDRRecord,
     Project,
     ProjectMember,
     ProjectMemberRole,
     ProjectReference,
     User,
+    UserPermission,
 )
 from app.schemas import (
     ProjectCreate,
@@ -235,6 +237,14 @@ IDENTIFIER_PATTERNS: list[tuple[str, str]] = [
     ("TSC_TEA", "TSC/TEA: AAA-BBB-CC(C)-DDDDDDD-EE-JJJ-NNNNN"),
 ]
 
+FACILITY_TITLES: list[tuple[str, str]] = [
+    ("1100000", "Титул 1100000 / Facility 1100000"),
+]
+
+PD_BOOK_CODES: list[tuple[str, str]] = [
+    ("GOCHS", "Раздел ПД GOCHS"),
+]
+
 
 def _default_project_references() -> list[tuple[str, str, str]]:
     refs: list[tuple[str, str, str]] = []
@@ -246,6 +256,8 @@ def _default_project_references() -> list[tuple[str, str, str]]:
     refs.extend(("procurement_request_type", code, value) for code, value in PROCUREMENT_REQUEST_TYPES)
     refs.extend(("equipment_type", code, value) for code, value in EQUIPMENT_TYPE_CODES)
     refs.extend(("identifier_pattern", code, value) for code, value in IDENTIFIER_PATTERNS)
+    refs.extend(("facility_title", code, value) for code, value in FACILITY_TITLES)
+    refs.extend(("pd_book", code, value) for code, value in PD_BOOK_CODES)
     return refs
 
 
@@ -260,24 +272,50 @@ def _ensure_project_access(db: Session, project_id: int, user: User) -> None:
     if user.role.value == "admin":
         return
 
+    project = _get_project_or_404(db, project_id)
     member = (
         db.query(ProjectMember)
         .filter(ProjectMember.project_id == project_id, ProjectMember.user_id == user.id)
         .first()
     )
-    if member is None:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No project access")
+    if member is not None:
+        return
+
+    permission = db.query(UserPermission).filter(UserPermission.user_id == user.id).first()
+    if permission and permission.can_manage_mdr and project.created_by_id == user.id:
+        return
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No project access")
 
 
-def _is_contractor_tdo_lead(db: Session, project_id: int, user_id: int) -> bool:
+def _normalize_project_code(raw_code: str) -> str:
+    code = raw_code.strip().upper()
+    if not re.fullmatch(r"[A-Z]{3}", code):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Project code must contain exactly 3 uppercase letters",
+        )
+    return code
+
+
+def _project_member(db: Session, project_id: int, user_id: int) -> ProjectMember | None:
     member = (
         db.query(ProjectMember)
-        .filter(ProjectMember.project_id == project_id, ProjectMember.user_id == user_id)
+        .filter(
+            ProjectMember.project_id == project_id,
+            ProjectMember.user_id == user_id,
+        )
         .first()
     )
-    if member is None:
+    return member
+
+
+def _can_manage_members(db: Session, project_id: int, user: User) -> bool:
+    if is_main_admin(user):
+        return True
+    permission = db.query(UserPermission).filter(UserPermission.user_id == user.id).first()
+    if not has_project_member_management_rights(user, permission):
         return False
-    return member.member_role == ProjectMemberRole.contractor_tdo_lead or member.can_manage_contractor_users
+    return _project_member(db, project_id, user.id) is not None
 
 
 @router.get("", response_model=list[ProjectRead])
@@ -306,12 +344,13 @@ def create_project(
     if not is_main_admin(current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Main admin required")
 
-    existing = db.query(Project).filter(Project.code == payload.code).first()
+    project_code = _normalize_project_code(payload.code)
+    existing = db.query(Project).filter(Project.code == project_code).first()
     if existing is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Project code already exists")
 
     project = Project(
-        code=payload.code,
+        code=project_code,
         name=payload.name,
         description=payload.description,
         created_by_id=current_user.id,
@@ -327,25 +366,6 @@ def create_project(
             can_manage_contractor_users=True,
         )
     )
-
-    if payload.contractor_tdo_manager_user_id is not None:
-        contractor_user = db.query(User).filter(User.id == payload.contractor_tdo_manager_user_id).first()
-        if contractor_user is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contractor manager user not found")
-        if contractor_user.company_type != CompanyType.contractor:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Contractor manager must belong to contractor side",
-            )
-
-        db.add(
-            ProjectMember(
-                project_id=project.id,
-                user_id=contractor_user.id,
-                member_role=ProjectMemberRole.contractor_tdo_lead,
-                can_manage_contractor_users=True,
-            )
-        )
 
     for ref_type, code, value in _default_project_references():
         db.add(
@@ -444,32 +464,14 @@ def add_project_member(
     if existing is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already in project")
 
-    can_manage = False
-    if is_main_admin(current_user):
-        can_manage = payload.member_role == ProjectMemberRole.contractor_tdo_lead
-    elif _is_contractor_tdo_lead(db, project_id, current_user.id):
-        if target_user.company_type != CompanyType.contractor:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="TDO lead can add only contractor users",
-            )
-        if payload.member_role not in {
-            ProjectMemberRole.contractor_member,
-            ProjectMemberRole.contractor_tdo_lead,
-        }:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="TDO lead can assign only contractor roles",
-            )
-        can_manage = payload.member_role == ProjectMemberRole.contractor_tdo_lead
-    else:
+    if not _can_manage_members(db, project_id, current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No rights to add project members")
 
     member = ProjectMember(
         project_id=project_id,
         user_id=payload.user_id,
         member_role=payload.member_role,
-        can_manage_contractor_users=can_manage,
+        can_manage_contractor_users=False,
     )
     db.add(member)
     db.commit()
@@ -496,15 +498,7 @@ def delete_project_member(
     if target_user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    if is_main_admin(current_user):
-        pass
-    elif _is_contractor_tdo_lead(db, project_id, current_user.id):
-        if target_user.company_type != CompanyType.contractor:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="TDO lead can remove only contractor users",
-            )
-    else:
+    if not _can_manage_members(db, project_id, current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No rights to remove project members")
 
     if member.member_role == ProjectMemberRole.main_admin:

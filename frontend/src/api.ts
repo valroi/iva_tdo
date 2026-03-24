@@ -95,14 +95,25 @@ export function createMdr(payload: Record<string, unknown>): Promise<MDRRecord> 
   });
 }
 
+export function updateMdr(mdrId: number, payload: Record<string, unknown>): Promise<MDRRecord> {
+  return request<MDRRecord>(`/mdr/${mdrId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteMdr(mdrId: number): Promise<void> {
+  return request<void>(`/mdr/${mdrId}`, {
+    method: "DELETE",
+  });
+}
+
 export function previewMdrDocNumber(payload: {
   project_code: string;
-  originator_code: string;
   category: string;
   title_object: string;
   discipline_code: string;
   doc_type: string;
-  serial_number: string;
 }): Promise<{ doc_number: string }> {
   return request<{ doc_number: string }>("/mdr/doc-number-preview", {
     method: "POST",
@@ -177,6 +188,9 @@ export function createUser(payload: {
   full_name: string;
   company_type: CompanyType;
   role: UserRole;
+  originator_code?: string;
+  can_manage_mdr?: boolean;
+  can_manage_project_members?: boolean;
 }): Promise<User> {
   return request<User>("/users", {
     method: "POST",
@@ -195,6 +209,16 @@ export function setUserActive(userId: number, isActive: boolean): Promise<User> 
   return request<User>(`/users/${userId}/active`, {
     method: "PUT",
     body: JSON.stringify({ is_active: isActive }),
+  });
+}
+
+export function updateUserPermissions(
+  userId: number,
+  payload: { originator_code?: string | null; can_manage_mdr: boolean; can_manage_project_members: boolean },
+): Promise<User> {
+  return request<User>(`/users/${userId}/permissions`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
   });
 }
 
@@ -259,7 +283,6 @@ export function createProject(payload: {
   code: string;
   name: string;
   description?: string;
-  contractor_tdo_manager_user_id?: number;
 }): Promise<ProjectItem> {
   return request<ProjectItem>("/projects", {
     method: "POST",

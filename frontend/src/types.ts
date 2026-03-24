@@ -16,16 +16,24 @@ export interface User {
   role: UserRole;
   is_active: boolean;
   created_at: string;
+  originator_code?: string | null;
+  can_manage_mdr?: boolean;
+  can_manage_project_members?: boolean;
 }
 
 export interface MDRRecord {
   id: number;
   document_key: string;
   project_code: string;
+  category: string;
+  title_object?: string;
   doc_number: string;
+  originator_code?: string;
+  serial_number?: string;
   doc_name: string;
   discipline_code: string;
   doc_type: string;
+  doc_weight?: number;
   progress_percent: number;
   review_code: "AP" | "AN" | "CO" | "RJ" | null;
   status: string;
@@ -117,9 +125,7 @@ export interface QuickDemoSetupResult {
 
 export type ProjectMemberRole =
   | "main_admin"
-  | "contractor_tdo_lead"
-  | "contractor_member"
-  | "owner_member"
+  | "participant"
   | "observer";
 
 export interface ProjectItem {

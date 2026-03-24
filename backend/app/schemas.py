@@ -44,21 +44,32 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: str = Field(min_length=6)
+    originator_code: str | None = None
+    can_manage_mdr: bool = False
+    can_manage_project_members: bool = False
 
 
 class UserRead(UserBase):
     id: int
     is_active: bool
     created_at: datetime
+    originator_code: str | None = None
+    can_manage_mdr: bool = False
+    can_manage_project_members: bool = False
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class UserPermissionUpdate(BaseModel):
+    originator_code: str | None = None
+    can_manage_mdr: bool | None = None
+    can_manage_project_members: bool | None = None
 
 
 class ProjectCreate(BaseModel):
     code: str
     name: str
     description: str | None = None
-    contractor_tdo_manager_user_id: int | None = None
 
 
 class ProjectUpdate(BaseModel):
@@ -80,7 +91,7 @@ class ProjectRead(BaseModel):
 
 class ProjectMemberCreate(BaseModel):
     user_id: int
-    member_role: ProjectMemberRole
+    member_role: ProjectMemberRole = ProjectMemberRole.observer
 
 
 class ProjectMemberRead(BaseModel):
@@ -122,13 +133,13 @@ class ProjectReferenceRead(BaseModel):
 class MDRBase(BaseModel):
     document_key: str
     project_code: str
-    originator_code: str
     category: str
     title_object: str
     discipline_code: str
     doc_type: str
-    serial_number: str
-    doc_number: str
+    originator_code: str | None = None
+    serial_number: str | None = None
+    doc_number: str | None = None
     doc_name: str
     progress_percent: float = 0
     doc_weight: float = 0
@@ -146,10 +157,14 @@ class MDRBase(BaseModel):
 
 
 class MDRCreate(MDRBase):
-    doc_number: str | None = None
+    title_object: str
 
 
 class MDRUpdate(BaseModel):
+    category: str | None = None
+    title_object: str | None = None
+    discipline_code: str | None = None
+    doc_type: str | None = None
     doc_name: str | None = None
     progress_percent: float | None = None
     doc_weight: float | None = None
@@ -176,12 +191,10 @@ class MDRRead(MDRBase):
 
 class MDRDocNumberPreviewRequest(BaseModel):
     project_code: str
-    originator_code: str
     category: str
     title_object: str
     discipline_code: str
     doc_type: str
-    serial_number: str
 
 
 class MDRDocNumberPreviewResponse(BaseModel):
@@ -315,6 +328,12 @@ class UserRoleUpdate(BaseModel):
 
 class UserActivationUpdate(BaseModel):
     is_active: bool
+
+
+class UserPermissionUpdate(BaseModel):
+    originator_code: str | None = None
+    can_manage_mdr: bool
+    can_manage_project_members: bool
 
 
 class RegistrationRequestRead(BaseModel):

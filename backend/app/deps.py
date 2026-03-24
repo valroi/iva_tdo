@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.auth import TokenError, decode_token
 from app.config import get_settings
 from app.database import get_db
-from app.models import User, UserRole
+from app.models import User, UserPermission, UserRole
 
 bearer_scheme = HTTPBearer(auto_error=False)
 settings = get_settings()
@@ -56,6 +56,22 @@ def require_main_admin(user: User = Depends(require_user_manager)) -> User:
     if not is_main_admin(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Main admin required")
     return user
+
+
+def has_project_member_management_rights(user: User, permission: UserPermission | None) -> bool:
+    if is_main_admin(user):
+        return True
+    if permission is None:
+        return False
+    return permission.can_manage_project_members
+
+
+def has_mdr_management_rights(user: User, permission: UserPermission | None) -> bool:
+    if is_main_admin(user):
+        return True
+    if permission is None:
+        return False
+    return permission.can_manage_mdr
 
 
 def users_by_company_roles(

@@ -37,9 +37,7 @@ interface Props {
 
 const projectMemberRoleOptions: { value: ProjectMemberRole; label: string }[] = [
   { value: "main_admin", label: "main_admin" },
-  { value: "contractor_tdo_lead", label: "contractor_tdo_lead" },
-  { value: "contractor_member", label: "contractor_member" },
-  { value: "owner_member", label: "owner_member" },
+  { value: "participant", label: "participant" },
   { value: "observer", label: "observer" },
 ];
 
@@ -111,7 +109,7 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
       render: (_, row) => (
         <Space>
           <Button size="small" onClick={() => setSelectedProjectId(row.id)}>
-            Открыть
+            Выбрать
           </Button>
           <Popconfirm
             title="Удалить проект?"
@@ -126,9 +124,9 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
               }
               await onReload();
             }}
-            disabled={currentUser.role !== "admin"}
+            disabled={currentUser.email !== "admin@ivamaris.io"}
           >
-            <Button size="small" danger disabled={currentUser.role !== "admin"}>
+            <Button size="small" danger disabled={currentUser.email !== "admin@ivamaris.io"}>
               Удалить
             </Button>
           </Popconfirm>
@@ -196,7 +194,7 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
       render: (_, row) => (
         <Button
           size="small"
-          disabled={currentUser.role !== "admin"}
+          disabled={currentUser.email !== "admin@ivamaris.io"}
           onClick={() => {
             setSelectedReference(row);
             referenceEditForm.setFieldsValue({ value: row.value, is_active: row.is_active });
@@ -209,7 +207,7 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
     },
   ];
 
-  const contractorUsers = users.filter((u) => u.company_type === "contractor");
+  const canManageProjects = currentUser.role === "admin" && currentUser.can_manage_project_members;
 
   return (
     <>
@@ -217,7 +215,7 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
         <Typography.Title level={4} style={{ margin: 0 }}>
           Проекты
         </Typography.Title>
-        <Button type="primary" onClick={() => setProjectOpen(true)} disabled={currentUser.role !== "admin"}>
+        <Button type="primary" onClick={() => setProjectOpen(true)} disabled={!canManageProjects}>
           + Создать проект
         </Button>
       </Space>
@@ -237,7 +235,7 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
                   <Space style={{ marginBottom: 12 }}>
                     <Button
                       onClick={() => setMemberOpen(true)}
-                      disabled={!selectedProjectId}
+                      disabled={!selectedProjectId || !canManageProjects}
                     >
                       + Добавить участника
                     </Button>
@@ -254,7 +252,7 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
                   <Space style={{ marginBottom: 12 }}>
                     <Button
                       onClick={() => setReferenceOpen(true)}
-                      disabled={!selectedProjectId || currentUser.role !== "admin"}
+                      disabled={!selectedProjectId || !canManageProjects}
                     >
                       + Добавить значение
                     </Button>
@@ -282,19 +280,13 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
       >
         <Form form={projectForm} layout="vertical">
           <Form.Item name="code" label="Код проекта" rules={[{ required: true }]}>
-            <Input placeholder="IVA" />
+            <Input placeholder="IVA" maxLength={3} />
           </Form.Item>
           <Form.Item name="name" label="Название" rules={[{ required: true }]}>
             <Input placeholder="Город столиц" />
           </Form.Item>
           <Form.Item name="description" label="Описание">
             <Input.TextArea rows={3} />
-          </Form.Item>
-          <Form.Item name="contractor_tdo_manager_user_id" label="Руководитель ТДО подрядчика">
-            <Select
-              allowClear
-              options={contractorUsers.map((u) => ({ value: u.id, label: `${u.full_name} (${u.email})` }))}
-            />
           </Form.Item>
         </Form>
       </Modal>

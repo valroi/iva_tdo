@@ -56,9 +56,7 @@ class RegistrationRequestStatus(str, enum.Enum):
 
 class ProjectMemberRole(str, enum.Enum):
     main_admin = "main_admin"
-    contractor_tdo_lead = "contractor_tdo_lead"
-    contractor_member = "contractor_member"
-    owner_member = "owner_member"
+    participant = "participant"
     observer = "observer"
 
 
@@ -79,6 +77,59 @@ class User(Base):
     role: Mapped[UserRole] = mapped_column(Enum(UserRole), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    permission: Mapped["UserPermission | None"] = relationship(
+        "UserPermission",
+        uselist=False,
+        back_populates="user",
+    )
+
+    @property
+    def originator_code(self) -> str | None:
+        if self.permission is None:
+            return None
+        return self.permission.originator_code
+
+    @property
+    def can_manage_mdr(self) -> bool:
+        if self.permission is None:
+            return False
+        return self.permission.can_manage_mdr
+
+    @property
+    def can_manage_project_members(self) -> bool:
+        if self.permission is None:
+            return False
+        return self.permission.can_manage_project_members
+
+    @property
+    def is_main_admin(self) -> bool:
+        from app.config import get_settings
+
+        settings = get_settings()
+        return self.email.lower() == settings.main_admin_email.lower()
+
+
+class UserPermission(Base):
+    __tablename__ = "user_permissions"
+    __table_args__ = (UniqueConstraint("user_id", name="uq_user_permissions_user"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    originator_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    can_manage_mdr: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    can_manage_project_members: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+    user: Mapped["User"] = relationship(
+        "User",
+        back_populates="permission",
+    )
+    user: Mapped["User"] = relationship("User")
 
 
 class RegistrationRequest(Base):

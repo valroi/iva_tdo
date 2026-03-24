@@ -119,16 +119,22 @@ def test_main_flow_and_user_governance():
                 "code": "IVA",
                 "name": "Проект IVA",
                 "description": "Тестовый проект",
-                "contractor_tdo_manager_user_id": contractor_id,
             },
             headers=_auth_header(main_admin_access),
         )
         assert project.status_code == 201, project.text
         project_id = project.json()["id"]
 
+        add_contractor_member = client.post(
+            f"/api/v1/projects/{project_id}/members",
+            json={"user_id": contractor_id, "member_role": "participant"},
+            headers=_auth_header(main_admin_access),
+        )
+        assert add_contractor_member.status_code == 201, add_contractor_member.text
+
         add_owner_member = client.post(
             f"/api/v1/projects/{project_id}/members",
-            json={"user_id": owner_id, "member_role": "owner_member"},
+            json={"user_id": owner_id, "member_role": "participant"},
             headers=_auth_header(main_admin_access),
         )
         assert add_owner_member.status_code == 201, add_owner_member.text
@@ -161,18 +167,26 @@ def test_main_flow_and_user_governance():
         assert owner_login.status_code == 200
         owner_access = owner_login.json()["access_token"]
 
+        set_contractor_permissions = client.put(
+            f"/api/v1/users/{contractor_id}/permissions",
+            json={
+                "originator_code": "CTR",
+                "can_manage_mdr": True,
+                "can_manage_project_members": False,
+            },
+            headers=_auth_header(main_admin_access),
+        )
+        assert set_contractor_permissions.status_code == 200, set_contractor_permissions.text
+
         mdr = client.post(
             "/api/v1/mdr",
             json={
                 "document_key": "DOC-001",
                 "project_code": "IVA",
-                "originator_code": "CTR",
-                "category": "PIPING",
-                "title_object": "Unit-1",
-                "discipline_code": "PD",
-                "doc_type": "DRAWING",
-                "serial_number": "0001",
-                "doc_number": "IVA-PD-0001",
+                "category": "SE",
+                "title_object": "1100000",
+                "discipline_code": "SE",
+                "doc_type": "REP",
                 "doc_name": "Piping layout",
                 "progress_percent": 10,
                 "doc_weight": 1.2,
@@ -186,6 +200,7 @@ def test_main_flow_and_user_governance():
         )
         assert mdr.status_code == 201, mdr.text
         mdr_id = mdr.json()["id"]
+        assert mdr.json()["doc_number"].startswith("IVA-CTR-SE-1100000-SE-REP-")
 
         delete_project_with_mdr = client.delete(
             f"/api/v1/projects/{project_id}",

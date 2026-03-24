@@ -6,7 +6,7 @@ interface MatrixRow {
   process: string;
   main_admin: boolean;
   admin: boolean;
-  contractor_tdo_lead: boolean;
+  participant: boolean;
   contractor_author: boolean;
   owner_manager: boolean;
   owner_reviewer: boolean;
@@ -19,7 +19,7 @@ const matrixRows: MatrixRow[] = [
     process: "Создание карточки проекта",
     main_admin: true,
     admin: false,
-    contractor_tdo_lead: false,
+    participant: false,
     contractor_author: false,
     owner_manager: false,
     owner_reviewer: false,
@@ -30,7 +30,7 @@ const matrixRows: MatrixRow[] = [
     process: "Удаление карточки проекта (если нет MDR)",
     main_admin: true,
     admin: false,
-    contractor_tdo_lead: false,
+    participant: false,
     contractor_author: false,
     owner_manager: false,
     owner_reviewer: false,
@@ -38,10 +38,10 @@ const matrixRows: MatrixRow[] = [
   },
   {
     key: "p3",
-    process: "Назначение руководителя ТДО подрядчика",
+    process: "Назначение участников проекта",
     main_admin: true,
     admin: false,
-    contractor_tdo_lead: false,
+    participant: false,
     contractor_author: false,
     owner_manager: false,
     owner_reviewer: false,
@@ -49,10 +49,10 @@ const matrixRows: MatrixRow[] = [
   },
   {
     key: "p4",
-    process: "Приглашение участников подрядчика в проект",
+    process: "Добавление участников в проект",
     main_admin: true,
     admin: false,
-    contractor_tdo_lead: true,
+    participant: true,
     contractor_author: false,
     owner_manager: false,
     owner_reviewer: false,
@@ -60,10 +60,10 @@ const matrixRows: MatrixRow[] = [
   },
   {
     key: "p5",
-    process: "Удаление участников подрядчика из проекта",
+    process: "Удаление участников из проекта",
     main_admin: true,
     admin: false,
-    contractor_tdo_lead: true,
+    participant: true,
     contractor_author: false,
     owner_manager: false,
     owner_reviewer: false,
@@ -74,7 +74,7 @@ const matrixRows: MatrixRow[] = [
     process: "Редактирование справочников проекта",
     main_admin: true,
     admin: false,
-    contractor_tdo_lead: false,
+    participant: false,
     contractor_author: false,
     owner_manager: false,
     owner_reviewer: false,
@@ -85,7 +85,7 @@ const matrixRows: MatrixRow[] = [
     process: "Создание MDR",
     main_admin: true,
     admin: true,
-    contractor_tdo_lead: true,
+    participant: true,
     contractor_author: true,
     owner_manager: false,
     owner_reviewer: false,
@@ -96,7 +96,7 @@ const matrixRows: MatrixRow[] = [
     process: "Загрузка PDF в ревизию",
     main_admin: true,
     admin: true,
-    contractor_tdo_lead: true,
+    participant: true,
     contractor_author: true,
     owner_manager: false,
     owner_reviewer: false,
@@ -107,7 +107,7 @@ const matrixRows: MatrixRow[] = [
     process: "Создание комментария",
     main_admin: true,
     admin: true,
-    contractor_tdo_lead: true,
+    participant: true,
     contractor_author: true,
     owner_manager: true,
     owner_reviewer: true,
@@ -118,7 +118,7 @@ const matrixRows: MatrixRow[] = [
     process: "Ответ на комментарий",
     main_admin: true,
     admin: true,
-    contractor_tdo_lead: true,
+    participant: true,
     contractor_author: true,
     owner_manager: false,
     owner_reviewer: false,
@@ -134,9 +134,9 @@ const columns: ColumnsType<MatrixRow> = [
   { title: "Главный админ", dataIndex: "main_admin", key: "main_admin", render: yesNo },
   { title: "Админ", dataIndex: "admin", key: "admin", render: yesNo },
   {
-    title: "Рук. ТДО подрядчика",
-    dataIndex: "contractor_tdo_lead",
-    key: "contractor_tdo_lead",
+    title: "Участник проекта",
+    dataIndex: "participant",
+    key: "participant",
     render: yesNo,
   },
   { title: "Автор подрядчика", dataIndex: "contractor_author", key: "contractor_author", render: yesNo },
@@ -151,8 +151,8 @@ export default function HelpPage(): JSX.Element {
       <Card title="Инструкция для пользователей (как работать в системе)">
         <ol style={{ marginBottom: 0 }}>
           <li>Главный админ создает карточку проекта в разделе «Проекты».</li>
-          <li>Главный админ назначает руководителя ТДО от подрядчика.</li>
-          <li>Руководитель ТДО подрядчика добавляет участников подрядчика в проект.</li>
+          <li>Главный админ добавляет участников проекта.</li>
+          <li>Пользователь с выданным правом может добавлять/удалять участников проекта.</li>
           <li>Главный админ настраивает справочники проекта (дисциплины, типы и классы документов).</li>
           <li>Команда подрядчика формирует MDR и создает документы/ревизии.</li>
           <li>Подрядчик загружает PDF в ревизию кнопкой «PDF».</li>
