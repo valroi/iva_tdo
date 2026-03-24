@@ -3,6 +3,7 @@ import {
   Card,
   Form,
   Input,
+  Tooltip,
   Modal,
   Popconfirm,
   Select,
@@ -124,9 +125,9 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
               }
               await onReload();
             }}
-            disabled={currentUser.email !== "admin@ivamaris.io"}
+            disabled={!canManageProjects}
           >
-            <Button size="small" danger disabled={currentUser.email !== "admin@ivamaris.io"}>
+            <Button size="small" danger disabled={!canManageProjects}>
               Удалить
             </Button>
           </Popconfirm>
@@ -194,7 +195,7 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
       render: (_, row) => (
         <Button
           size="small"
-          disabled={currentUser.email !== "admin@ivamaris.io"}
+          disabled={!canManageProjects}
           onClick={() => {
             setSelectedReference(row);
             referenceEditForm.setFieldsValue({ value: row.value, is_active: row.is_active });
@@ -207,7 +208,7 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
     },
   ];
 
-  const canManageProjects = currentUser.role === "admin" && currentUser.can_manage_project_members;
+  const canManageProjects = currentUser.role === "admin" && Boolean(currentUser.can_manage_project_members);
 
   return (
     <>
@@ -215,16 +216,21 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
         <Typography.Title level={4} style={{ margin: 0 }}>
           Проекты
         </Typography.Title>
-        <Button type="primary" onClick={() => setProjectOpen(true)} disabled={!canManageProjects}>
-          + Создать проект
-        </Button>
+        <Space>
+          <Tooltip title="Кнопка «Выбрать» открывает проект в нижних вкладках: участники и справочники.">
+            <Typography.Text type="secondary">Что делает «Выбрать»?</Typography.Text>
+          </Tooltip>
+          <Button type="primary" onClick={() => setProjectOpen(true)} disabled={!canManageProjects}>
+            + Создать проект
+          </Button>
+        </Space>
       </Space>
 
       <Card style={{ marginBottom: 16 }}>
         <Table rowKey="id" columns={projectColumns} dataSource={projects} pagination={false} />
       </Card>
 
-      <Card title={`Карточка проекта: ${selectedProjectId ?? "—"}`}>
+      <Card title={`Карточка проекта / Project card: ${selectedProjectId ?? "—"}`}>
         <Tabs
           items={[
             {
@@ -233,6 +239,9 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
               children: (
                 <>
                   <Space style={{ marginBottom: 12 }}>
+                    <Tooltip title="Кнопка «Выбрать» в таблице сверху определяет активный проект для этой вкладки">
+                      <Typography.Text type="secondary">Текущий проект: {selectedProjectId ?? "не выбран"}</Typography.Text>
+                    </Tooltip>
                     <Button
                       onClick={() => setMemberOpen(true)}
                       disabled={!selectedProjectId || !canManageProjects}
@@ -250,6 +259,9 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
               children: (
                 <>
                   <Space style={{ marginBottom: 12 }}>
+                    <Tooltip title="Кнопка «Выбрать» в таблице сверху определяет активный проект для этой вкладки">
+                      <Typography.Text type="secondary">Текущий проект: {selectedProjectId ?? "не выбран"}</Typography.Text>
+                    </Tooltip>
                     <Button
                       onClick={() => setReferenceOpen(true)}
                       disabled={!selectedProjectId || !canManageProjects}
@@ -279,8 +291,22 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
         }}
       >
         <Form form={projectForm} layout="vertical">
-          <Form.Item name="code" label="Код проекта" rules={[{ required: true }]}>
-            <Input placeholder="IVA" maxLength={3} />
+          <Form.Item
+            name="code"
+            label="Код проекта (3 заглавные буквы / 3 uppercase letters)"
+            rules={[
+              { required: true },
+              { pattern: /^[A-Z]{3}$/, message: "Только 3 заглавные буквы, например IVA" },
+            ]}
+          >
+            <Input
+              placeholder="IVA"
+              maxLength={3}
+              onChange={(event) => {
+                const next = event.target.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 3);
+                projectForm.setFieldValue("code", next);
+              }}
+            />
           </Form.Item>
           <Form.Item name="name" label="Название" rules={[{ required: true }]}>
             <Input placeholder="Город столиц" />
@@ -347,6 +373,8 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
                 { value: "numbering_attribute", label: "numbering_attribute" },
                 { value: "discipline", label: "discipline" },
                 { value: "document_type", label: "document_type" },
+                { value: "facility_title", label: "facility_title" },
+                { value: "pd_book", label: "pd_book" },
                 { value: "se_reporting_type", label: "se_reporting_type" },
                 { value: "procurement_request_type", label: "procurement_request_type" },
                 { value: "equipment_type", label: "equipment_type" },

@@ -318,6 +318,10 @@ def _can_manage_members(db: Session, project_id: int, user: User) -> bool:
     return _project_member(db, project_id, user.id) is not None
 
 
+def _can_manage_references(user: User) -> bool:
+    return is_main_admin(user)
+
+
 @router.get("", response_model=list[ProjectRead])
 def list_projects(
     db: Session = Depends(get_db),
@@ -532,7 +536,7 @@ def create_project_reference(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not is_main_admin(current_user):
+    if not _can_manage_references(current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Main admin required")
 
     _get_project_or_404(db, project_id)
@@ -563,7 +567,7 @@ def update_project_reference(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not is_main_admin(current_user):
+    if not _can_manage_references(current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Main admin required")
 
     item = db.query(ProjectReference).filter(ProjectReference.id == reference_id).first()

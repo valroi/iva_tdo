@@ -15,6 +15,7 @@ from app.schemas import (
 )
 
 router = APIRouter()
+TSC_LIKE_DOC_TYPES = {"TSC", "TEA"}
 
 def _normalize_segment(field_name: str, value: str) -> str:
     cleaned = re.sub(r"[^A-Z0-9-]+", "", value.strip().upper().replace(" ", "-"))
@@ -31,6 +32,23 @@ def _normalize_category(category: str) -> str:
     return _normalize_segment("category", category)
 
 
+def _mask_kind(category: str, doc_type: str) -> str:
+    normalized_category = _normalize_category(category)
+    normalized_doc_type = _normalize_segment("doc_type", doc_type)
+
+    if normalized_category == "SE":
+        return "SE"
+    if normalized_category == "PD":
+        return "PD"
+    if normalized_doc_type in TSC_LIKE_DOC_TYPES:
+        return "TSC"
+
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Only SE, PD and TSC/TEA masks are supported in current release",
+    )
+
+
 def _next_sequence_number(
     db: Session,
     *,
@@ -38,19 +56,19 @@ def _next_sequence_number(
     category: str,
     discipline_code: str,
     doc_type: str,
+    exclude_mdr_id: int | None = None,
 ) -> str:
     regex = re.compile(rf"^{re.escape(project_code)}-[A-Z0-9]+-{re.escape(category)}-[A-Z0-9]+-{re.escape(discipline_code)}-{re.escape(doc_type)}-(\d{{5}})$")
     max_seq = 0
-    rows = (
-        db.query(MDRRecord.doc_number)
-        .filter(
-            MDRRecord.project_code == project_code,
-            MDRRecord.category == category,
-            MDRRecord.discipline_code == discipline_code,
-            MDRRecord.doc_type == doc_type,
-        )
-        .all()
+    query = db.query(MDRRecord.doc_number).filter(
+        MDRRecord.project_code == project_code,
+        MDRRecord.category == category,
+        MDRRecord.discipline_code == discipline_code,
+        MDRRecord.doc_type == doc_type,
     )
+    if exclude_mdr_id is not None:
+        query = query.filter(MDRRecord.id != exclude_mdr_id)
+    rows = query.all()
     for row in rows:
         if not row.doc_number:
             continue
@@ -58,18 +76,6 @@ def _next_sequence_number(
         if match:
             max_seq = max(max_seq, int(match.group(1)))
     return f"{max_seq + 1:05d}"
-
-
-def _mask_kind(category: str, doc_type: str) -> str:
-    normalized_category = _normalize_category(category)
-    normalized_doc_type = _normalize_segment("doc_type", doc_type)
-    if normalized_category == "PD":
-        return "PD"
-    if normalized_category == "SE":
-        return "SE"
-    if normalized_doc_type in {"TSC", "TEA"}:
-        return "SE"
-    return "SE"
 
 
 def _build_doc_number(
@@ -187,14 +193,43 @@ def _ensure_mdr_reference_codes(
     doc_type: str,
     title_object: str,
 ) -> None:
-    if not _project_ref_exists(db, project.id, "document_category", category):
+    normalized_category = _normalize_category(category)
+    normalized_doc_type = _normalize_segment("doc_type", doc_type)
+    mask_kind = _mask_kind(normalized_category, normalized_doc_type)
+
+    if not _project_ref_exists(db, project.id, "document_category", normalized_category):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown category for project")
-    if not _project_ref_exists(db, project.id, "discipline", discipline_code):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown discipline for project")
-    if not _project_ref_exists(db, project.id, "document_type", doc_type):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown document type for project")
     if not _project_ref_exists(db, project.id, "facility_title", title_object):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown title object for project")
+
+    if mask_kind == "SE":
+        if not _project_ref_exists(db, project.id, "discipline", discipline_code):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown discipline for project")
+        if not _project_ref_exists(db, project.id, "se_reporting_type", normalized_doc_type):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="For SE category doc_type must be selected from se_reporting_type",
+            )
+        return
+
+    if mask_kind == "PD":
+        if not _project_ref_exists(db, project.id, "pd_book", normalized_doc_type):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="For PD category doc_type must be selected from pd_book",
+            )
+        return
+
+    # TSC/TEA mask.
+    if not _project_ref_exists(db, project.id, "discipline", discipline_code):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown discipline for project")
+    if not _project_ref_exists(db, project.id, "document_type", normalized_doc_type):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unknown document type for project",
+        )
+    if normalized_doc_type not in TSC_LIKE_DOC_TYPES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only TSC/TEA types use this mask")
 
 
 def _validate_category_weight_limit(
@@ -234,20 +269,29 @@ def preview_mdr_doc_number(
         title_object=payload.title_object,
     )
     originator_code = _resolve_originator_code(db, current_user, None)
-    serial = _next_sequence_number(
-        db,
-        project_code=_normalize_segment("project_code", payload.project_code),
-        category=_normalize_category(payload.category),
-        discipline_code=_normalize_segment("discipline_code", payload.discipline_code),
-        doc_type=_normalize_segment("doc_type", payload.doc_type),
+    normalized_category = _normalize_category(payload.category)
+    normalized_discipline = _normalize_segment("discipline_code", payload.discipline_code)
+    normalized_doc_type = _normalize_segment("doc_type", payload.doc_type)
+    mask_kind = _mask_kind(normalized_category, normalized_doc_type)
+
+    serial = (
+        "00000"
+        if mask_kind == "PD"
+        else _next_sequence_number(
+            db,
+            project_code=_normalize_segment("project_code", payload.project_code),
+            category=normalized_category,
+            discipline_code=normalized_discipline,
+            doc_type=normalized_doc_type,
+        )
     )
     doc_number = _build_doc_number(
         project_code=payload.project_code,
         originator_code=originator_code,
-        category=payload.category,
+        category=normalized_category,
         title_object=payload.title_object,
-        discipline_code=payload.discipline_code,
-        doc_type=payload.doc_type,
+        discipline_code=normalized_discipline,
+        doc_type=normalized_doc_type,
         serial_number=serial,
     )
     return MDRDocNumberPreviewResponse(doc_number=doc_number)
@@ -334,12 +378,17 @@ def create_mdr(
             detail="doc_number is generated automatically and must not be provided",
         )
 
-    serial = _next_sequence_number(
-        db,
-        project_code=_normalize_segment("project_code", payload.project_code),
-        category=payload_data["category"],
-        discipline_code=payload_data["discipline_code"],
-        doc_type=payload_data["doc_type"],
+    mask_kind = _mask_kind(payload_data["category"], payload_data["doc_type"])
+    serial = (
+        "00000"
+        if mask_kind == "PD"
+        else _next_sequence_number(
+            db,
+            project_code=_normalize_segment("project_code", payload.project_code),
+            category=payload_data["category"],
+            discipline_code=payload_data["discipline_code"],
+            doc_type=payload_data["doc_type"],
+        )
     )
     payload_data["serial_number"] = serial
     payload_data["doc_number"] = _build_doc_number(
@@ -353,6 +402,7 @@ def create_mdr(
     )
     _ensure_unique_doc_number(db, payload_data["doc_number"])
 
+    payload_data.pop("pd_book", None)
     mdr = MDRRecord(**payload_data)
     db.add(mdr)
     db.commit()
@@ -393,13 +443,28 @@ def update_mdr(
         mdr.title_object = _normalize_segment("title_object", mdr.title_object)
         mdr.discipline_code = _normalize_segment("discipline_code", mdr.discipline_code)
         mdr.doc_type = _normalize_segment("doc_type", mdr.doc_type)
-        mdr.serial_number = _next_sequence_number(
-            db,
-            project_code=_normalize_segment("project_code", mdr.project_code),
-            category=mdr.category,
-            discipline_code=mdr.discipline_code,
-            doc_type=mdr.doc_type,
-        )
+        group_changed = any(key in updates for key in {"category", "discipline_code", "doc_type"})
+        mask_kind = _mask_kind(mdr.category, mdr.doc_type)
+        if mask_kind == "PD":
+            mdr.serial_number = "00000"
+        elif group_changed:
+            mdr.serial_number = _next_sequence_number(
+                db,
+                project_code=_normalize_segment("project_code", mdr.project_code),
+                category=mdr.category,
+                discipline_code=mdr.discipline_code,
+                doc_type=mdr.doc_type,
+                exclude_mdr_id=mdr.id,
+            )
+        elif not mdr.serial_number:
+            mdr.serial_number = _next_sequence_number(
+                db,
+                project_code=_normalize_segment("project_code", mdr.project_code),
+                category=mdr.category,
+                discipline_code=mdr.discipline_code,
+                doc_type=mdr.doc_type,
+                exclude_mdr_id=mdr.id,
+            )
         mdr.doc_number = _build_doc_number(
             project_code=mdr.project_code,
             originator_code=mdr.originator_code,

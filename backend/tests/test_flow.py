@@ -186,7 +186,7 @@ def test_main_flow_and_user_governance():
                 "category": "SE",
                 "title_object": "1100000",
                 "discipline_code": "SE",
-                "doc_type": "REP",
+                    "doc_type": "IGD",
                 "doc_name": "Piping layout",
                 "progress_percent": 10,
                 "doc_weight": 1.2,
@@ -200,7 +200,7 @@ def test_main_flow_and_user_governance():
         )
         assert mdr.status_code == 201, mdr.text
         mdr_id = mdr.json()["id"]
-        assert mdr.json()["doc_number"].startswith("IVA-CTR-SE-1100000-SE-REP-")
+        assert mdr.json()["doc_number"].startswith("IVA-CTR-SE-1100000-SE-IGD-")
 
         delete_project_with_mdr = client.delete(
             f"/api/v1/projects/{project_id}",

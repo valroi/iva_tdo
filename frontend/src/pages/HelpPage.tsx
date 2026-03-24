@@ -140,9 +140,9 @@ const columns: ColumnsType<MatrixRow> = [
     render: yesNo,
   },
   { title: "Автор подрядчика", dataIndex: "contractor_author", key: "contractor_author", render: yesNo },
-  { title: "Owner manager", dataIndex: "owner_manager", key: "owner_manager", render: yesNo },
-  { title: "Owner reviewer", dataIndex: "owner_reviewer", key: "owner_reviewer", render: yesNo },
-  { title: "Viewer", dataIndex: "viewer", key: "viewer", render: yesNo },
+  { title: "Менеджер заказчика / Owner manager", dataIndex: "owner_manager", key: "owner_manager", render: yesNo },
+  { title: "Ревьюер заказчика / Owner reviewer", dataIndex: "owner_reviewer", key: "owner_reviewer", render: yesNo },
+  { title: "Наблюдатель / Viewer", dataIndex: "viewer", key: "viewer", render: yesNo },
 ];
 
 export default function HelpPage(): JSX.Element {

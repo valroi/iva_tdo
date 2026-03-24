@@ -62,6 +62,8 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
   const [roleOpen, setRoleOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [roleForm] = Form.useForm();
+  const [permissionsOpen, setPermissionsOpen] = useState(false);
+  const [permissionsForm] = Form.useForm();
 
   const [approveOpen, setApproveOpen] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<RegistrationRequest | null>(null);
@@ -114,7 +116,31 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
       title: "Роль",
       dataIndex: "role",
       key: "role",
-      render: (value: UserRole) => <Tag color={value === "admin" ? "purple" : "blue"}>{value}</Tag>,
+      render: (value: UserRole) => (
+        <Tooltip title={roleTooltipRuEn(value)}>
+          <Tag color={value === "admin" ? "purple" : "blue"}>{roleDisplayRuEn(value)}</Tag>
+        </Tooltip>
+      ),
+    },
+    {
+      title: "Код компании",
+      dataIndex: "originator_code",
+      key: "originator_code",
+      render: (value: string | null | undefined) => value || "—",
+    },
+    {
+      title: "Права",
+      key: "permissions",
+      render: (_, row) => (
+        <Space size={4} wrap>
+          <Tag color={row.can_manage_mdr ? "green" : "default"}>
+            MDR: {row.can_manage_mdr ? "Да" : "Нет"}
+          </Tag>
+          <Tag color={row.can_manage_project_members ? "green" : "default"}>
+            Участники проекта: {row.can_manage_project_members ? "Да" : "Нет"}
+          </Tag>
+        </Space>
+      ),
     },
     {
       title: "Активен",
@@ -137,6 +163,21 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
             disabled={!isMainAdmin}
           >
             Изменить роль
+          </Button>
+          <Button
+            size="small"
+            onClick={() => {
+              setSelectedUser(row);
+              permissionsForm.setFieldsValue({
+                originator_code: row.originator_code ?? "",
+                can_manage_mdr: Boolean(row.can_manage_mdr),
+                can_manage_project_members: Boolean(row.can_manage_project_members),
+              });
+              setPermissionsOpen(true);
+            }}
+            disabled={!isMainAdmin}
+          >
+            Права
           </Button>
           <Button
             size="small"
@@ -289,7 +330,16 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
           await loadData();
         }}
       >
-        <Form form={createForm} layout="vertical" initialValues={{ company_type: "contractor", role: "viewer" }}>
+        <Form
+          form={createForm}
+          layout="vertical"
+          initialValues={{
+            company_type: "contractor",
+            role: "viewer",
+            can_manage_mdr: false,
+            can_manage_project_members: false,
+          }}
+        >
           <Form.Item name="email" label="Email" rules={[{ required: true, type: "email" }]}>
             <Input />
           </Form.Item>
@@ -303,7 +353,37 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
             <Select options={companyOptions} />
           </Form.Item>
           <Form.Item name="role" label="Роль" rules={[{ required: true }]}>
-            <Select options={visibleRoleOptions} />
+            <Select
+              options={visibleRoleOptions}
+              optionRender={(option) => (
+                <Tooltip title={roleTooltipRuEn(option.value as UserRole)}>
+                  <span>{String(option.label)}</span>
+                </Tooltip>
+              )}
+            />
+          </Form.Item>
+          <Form.Item name="originator_code" label="Код компании разработчика (BBB)">
+            <Input maxLength={10} placeholder="CTR" />
+          </Form.Item>
+          <Form.Item name="can_manage_mdr" label="Право: вносить записи в MDR" rules={[{ required: true }]}>
+            <Select
+              options={[
+                { value: true, label: "Да / Yes" },
+                { value: false, label: "Нет / No" },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item
+            name="can_manage_project_members"
+            label="Право: добавлять пользователей в проект"
+            rules={[{ required: true }]}
+          >
+            <Select
+              options={[
+                { value: true, label: "Да / Yes" },
+                { value: false, label: "Нет / No" },
+              ]}
+            />
           </Form.Item>
         </Form>
       </Modal>
@@ -323,7 +403,54 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
       >
         <Form form={roleForm} layout="vertical">
           <Form.Item name="role" label="Роль" rules={[{ required: true }]}>
-            <Select options={roleOptions} />
+            <Select
+              options={roleOptions}
+              optionRender={(option) => (
+                <Tooltip title={roleTooltipRuEn(option.value as UserRole)}>
+                  <span>{String(option.label)}</span>
+                </Tooltip>
+              )}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        open={permissionsOpen}
+        title={`Права пользователя: ${selectedUser?.email ?? ""}`}
+        onCancel={() => setPermissionsOpen(false)}
+        onOk={async () => {
+          if (!selectedUser) return;
+          const values = await permissionsForm.validateFields();
+          await updateUserPermissions(selectedUser.id, values);
+          message.success("Права обновлены");
+          setPermissionsOpen(false);
+          await loadData();
+        }}
+      >
+        <Form form={permissionsForm} layout="vertical">
+          <Form.Item name="originator_code" label="Код компании разработчика (BBB)">
+            <Input maxLength={10} placeholder="CTR" />
+          </Form.Item>
+          <Form.Item name="can_manage_mdr" label="Право: вносить записи в MDR" rules={[{ required: true }]}>
+            <Select
+              options={[
+                { value: true, label: "Да / Yes" },
+                { value: false, label: "Нет / No" },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item
+            name="can_manage_project_members"
+            label="Право: добавлять пользователей в проект"
+            rules={[{ required: true }]}
+          >
+            <Select
+              options={[
+                { value: true, label: "Да / Yes" },
+                { value: false, label: "Нет / No" },
+              ]}
+            />
           </Form.Item>
         </Form>
       </Modal>
@@ -343,7 +470,14 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
       >
         <Form form={approveForm} layout="vertical">
           <Form.Item name="role" label="Роль" rules={[{ required: true }]}>
-            <Select options={roleOptions} />
+            <Select
+              options={roleOptions}
+              optionRender={(option) => (
+                <Tooltip title={roleTooltipRuEn(option.value as UserRole)}>
+                  <span>{String(option.label)}</span>
+                </Tooltip>
+              )}
+            />
           </Form.Item>
           <Form.Item name="company_type" label="Компания" rules={[{ required: true }]}>
             <Select options={companyOptions} />

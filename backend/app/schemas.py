@@ -157,7 +157,7 @@ class MDRBase(BaseModel):
 
 
 class MDRCreate(MDRBase):
-    title_object: str
+    pd_book: str | None = None
 
 
 class MDRUpdate(BaseModel):
@@ -165,6 +165,7 @@ class MDRUpdate(BaseModel):
     title_object: str | None = None
     discipline_code: str | None = None
     doc_type: str | None = None
+    pd_book: str | None = None
     doc_name: str | None = None
     progress_percent: float | None = None
     doc_weight: float | None = None
@@ -195,6 +196,7 @@ class MDRDocNumberPreviewRequest(BaseModel):
     title_object: str
     discipline_code: str
     doc_type: str
+    pd_book: str | None = None
 
 
 class MDRDocNumberPreviewResponse(BaseModel):
