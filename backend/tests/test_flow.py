@@ -256,6 +256,14 @@ def test_main_flow_and_user_governance():
         assert template_download.status_code == 200, template_download.text
         assert template_download.content[:2] == b"PK"
 
+        bulk_delete_refs = client.post(
+            "/api/v1/projects/references/bulk-delete",
+            json={"ids": [secondary_project_refs.json()[0]["id"]]},
+            headers=_auth_header(secondary_access),
+        )
+        assert bulk_delete_refs.status_code == 200, bulk_delete_refs.text
+        assert bulk_delete_refs.json()["deleted_count"] >= 1
+
         delete_project_with_mdr = client.delete(
             f"/api/v1/projects/{project_id}",
             headers=_auth_header(main_admin_access),
@@ -377,3 +385,9 @@ def test_main_flow_and_user_governance():
         )
         assert notifications.status_code == 200
         assert len(notifications.json()) >= 1
+
+        reset_demo = client.post(
+            "/api/v1/projects/admin/reset-demo-data",
+            headers=_auth_header(main_admin_access),
+        )
+        assert reset_demo.status_code == 200, reset_demo.text

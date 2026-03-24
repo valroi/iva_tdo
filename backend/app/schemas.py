@@ -107,6 +107,8 @@ class ProjectReferenceCreate(BaseModel):
 
 
 class ProjectReferenceUpdate(BaseModel):
+    ref_type: str | None = None
+    code: str | None = None
     value: str | None = None
     is_active: bool | None = None
 
@@ -122,6 +124,27 @@ class ProjectReferenceRead(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ProjectReferenceBulkDeleteRequest(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=2000)
+
+
+class ProjectReferenceBulkDeleteResponse(BaseModel):
+    deleted_count: int
+
+
+class AdminDataResetResponse(BaseModel):
+    deleted_project_references: int
+    deleted_project_members: int
+    deleted_comments: int
+    deleted_revisions: int
+    deleted_documents: int
+    deleted_mdr_records: int
+    deleted_projects: int
+    deleted_notifications: int
+    deleted_registration_requests: int
+    deleted_users: int
 
 
 class MDRBase(BaseModel):
@@ -415,3 +438,9 @@ class FileUploadResponse(BaseModel):
     file_path: str
     content_type: str
     file_size: int
+
+
+class DataResetResponse(BaseModel):
+    message: str
+    deleted: dict[str, int]
+    kept_admin_emails: list[EmailStr]

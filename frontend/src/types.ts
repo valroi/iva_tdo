@@ -188,3 +188,19 @@ export interface ProjectReference {
   created_at: string;
   updated_at: string;
 }
+
+export interface ProjectReferenceSelectionItem extends ProjectReference {
+  project_code: string;
+  project_name: string;
+}
+
+export interface AdminDataResetResult {
+  deleted_projects: number;
+  deleted_project_members: number;
+  deleted_project_references: number;
+  deleted_mdr_records: number;
+  deleted_documents: number;
+  deleted_revisions: number;
+  deleted_comments: number;
+  deleted_notifications: number;
+}

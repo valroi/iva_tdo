@@ -6,19 +6,26 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.deps import get_current_user, has_project_member_management_rights, is_main_admin
 from app.models import (
+    Comment,
+    Document,
     MDRRecord,
+    Notification,
     Project,
     ProjectMember,
     ProjectMemberRole,
     ProjectReference,
+    Revision,
     User,
     UserPermission,
 )
 from app.schemas import (
+    AdminDataResetResponse,
     ProjectCreate,
     ProjectMemberCreate,
     ProjectMemberRead,
     ProjectRead,
+    ProjectReferenceBulkDeleteRequest,
+    ProjectReferenceBulkDeleteResponse,
     ProjectReferenceCreate,
     ProjectReferenceRead,
     ProjectReferenceUpdate,
@@ -567,6 +574,47 @@ def create_project_reference(
     return item
 
 
+@router.post("/references/bulk-delete", response_model=ProjectReferenceBulkDeleteResponse)
+def bulk_delete_project_references(
+    payload: ProjectReferenceBulkDeleteRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not _can_manage_references(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
+
+    deleted_count = (
+        db.query(ProjectReference)
+        .filter(ProjectReference.id.in_(payload.ids))
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return ProjectReferenceBulkDeleteResponse(deleted_count=deleted_count)
+
+
+@router.get("/references/catalog", response_model=list[ProjectReferenceRead])
+def list_all_project_references(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    project_ids: str | None = Query(default=None),
+    ref_type: str | None = Query(default=None),
+):
+    if not _can_manage_references(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
+
+    query = db.query(ProjectReference)
+    if project_ids:
+        try:
+            ids = [int(raw.strip()) for raw in project_ids.split(",") if raw.strip()]
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid project_ids filter") from exc
+        if ids:
+            query = query.filter(ProjectReference.project_id.in_(ids))
+    if ref_type:
+        query = query.filter(ProjectReference.ref_type == ref_type)
+    return query.order_by(ProjectReference.project_id.asc(), ProjectReference.ref_type.asc(), ProjectReference.code.asc()).all()
+
+
 @router.put("/references/{reference_id}", response_model=ProjectReferenceRead)
 def update_project_reference(
     reference_id: int,
@@ -588,3 +636,51 @@ def update_project_reference(
     db.commit()
     db.refresh(item)
     return item
+
+
+@router.delete("/references/{reference_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_project_reference(
+    reference_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not _can_manage_references(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
+
+    item = db.query(ProjectReference).filter(ProjectReference.id == reference_id).first()
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reference not found")
+
+    db.delete(item)
+    db.commit()
+
+
+@router.post("/admin/reset-demo-data", response_model=AdminDataResetResponse)
+def reset_demo_data(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not is_main_admin(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Main admin required")
+
+    # Reset workflow/business data while keeping user/admin accounts intact.
+    deleted_comments = db.query(Comment).delete(synchronize_session=False)
+    deleted_revisions = db.query(Revision).delete(synchronize_session=False)
+    deleted_documents = db.query(Document).delete(synchronize_session=False)
+    deleted_mdr = db.query(MDRRecord).delete(synchronize_session=False)
+    deleted_project_refs = db.query(ProjectReference).delete(synchronize_session=False)
+    deleted_project_members = db.query(ProjectMember).delete(synchronize_session=False)
+    deleted_projects = db.query(Project).delete(synchronize_session=False)
+    deleted_notifications = db.query(Notification).delete(synchronize_session=False)
+
+    db.commit()
+    return AdminDataResetResponse(
+        deleted_projects=deleted_projects,
+        deleted_project_members=deleted_project_members,
+        deleted_project_references=deleted_project_refs,
+        deleted_mdr_records=deleted_mdr,
+        deleted_documents=deleted_documents,
+        deleted_revisions=deleted_revisions,
+        deleted_comments=deleted_comments,
+        deleted_notifications=deleted_notifications,
+    )

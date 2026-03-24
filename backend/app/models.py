@@ -133,7 +133,6 @@ class UserPermission(Base):
         "User",
         back_populates="permission",
     )
-    user: Mapped["User"] = relationship("User")
 
 
 class RegistrationRequest(Base):

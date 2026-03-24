@@ -412,3 +412,31 @@ export function updateProjectReference(
     body: JSON.stringify(payload),
   });
 }
+
+export function deleteProjectReference(referenceId: number): Promise<void> {
+  return request<void>(`/projects/references/${referenceId}`, {
+    method: "DELETE",
+  });
+}
+
+export function bulkDeleteProjectReferences(ids: number[]): Promise<{ deleted_count: number }> {
+  return request<{ deleted_count: number }>("/projects/references/bulk-delete", {
+    method: "POST",
+    body: JSON.stringify({ ids }),
+  });
+}
+
+export function resetDemoData(): Promise<{
+  deleted_projects: number;
+  deleted_project_members: number;
+  deleted_project_references: number;
+  deleted_mdr_records: number;
+  deleted_documents: number;
+  deleted_revisions: number;
+  deleted_comments: number;
+  deleted_notifications: number;
+}> {
+  return request("/projects/admin/reset-demo-data", {
+    method: "POST",
+  });
+}

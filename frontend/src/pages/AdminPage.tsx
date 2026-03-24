@@ -17,19 +17,33 @@ import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
 
 import {
+  bulkDeleteProjectReferences,
   approveRegistrationRequest,
   createQuickDemoSetup,
   createUser,
   deleteUser,
+  deleteProjectReference,
+  listProjects,
+  listProjectReferences,
   listRegistrationRequests,
   listUsers,
+  resetDemoData,
   rejectRegistrationRequest,
   setUserActive,
+  updateProjectReference,
   updateUserPermissions,
   updateUserRole,
 } from "../api";
 import { roleDisplayRuEn, roleTooltipRuEn } from "../roles";
-import type { CompanyType, QuickDemoSetupResult, RegistrationRequest, User, UserRole } from "../types";
+import type {
+  CompanyType,
+  ProjectItem,
+  ProjectReferenceSelectionItem,
+  QuickDemoSetupResult,
+  RegistrationRequest,
+  User,
+  UserRole,
+} from "../types";
 
 interface Props {
   currentUser: User;
@@ -53,9 +67,16 @@ const companyOptions: { value: CompanyType; label: string }[] = [
 export default function AdminPage({ currentUser }: Props): JSX.Element {
   const [users, setUsers] = useState<User[]>([]);
   const [requests, setRequests] = useState<RegistrationRequest[]>([]);
+  const [projects, setProjects] = useState<ProjectItem[]>([]);
+  const [referenceRows, setReferenceRows] = useState<ProjectReferenceSelectionItem[]>([]);
   const [isMainAdmin, setIsMainAdmin] = useState(false);
   const [loading, setLoading] = useState(false);
-
+  const [selectedReferenceIds, setSelectedReferenceIds] = useState<number[]>([]);
+  const [filterProjectIds, setFilterProjectIds] = useState<number[]>([]);
+  const [filterRefTypes, setFilterRefTypes] = useState<string[]>([]);
+  const [referenceEditOpen, setReferenceEditOpen] = useState(false);
+  const [selectedReference, setSelectedReference] = useState<ProjectReferenceSelectionItem | null>(null);
+  const [referenceEditForm] = Form.useForm();
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm] = Form.useForm();
 
@@ -81,6 +102,19 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
     try {
       const usersResp = await listUsers();
       setUsers(usersResp);
+      const projectsResp = await listProjects();
+      setProjects(projectsResp);
+      const refsChunks = await Promise.all(
+        projectsResp.map(async (project) => {
+          const refs = await listProjectReferences(project.id);
+          return refs.map((ref) => ({
+            ...ref,
+            project_code: project.code,
+            project_name: project.name,
+          }));
+        }),
+      );
+      setReferenceRows(refsChunks.flat());
 
       try {
         const reqResp = await listRegistrationRequests();
@@ -268,6 +302,79 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
     },
   ];
 
+  const visibleReferenceRows = useMemo(() => {
+    return referenceRows.filter((row) => {
+      if (filterProjectIds.length > 0 && !filterProjectIds.includes(row.project_id)) {
+        return false;
+      }
+      if (filterRefTypes.length > 0 && !filterRefTypes.includes(row.ref_type)) {
+        return false;
+      }
+      return true;
+    });
+  }, [filterProjectIds, filterRefTypes, referenceRows]);
+
+  const selectedReferenceRows = useMemo(
+    () => visibleReferenceRows.filter((row) => selectedReferenceIds.includes(row.id)),
+    [selectedReferenceIds, visibleReferenceRows],
+  );
+
+  const referenceColumns: ColumnsType<ProjectReferenceSelectionItem> = [
+    {
+      title: "Проект",
+      key: "project",
+      render: (_, row) => `${row.project_code} — ${row.project_name}`,
+      width: 260,
+    },
+    { title: "Тип", dataIndex: "ref_type", key: "ref_type", width: 220 },
+    { title: "Код", dataIndex: "code", key: "code", width: 140 },
+    { title: "Значение", dataIndex: "value", key: "value" },
+    {
+      title: "Активен",
+      dataIndex: "is_active",
+      key: "is_active",
+      width: 100,
+      render: (value: boolean) => (value ? <Tag color="green">Да</Tag> : <Tag color="default">Нет</Tag>),
+    },
+    {
+      title: "Действия",
+      key: "actions",
+      width: 120,
+      render: (_, row) => (
+        <Space>
+          <Button
+            size="small"
+            onClick={() => {
+              setSelectedReference(row);
+              referenceEditForm.setFieldsValue({ value: row.value, is_active: row.is_active });
+              setReferenceEditOpen(true);
+            }}
+          >
+            Изменить
+          </Button>
+          <Popconfirm
+            title="Удалить запись справочника?"
+            description="Операция необратима."
+            onConfirm={async () => {
+              try {
+                await deleteProjectReference(row.id);
+                message.success("Запись удалена");
+                await loadData();
+              } catch (error: unknown) {
+                const text = error instanceof Error ? error.message : "Не удалось удалить запись";
+                message.error(text);
+              }
+            }}
+          >
+            <Button size="small" danger>
+              Удалить
+            </Button>
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ];
+
   return (
     <>
       <Space style={{ marginBottom: 12, width: "100%", justifyContent: "space-between" }}>
@@ -292,6 +399,27 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
           <Button type="primary" onClick={() => setCreateOpen(true)}>
             + Создать пользователя
           </Button>
+          <Popconfirm
+            title="Очистить все рабочие данные?"
+            description="Будут удалены проекты, MDR, документы, ревизии, комментарии и уведомления. Пользователи останутся."
+            disabled={!isMainAdmin}
+            onConfirm={async () => {
+              try {
+                const result = await resetDemoData();
+                message.success(
+                  `Данные очищены: проектов ${result.deleted_projects}, MDR ${result.deleted_mdr_records}, документов ${result.deleted_documents}`,
+                );
+                await loadData();
+              } catch (error: unknown) {
+                const text = error instanceof Error ? error.message : "Не удалось выполнить сброс данных";
+                message.error(text);
+              }
+            }}
+          >
+            <Button danger disabled={!isMainAdmin}>
+              Сбросить рабочие данные
+            </Button>
+          </Popconfirm>
         </Space>
       </Space>
 
@@ -303,6 +431,7 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
       )}
 
       <Tabs
+        tabPosition="left"
         items={[
           {
             key: "users",
@@ -314,8 +443,117 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
             label: "Заявки на регистрацию",
             children: <Table rowKey="id" loading={loading} columns={requestColumns} dataSource={requests} />,
           },
+          {
+            key: "references",
+            label: "Справочники",
+            children: (
+              <Space direction="vertical" style={{ width: "100%" }} size={12}>
+                <Space wrap>
+                  <Select
+                    mode="multiple"
+                    allowClear
+                    style={{ minWidth: 320 }}
+                    placeholder="Фильтр по проектам"
+                    value={filterProjectIds}
+                    onChange={setFilterProjectIds}
+                    options={projects.map((p) => ({ value: p.id, label: `${p.code} — ${p.name}` }))}
+                  />
+                  <Select
+                    mode="multiple"
+                    allowClear
+                    style={{ minWidth: 320 }}
+                    placeholder="Фильтр по типам справочника"
+                    value={filterRefTypes}
+                    onChange={setFilterRefTypes}
+                    options={Array.from(new Set(referenceRows.map((r) => r.ref_type)))
+                      .sort((a, b) => a.localeCompare(b))
+                      .map((refType) => ({ value: refType, label: refType }))}
+                  />
+                  <Popconfirm
+                    title={`Удалить выбранные записи (${selectedReferenceRows.length})?`}
+                    description={
+                      selectedReferenceRows.length > 0
+                        ? `Проекты: ${Array.from(new Set(selectedReferenceRows.map((r) => r.project_code)))
+                            .sort((a, b) => a.localeCompare(b))
+                            .join(", ")}`
+                        : "Операция необратима. Удалятся значения справочников из выбранных проектов."
+                    }
+                    disabled={selectedReferenceRows.length === 0}
+                    onConfirm={async () => {
+                      try {
+                        const idsToDelete = selectedReferenceRows.map((row) => row.id);
+                        if (idsToDelete.some((id) => id === selectedReference?.id)) {
+                          setReferenceEditOpen(false);
+                          setSelectedReference(null);
+                        }
+                        const response = await bulkDeleteProjectReferences(idsToDelete);
+                        message.success(`Удалено записей: ${response.deleted_count}`);
+                        setSelectedReferenceIds((prev) => prev.filter((id) => !idsToDelete.includes(id)));
+                        await loadData();
+                      } catch (error: unknown) {
+                        const text =
+                          error instanceof Error ? error.message : "Не удалось удалить выбранные справочники";
+                        message.error(text);
+                      }
+                    }}
+                  >
+                    <Button danger disabled={selectedReferenceRows.length === 0}>
+                      Массовое удаление
+                    </Button>
+                  </Popconfirm>
+                  <Typography.Text type="secondary">
+                    Выбрано: {selectedReferenceIds.length}
+                  </Typography.Text>
+                </Space>
+                <Table
+                  rowKey="id"
+                  loading={loading}
+                  columns={referenceColumns}
+                  dataSource={visibleReferenceRows}
+                  rowSelection={{
+                    selectedRowKeys: selectedReferenceIds,
+                    onChange: (keys) => setSelectedReferenceIds(keys as number[]),
+                    preserveSelectedRowKeys: true,
+                  }}
+                />
+              </Space>
+            ),
+          },
         ]}
       />
+
+      <Modal
+        open={referenceEditOpen}
+        title={`Изменить справочник: ${selectedReference?.project_code ?? ""} / ${selectedReference?.code ?? ""}`}
+        onCancel={() => setReferenceEditOpen(false)}
+        onOk={async () => {
+          if (!selectedReference) return;
+          const values = await referenceEditForm.validateFields();
+          try {
+            await updateProjectReference(selectedReference.id, values);
+            message.success("Запись справочника обновлена");
+            setReferenceEditOpen(false);
+            await loadData();
+          } catch (error: unknown) {
+            const text = error instanceof Error ? error.message : "Не удалось обновить запись справочника";
+            message.error(text);
+          }
+        }}
+      >
+        <Form form={referenceEditForm} layout="vertical">
+          <Form.Item name="value" label="Значение" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="is_active" label="Активен" rules={[{ required: true }]}>
+            <Select
+              options={[
+                { value: true, label: "Да / Yes" },
+                { value: false, label: "Нет / No" },
+              ]}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
 
       <Modal
         open={createOpen}
