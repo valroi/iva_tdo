@@ -414,20 +414,6 @@ def list_mdr(
     return query.order_by(MDRRecord.id.desc()).all()
 
 
-@router.get("/{mdr_id}", response_model=MDRRead)
-def get_mdr(
-    mdr_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    mdr = db.query(MDRRecord).filter(MDRRecord.id == mdr_id).first()
-    if not mdr:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="MDR not found")
-    if not _has_project_access(db, mdr.project_code, current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No access to this project")
-    return mdr
-
-
 @router.post("", response_model=MDRRead, status_code=status.HTTP_201_CREATED)
 def create_mdr(
     payload: MDRCreate,
@@ -594,6 +580,20 @@ def import_mdr_xlsx(
         created_ids=created_ids,
         errors=errors,
     )
+
+
+@router.get("/{mdr_id}", response_model=MDRRead)
+def get_mdr(
+    mdr_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    mdr = db.query(MDRRecord).filter(MDRRecord.id == mdr_id).first()
+    if not mdr:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="MDR not found")
+    if not _has_project_access(db, mdr.project_code, current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No access to this project")
+    return mdr
 
 
 @router.put("/{mdr_id}", response_model=MDRRead)
