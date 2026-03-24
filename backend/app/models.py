@@ -91,12 +91,16 @@ class User(Base):
 
     @property
     def can_manage_mdr(self) -> bool:
+        if self.role == UserRole.admin:
+            return True
         if self.permission is None:
             return False
         return self.permission.can_manage_mdr
 
     @property
     def can_manage_project_members(self) -> bool:
+        if self.role == UserRole.admin:
+            return True
         if self.permission is None:
             return False
         return self.permission.can_manage_project_members

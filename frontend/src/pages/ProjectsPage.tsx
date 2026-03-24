@@ -222,9 +222,8 @@ export default function ProjectsPage({ currentUser, projects, onReload, onOpenMd
     },
   ];
 
-  const isMainAdmin = currentUser.email.toLowerCase() === "admin@ivamaris.io";
-  const canManageProjects = currentUser.role === "admin" && Boolean(currentUser.can_manage_project_members);
-  const canDeleteProjects = isMainAdmin;
+  const canManageProjects = currentUser.role === "admin";
+  const canDeleteProjects = currentUser.role === "admin";
   const selectedProject = projects.find((item) => item.id === selectedProjectId) ?? null;
   const categoryRefs = references.filter((ref) => ref.ref_type === "document_category" && ref.is_active);
 

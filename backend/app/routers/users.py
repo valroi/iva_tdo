@@ -105,8 +105,10 @@ def create_user(
         UserPermission(
             user_id=user.id,
             originator_code=(payload.originator_code or "").strip().upper() or None,
-            can_manage_mdr=payload.can_manage_mdr,
-            can_manage_project_members=payload.can_manage_project_members,
+            can_manage_mdr=True if payload.role == UserRole.admin else bool(payload.can_manage_mdr),
+            can_manage_project_members=True
+            if payload.role == UserRole.admin
+            else bool(payload.can_manage_project_members),
         )
     )
     db.commit()
@@ -388,8 +390,14 @@ def update_user_permissions(
         permission = UserPermission(user_id=user.id)
 
     permission.originator_code = (payload.originator_code or "").strip().upper() or None
-    permission.can_manage_mdr = payload.can_manage_mdr
-    permission.can_manage_project_members = payload.can_manage_project_members
+
+    # Admin users always keep full management rights by default.
+    if user.role == UserRole.admin:
+        permission.can_manage_mdr = True
+        permission.can_manage_project_members = True
+    else:
+        permission.can_manage_mdr = bool(payload.can_manage_mdr)
+        permission.can_manage_project_members = bool(payload.can_manage_project_members)
 
     db.add(permission)
     db.commit()

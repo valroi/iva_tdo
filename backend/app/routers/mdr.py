@@ -1,6 +1,9 @@
+import io
 import re
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi.responses import StreamingResponse
+from openpyxl import Workbook, load_workbook
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -8,9 +11,13 @@ from app.database import get_db
 from app.deps import get_current_user, is_main_admin
 from app.models import Document, MDRRecord, Project, ProjectMember, ProjectReference, User, UserPermission, UserRole
 from app.schemas import (
+    MDRBulkCreate,
+    MDRBulkCreateRequest,
+    MDRBulkImportResponse,
     MDRCreate,
     MDRDocNumberPreviewRequest,
     MDRDocNumberPreviewResponse,
+    MDRImportError,
     MDRRead,
     MDRUpdate,
 )
@@ -162,7 +169,7 @@ def _has_project_access(db: Session, project_code: str, user: User) -> bool:
 
 
 def _require_mdr_write_access(db: Session, user: User, project_code: str) -> None:
-    if is_main_admin(user):
+    if is_main_admin(user) or user.role == UserRole.admin:
         return
     permission = _current_user_permission(db, user.id)
     if permission is None or not permission.can_manage_mdr:
@@ -250,6 +257,93 @@ def _validate_category_weight_limit(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Total weight for project/category cannot exceed 100%",
         )
+
+
+def _parse_bool_like(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "да"}
+    return False
+
+
+def _create_mdr_record(
+    db: Session,
+    *,
+    current_user: User,
+    payload: MDRCreate,
+) -> MDRRecord:
+    _require_mdr_write_access(db, current_user, payload.project_code)
+    project = db.query(Project).filter(Project.code == payload.project_code).first()
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown project_code")
+
+    exists = db.query(MDRRecord).filter(MDRRecord.document_key == payload.document_key).first()
+    if exists:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="document_key already exists")
+
+    _ensure_mdr_reference_codes(
+        db,
+        project=project,
+        category=payload.category,
+        discipline_code=payload.discipline_code,
+        doc_type=payload.doc_type,
+        title_object=payload.title_object,
+    )
+
+    payload_data = payload.model_dump()
+    payload_data["originator_code"] = _resolve_originator_code(db, current_user, payload.originator_code)
+    payload_data["category"] = _normalize_category(payload.category)
+    payload_data["discipline_code"] = _normalize_segment("discipline_code", payload.discipline_code)
+    payload_data["doc_type"] = _normalize_segment("doc_type", payload.doc_type)
+    payload_data["title_object"] = _normalize_segment("title_object", payload.title_object)
+
+    _validate_category_weight_limit(
+        db,
+        project_code=payload.project_code,
+        category=payload.category,
+        candidate_weight=payload.doc_weight,
+    )
+
+    provided_doc_number = payload_data.get("doc_number")
+    if provided_doc_number:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="doc_number is generated automatically and must not be provided",
+        )
+
+    mask_kind = _mask_kind(payload_data["category"], payload_data["doc_type"])
+    serial = (
+        "00000"
+        if mask_kind == "PD"
+        else _next_sequence_number(
+            db,
+            project_code=_normalize_segment("project_code", payload.project_code),
+            category=payload_data["category"],
+            discipline_code=payload_data["discipline_code"],
+            doc_type=payload_data["doc_type"],
+        )
+    )
+    payload_data["serial_number"] = serial
+    payload_data["doc_number"] = _build_doc_number(
+        project_code=payload.project_code,
+        originator_code=payload_data["originator_code"],
+        category=payload_data["category"],
+        title_object=payload_data["title_object"],
+        discipline_code=payload_data["discipline_code"],
+        doc_type=payload_data["doc_type"],
+        serial_number=serial,
+    )
+    _ensure_unique_doc_number(db, payload_data["doc_number"])
+
+    payload_data.pop("pd_book", None)
+    mdr = MDRRecord(**payload_data)
+    db.add(mdr)
+    db.commit()
+    db.refresh(mdr)
+    return mdr
 
 
 @router.post("/doc-number-preview", response_model=MDRDocNumberPreviewResponse)
@@ -340,75 +434,166 @@ def create_mdr(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_mdr_write_access(db, current_user, payload.project_code)
-    project = db.query(Project).filter(Project.code == payload.project_code).first()
-    if project is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown project_code")
+    return _create_mdr_record(db, current_user=current_user, payload=payload)
 
-    exists = db.query(MDRRecord).filter(MDRRecord.document_key == payload.document_key).first()
-    if exists:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="document_key already exists")
 
-    _ensure_mdr_reference_codes(
-        db,
-        project=project,
-        category=payload.category,
-        discipline_code=payload.discipline_code,
-        doc_type=payload.doc_type,
-        title_object=payload.title_object,
+@router.post("/bulk", response_model=list[MDRRead], status_code=status.HTTP_201_CREATED)
+def create_mdr_bulk(
+    payload: MDRBulkCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    created: list[MDRRecord] = []
+    for row in payload.rows:
+        item = MDRCreate(
+            document_key=row.document_key,
+            project_code=payload.project_code,
+            category=payload.category,
+            title_object=row.title_object,
+            discipline_code=row.discipline_code,
+            doc_type=row.doc_type,
+            doc_name=row.doc_name,
+            progress_percent=row.progress_percent,
+            doc_weight=row.doc_weight,
+            dates={},
+            status=row.status,
+            contractor_responsible_id=row.contractor_responsible_id,
+            owner_responsible_id=row.owner_responsible_id,
+            note=row.note,
+            is_confidential=row.is_confidential,
+        )
+        created.append(_create_mdr_record(db, current_user=current_user, payload=item))
+    return created
+
+
+@router.post("/bulk-create", response_model=list[MDRRead], status_code=status.HTTP_201_CREATED)
+def create_mdr_bulk_legacy(
+    payload: MDRBulkCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    created: list[MDRRecord] = []
+    for item in payload.items:
+        created.append(_create_mdr_record(db, current_user=current_user, payload=item))
+    return created
+
+
+@router.get("/import-template")
+def download_mdr_import_template(
+    _: User = Depends(get_current_user),
+):
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "MDR_IMPORT"
+    headers = [
+        "document_key",
+        "title_object",
+        "discipline_code",
+        "doc_type",
+        "doc_name",
+        "doc_weight",
+        "progress_percent",
+        "status",
+        "note",
+        "is_confidential",
+        "contractor_responsible_id",
+        "owner_responsible_id",
+    ]
+    sheet.append(headers)
+    sheet.append(["DOC-001", "1100000", "SE", "IGD", "Survey report", 1.0, 0.0, "DRAFT", "", False, "", ""])
+
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    buffer.seek(0)
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="mdr_import_template.xlsx"'},
     )
 
-    payload_data = payload.model_dump()
-    payload_data["originator_code"] = _resolve_originator_code(db, current_user, payload.originator_code)
-    payload_data["category"] = _normalize_category(payload.category)
-    payload_data["discipline_code"] = _normalize_segment("discipline_code", payload.discipline_code)
-    payload_data["doc_type"] = _normalize_segment("doc_type", payload.doc_type)
-    payload_data["title_object"] = _normalize_segment("title_object", payload.title_object)
 
-    _validate_category_weight_limit(
-        db,
-        project_code=payload.project_code,
-        category=payload.category,
-        candidate_weight=payload.doc_weight,
-    )
+@router.post("/import-xlsx", response_model=MDRBulkImportResponse)
+def import_mdr_xlsx(
+    project_code: str = Form(...),
+    category: str = Form(...),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not file.filename or not file.filename.lower().endswith(".xlsx"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only .xlsx files are supported")
 
-    provided_doc_number = payload_data.get("doc_number")
-    if provided_doc_number:
+    raw_bytes = file.file.read()
+    workbook = load_workbook(io.BytesIO(raw_bytes), data_only=True)
+    sheet = workbook.active
+
+    header_cells = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
+    if not header_cells:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Template header row is missing")
+    headers = [str(item).strip() if item is not None else "" for item in header_cells]
+    header_index = {name: idx for idx, name in enumerate(headers)}
+    required_headers = ["document_key", "title_object", "discipline_code", "doc_type", "doc_name"]
+    missing_headers = [name for name in required_headers if name not in header_index]
+    if missing_headers:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="doc_number is generated automatically and must not be provided",
+            detail=f"Missing required columns: {', '.join(missing_headers)}",
         )
 
-    mask_kind = _mask_kind(payload_data["category"], payload_data["doc_type"])
-    serial = (
-        "00000"
-        if mask_kind == "PD"
-        else _next_sequence_number(
-            db,
-            project_code=_normalize_segment("project_code", payload.project_code),
-            category=payload_data["category"],
-            discipline_code=payload_data["discipline_code"],
-            doc_type=payload_data["doc_type"],
-        )
-    )
-    payload_data["serial_number"] = serial
-    payload_data["doc_number"] = _build_doc_number(
-        project_code=payload.project_code,
-        originator_code=payload_data["originator_code"],
-        category=payload_data["category"],
-        title_object=payload_data["title_object"],
-        discipline_code=payload_data["discipline_code"],
-        doc_type=payload_data["doc_type"],
-        serial_number=serial,
-    )
-    _ensure_unique_doc_number(db, payload_data["doc_number"])
+    created_ids: list[int] = []
+    errors: list[MDRImportError] = []
 
-    payload_data.pop("pd_book", None)
-    mdr = MDRRecord(**payload_data)
-    db.add(mdr)
-    db.commit()
-    db.refresh(mdr)
-    return mdr
+    for excel_row_idx, values in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
+        if values is None:
+            continue
+        if all(value in (None, "") for value in values):
+            continue
+        try:
+            def _cell(name: str) -> str:
+                idx = header_index[name]
+                cell = values[idx] if idx < len(values) else None
+                return "" if cell is None else str(cell).strip()
+
+            doc_weight_raw = _cell("doc_weight") if "doc_weight" in header_index else "0"
+            progress_raw = _cell("progress_percent") if "progress_percent" in header_index else "0"
+            status_raw = _cell("status") if "status" in header_index else "DRAFT"
+            note_raw = _cell("note") if "note" in header_index else ""
+            confidential_raw = _cell("is_confidential") if "is_confidential" in header_index else "false"
+            contractor_raw = _cell("contractor_responsible_id") if "contractor_responsible_id" in header_index else ""
+            owner_raw = _cell("owner_responsible_id") if "owner_responsible_id" in header_index else ""
+
+            payload = MDRCreate(
+                document_key=_cell("document_key"),
+                project_code=project_code,
+                category=category,
+                title_object=_cell("title_object"),
+                discipline_code=_cell("discipline_code"),
+                doc_type=_cell("doc_type"),
+                doc_name=_cell("doc_name"),
+                doc_weight=float(doc_weight_raw or 0),
+                progress_percent=float(progress_raw or 0),
+                status=status_raw or "DRAFT",
+                note=note_raw or None,
+                is_confidential=_parse_bool_like(confidential_raw),
+                contractor_responsible_id=int(contractor_raw) if contractor_raw else None,
+                owner_responsible_id=int(owner_raw) if owner_raw else None,
+                dates={},
+            )
+            created = _create_mdr_record(db, current_user=current_user, payload=payload)
+            created_ids.append(created.id)
+        except HTTPException as exc:
+            db.rollback()
+            errors.append(MDRImportError(row=excel_row_idx, error=str(exc.detail)))
+        except Exception as exc:  # noqa: BLE001
+            db.rollback()
+            errors.append(MDRImportError(row=excel_row_idx, error=str(exc)))
+
+    return MDRBulkImportResponse(
+        created_count=len(created_ids),
+        failed_count=len(errors),
+        created_ids=created_ids,
+        errors=errors,
+    )
 
 
 @router.put("/{mdr_id}", response_model=MDRRead)

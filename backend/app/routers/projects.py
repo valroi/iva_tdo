@@ -319,7 +319,7 @@ def _can_manage_members(db: Session, project_id: int, user: User) -> bool:
 
 
 def _can_manage_references(user: User) -> bool:
-    return is_main_admin(user)
+    return user.role.value == "admin"
 
 
 @router.get("", response_model=list[ProjectRead])
@@ -345,8 +345,8 @@ def create_project(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not is_main_admin(current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Main admin required")
+    if current_user.role.value != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
 
     project_code = _normalize_project_code(payload.code)
     existing = db.query(Project).filter(Project.code == project_code).first()
@@ -366,7 +366,7 @@ def create_project(
         ProjectMember(
             project_id=project.id,
             user_id=current_user.id,
-            member_role=ProjectMemberRole.main_admin,
+            member_role=ProjectMemberRole.main_admin if is_main_admin(current_user) else ProjectMemberRole.participant,
             can_manage_contractor_users=True,
         )
     )
@@ -394,10 +394,12 @@ def update_project(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not is_main_admin(current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Main admin required")
+    if current_user.role.value != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
 
     project = _get_project_or_404(db, project_id)
+    if not is_main_admin(current_user) and project.created_by_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only creator or main admin can edit project")
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(project, field, value)
 
@@ -413,10 +415,15 @@ def delete_project(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not is_main_admin(current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Main admin required")
+    if current_user.role.value != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
 
     project = _get_project_or_404(db, project_id)
+    if not is_main_admin(current_user) and project.created_by_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only creator or main admin can delete project",
+        )
 
     mdr_exists = db.query(MDRRecord.id).filter(MDRRecord.project_code == project.code).first()
     if mdr_exists is not None:
@@ -537,7 +544,7 @@ def create_project_reference(
     current_user: User = Depends(get_current_user),
 ):
     if not _can_manage_references(current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Main admin required")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
 
     _get_project_or_404(db, project_id)
 
@@ -568,7 +575,7 @@ def update_project_reference(
     current_user: User = Depends(get_current_user),
 ):
     if not _can_manage_references(current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Main admin required")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
 
     item = db.query(ProjectReference).filter(ProjectReference.id == reference_id).first()
     if item is None:

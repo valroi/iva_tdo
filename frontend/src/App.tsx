@@ -1,5 +1,7 @@
 import {
+  ApartmentOutlined,
   BellOutlined,
+  CheckSquareOutlined,
   DatabaseOutlined,
   FileOutlined,
   HomeOutlined,
@@ -26,14 +28,25 @@ import DashboardPage from "./pages/DashboardPage";
 import DocumentsPage from "./pages/DocumentsPage";
 import HelpPage from "./pages/HelpPage";
 import MdrPage from "./pages/MdrPage";
+import MyTasksPage from "./pages/MyTasksPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import AdminPage from "./pages/AdminPage";
 import ProjectsPage from "./pages/ProjectsPage";
+import RegistryTreePage from "./pages/RegistryTreePage";
 import type { DocumentItem, MDRRecord, NotificationItem, ProjectItem, User, WorkflowStatus } from "./types";
 
 const { Header, Sider, Content } = Layout;
 
-type Section = "dashboard" | "projects" | "mdr" | "documents" | "notifications" | "admin" | "help";
+type Section =
+  | "dashboard"
+  | "projects"
+  | "registry_tree"
+  | "mdr"
+  | "documents"
+  | "tasks"
+  | "notifications"
+  | "admin"
+  | "help";
 
 export default function App(): JSX.Element {
   const [authenticated, setAuthenticated] = useState(hasAccessToken());
@@ -85,8 +98,10 @@ export default function App(): JSX.Element {
     const items = [
       { key: "dashboard", icon: <HomeOutlined />, label: "Обзор" },
       { key: "projects", icon: <ProjectOutlined />, label: "Проекты" },
+      { key: "registry_tree", icon: <ApartmentOutlined />, label: "Иерархия реестра" },
       { key: "mdr", icon: <DatabaseOutlined />, label: "Реестр MDR" },
       { key: "documents", icon: <FileOutlined />, label: "Документы" },
+      { key: "tasks", icon: <CheckSquareOutlined />, label: "Мои задачи" },
       { key: "notifications", icon: <BellOutlined />, label: "Уведомления" },
       { key: "help", icon: <ReadOutlined />, label: "Инструкция" },
     ];
@@ -101,8 +116,10 @@ export default function App(): JSX.Element {
   const sectionTitleMap: Record<Section, string> = {
     dashboard: "Обзор",
     projects: "Проекты",
+    registry_tree: "Иерархия реестра",
     mdr: "Реестр MDR",
     documents: "Документы",
+    tasks: "Мои задачи",
     notifications: "Уведомления",
     admin: "Администрирование",
     help: "Инструкция",
@@ -183,6 +200,15 @@ export default function App(): JSX.Element {
                   }}
                 />
               )}
+              {activeSection === "registry_tree" && user && (
+                <RegistryTreePage
+                  currentUser={user}
+                  projects={projects}
+                  mdr={mdr}
+                  documents={documents}
+                  onReloadAll={loadInitialData}
+                />
+              )}
               {activeSection === "mdr" && (
                 <MdrPage
                   mdr={mdr}
@@ -194,6 +220,9 @@ export default function App(): JSX.Element {
               )}
               {activeSection === "documents" && (
                 <DocumentsPage documents={documents} mdr={mdr} onReloadDocuments={loadInitialData} />
+              )}
+              {activeSection === "tasks" && user && (
+                <MyTasksPage currentUser={user} notifications={notifications} documents={documents} mdr={mdr} />
               )}
               {activeSection === "notifications" && (
                 <NotificationsPage notifications={notifications} onReload={loadInitialData} />

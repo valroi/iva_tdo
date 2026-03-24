@@ -60,12 +60,6 @@ class UserRead(UserBase):
     model_config = ConfigDict(from_attributes=True)
 
 
-class UserPermissionUpdate(BaseModel):
-    originator_code: str | None = None
-    can_manage_mdr: bool | None = None
-    can_manage_project_members: bool | None = None
-
-
 class ProjectCreate(BaseModel):
     code: str
     name: str
@@ -182,6 +176,27 @@ class MDRUpdate(BaseModel):
     is_confidential: bool | None = None
 
 
+class MDRBulkRow(BaseModel):
+    document_key: str
+    title_object: str
+    discipline_code: str
+    doc_type: str
+    doc_name: str
+    doc_weight: float = 0
+    progress_percent: float = 0
+    status: str = "DRAFT"
+    note: str | None = None
+    is_confidential: bool = False
+    contractor_responsible_id: int | None = None
+    owner_responsible_id: int | None = None
+
+
+class MDRBulkCreate(BaseModel):
+    project_code: str
+    category: str
+    rows: list[MDRBulkRow] = Field(min_length=1, max_length=1000)
+
+
 class MDRRead(MDRBase):
     id: int
     created_at: datetime
@@ -201,6 +216,22 @@ class MDRDocNumberPreviewRequest(BaseModel):
 
 class MDRDocNumberPreviewResponse(BaseModel):
     doc_number: str
+
+
+class MDRBulkCreateRequest(BaseModel):
+    items: list[MDRCreate] = Field(min_length=1, max_length=1000)
+
+
+class MDRImportError(BaseModel):
+    row: int
+    error: str
+
+
+class MDRBulkImportResponse(BaseModel):
+    created_count: int
+    failed_count: int
+    created_ids: list[int]
+    errors: list[MDRImportError]
 
 
 class DocumentCreate(BaseModel):

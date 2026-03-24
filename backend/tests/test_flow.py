@@ -70,6 +70,32 @@ def test_main_flow_and_user_governance():
         assert secondary_login.status_code == 200, secondary_login.text
         secondary_access = secondary_login.json()["access_token"]
 
+        secondary_permissions = client.get(
+            "/api/v1/auth/me",
+            headers=_auth_header(secondary_access),
+        )
+        assert secondary_permissions.status_code == 200, secondary_permissions.text
+        assert secondary_permissions.json()["can_manage_mdr"] is True
+        assert secondary_permissions.json()["can_manage_project_members"] is True
+
+        secondary_project = client.post(
+            "/api/v1/projects",
+            json={
+                "code": "IVB",
+                "name": "Проект IVB",
+                "description": "Создан вторым админом",
+            },
+            headers=_auth_header(secondary_access),
+        )
+        assert secondary_project.status_code == 201, secondary_project.text
+
+        secondary_project_refs = client.get(
+            f"/api/v1/projects/{secondary_project.json()['id']}/references",
+            headers=_auth_header(secondary_access),
+        )
+        assert secondary_project_refs.status_code == 200, secondary_project_refs.text
+        assert len(secondary_project_refs.json()) >= 1
+
         # Secondary admin can create regular users.
         contractor = client.post(
             "/api/v1/users",
@@ -201,6 +227,34 @@ def test_main_flow_and_user_governance():
         assert mdr.status_code == 201, mdr.text
         mdr_id = mdr.json()["id"]
         assert mdr.json()["doc_number"].startswith("IVA-CTR-SE-1100000-SE-IGD-")
+
+        bulk_mdr = client.post(
+            "/api/v1/mdr/bulk",
+            json={
+                "project_code": "IVA",
+                "category": "SE",
+                "rows": [
+                    {
+                        "document_key": "DOC-002",
+                        "title_object": "1100000",
+                        "discipline_code": "SE",
+                        "doc_type": "IGD",
+                        "doc_name": "Bulk survey report",
+                        "doc_weight": 1.1,
+                    }
+                ],
+            },
+            headers=_auth_header(contractor_access),
+        )
+        assert bulk_mdr.status_code == 201, bulk_mdr.text
+        assert len(bulk_mdr.json()) == 1
+
+        template_download = client.get(
+            "/api/v1/mdr/import-template",
+            headers=_auth_header(contractor_access),
+        )
+        assert template_download.status_code == 200, template_download.text
+        assert template_download.content[:2] == b"PK"
 
         delete_project_with_mdr = client.delete(
             f"/api/v1/projects/{project_id}",

@@ -37,7 +37,38 @@ export interface MDRRecord {
   progress_percent: number;
   review_code: "AP" | "AN" | "CO" | "RJ" | null;
   status: string;
+  contractor_responsible_id?: number | null;
+  owner_responsible_id?: number | null;
+  note?: string | null;
+  is_confidential?: boolean;
   created_at: string;
+}
+
+export interface MDRBulkRow {
+  document_key: string;
+  title_object: string;
+  discipline_code: string;
+  doc_type: string;
+  doc_name: string;
+  doc_weight?: number;
+  progress_percent?: number;
+  status?: string;
+  note?: string;
+  is_confidential?: boolean;
+  contractor_responsible_id?: number | null;
+  owner_responsible_id?: number | null;
+}
+
+export interface MDRImportError {
+  row: number;
+  error: string;
+}
+
+export interface MDRBulkImportResponse {
+  created_count: number;
+  failed_count: number;
+  created_ids: number[];
+  errors: MDRImportError[];
 }
 
 export interface DocumentItem {

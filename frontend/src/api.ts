@@ -2,6 +2,7 @@ import type {
   CommentItem,
   CompanyType,
   DocumentItem,
+  MDRBulkImportResponse,
   MDRRecord,
   NotificationItem,
   ProjectItem,
@@ -105,6 +106,64 @@ export function createMdr(payload: Record<string, unknown>): Promise<MDRRecord> 
   return request<MDRRecord>("/mdr", {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export function createMdrBulk(payload: {
+  project_code: string;
+  category: string;
+  rows: Array<{
+    document_key: string;
+    title_object: string;
+    discipline_code: string;
+    doc_type: string;
+    doc_name: string;
+    doc_weight?: number;
+    progress_percent?: number;
+    status?: string;
+    note?: string | null;
+    is_confidential?: boolean;
+    contractor_responsible_id?: number | null;
+    owner_responsible_id?: number | null;
+  }>;
+}): Promise<MDRRecord[]> {
+  return request<MDRRecord[]>("/mdr/bulk", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function downloadMdrImportTemplate(): Promise<void> {
+  const token = getAccessToken();
+  const headers = new Headers();
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  const response = await fetch(`${PREFIX}/mdr/import-template`, { method: "GET", headers });
+  if (!response.ok) {
+    throw new Error("Не удалось скачать шаблон");
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "mdr_import_template.xlsx";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export function importMdrFromXlsx(
+  projectCode: string,
+  category: string,
+  file: File,
+): Promise<MDRBulkImportResponse> {
+  const body = new FormData();
+  body.append("project_code", projectCode);
+  body.append("category", category);
+  body.append("file", file);
+  return request<MDRBulkImportResponse>("/mdr/import-xlsx", {
+    method: "POST",
+    body,
   });
 }
 

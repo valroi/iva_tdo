@@ -59,6 +59,8 @@ def require_main_admin(user: User = Depends(require_user_manager)) -> User:
 
 
 def has_project_member_management_rights(user: User, permission: UserPermission | None) -> bool:
+    if user.role == UserRole.admin:
+        return True
     if is_main_admin(user):
         return True
     if permission is None:
@@ -67,6 +69,8 @@ def has_project_member_management_rights(user: User, permission: UserPermission 
 
 
 def has_mdr_management_rights(user: User, permission: UserPermission | None) -> bool:
+    if user.role == UserRole.admin:
+        return True
     if is_main_admin(user):
         return True
     if permission is None:
