@@ -683,4 +683,6 @@ def reset_demo_data(
         deleted_revisions=deleted_revisions,
         deleted_comments=deleted_comments,
         deleted_notifications=deleted_notifications,
+        deleted_registration_requests=0,
+        deleted_users=0,
     )
