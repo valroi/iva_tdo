@@ -95,6 +95,21 @@ export function createMdr(payload: Record<string, unknown>): Promise<MDRRecord> 
   });
 }
 
+export function previewMdrDocNumber(payload: {
+  project_code: string;
+  originator_code: string;
+  category: string;
+  title_object: string;
+  discipline_code: string;
+  doc_type: string;
+  serial_number: string;
+}): Promise<{ doc_number: string }> {
+  return request<{ doc_number: string }>("/mdr/doc-number-preview", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function listDocuments(): Promise<DocumentItem[]> {
   return request<DocumentItem[]>("/documents");
 }

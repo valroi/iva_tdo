@@ -1,9 +1,9 @@
-import { Button, Form, Input, Modal, Select, Space, Table, Tag, Typography } from "antd";
+import { Button, Form, Input, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { createMdr } from "../api";
-import type { MDRRecord, ProjectItem } from "../types";
+import { createMdr, listProjectReferences, previewMdrDocNumber } from "../api";
+import type { MDRRecord, ProjectItem, ProjectReference } from "../types";
 
 interface Props {
   mdr: MDRRecord[];
@@ -14,7 +14,53 @@ interface Props {
 export default function MdrPage({ mdr, projects, onCreated }: Props): JSX.Element {
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [references, setReferences] = useState<ProjectReference[]>([]);
+  const [loadingReferences, setLoadingReferences] = useState(false);
+  const [previewingDocNumber, setPreviewingDocNumber] = useState(false);
   const [form] = Form.useForm();
+  const selectedProjectCode = Form.useWatch("project_code", form);
+
+  useEffect(() => {
+    if (!open || !selectedProjectCode) {
+      setReferences([]);
+      return;
+    }
+    const project = projects.find((item) => item.code === selectedProjectCode);
+    if (!project) {
+      setReferences([]);
+      return;
+    }
+    setLoadingReferences(true);
+    void listProjectReferences(project.id)
+      .then(setReferences)
+      .catch((error: unknown) => {
+        const text = error instanceof Error ? error.message : "Не удалось загрузить справочники проекта";
+        message.error(text);
+      })
+      .finally(() => setLoadingReferences(false));
+  }, [open, projects, selectedProjectCode]);
+
+  const categoryOptions = useMemo(
+    () =>
+      references
+        .filter((ref) => ref.ref_type === "document_category" && ref.is_active)
+        .map((ref) => ({ value: ref.code, label: `${ref.code} — ${ref.value}` })),
+    [references],
+  );
+  const disciplineOptions = useMemo(
+    () =>
+      references
+        .filter((ref) => ref.ref_type === "discipline" && ref.is_active)
+        .map((ref) => ({ value: ref.code, label: `${ref.code} — ${ref.value}` })),
+    [references],
+  );
+  const docTypeOptions = useMemo(
+    () =>
+      references
+        .filter((ref) => ref.ref_type === "document_type" && ref.is_active)
+        .map((ref) => ({ value: ref.code, label: `${ref.code} — ${ref.value}` })),
+    [references],
+  );
 
   const columns: ColumnsType<MDRRecord> = [
     { title: "Шифр", dataIndex: "doc_number", key: "doc_number" },
@@ -47,6 +93,28 @@ export default function MdrPage({ mdr, projects, onCreated }: Props): JSX.Elemen
       await onCreated();
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const generateDocNumber = async () => {
+    const values = await form.validateFields([
+      "project_code",
+      "originator_code",
+      "category",
+      "title_object",
+      "discipline_code",
+      "doc_type",
+      "serial_number",
+    ]);
+    setPreviewingDocNumber(true);
+    try {
+      const resp = await previewMdrDocNumber(values);
+      form.setFieldValue("doc_number", resp.doc_number);
+    } catch (error: unknown) {
+      const text = error instanceof Error ? error.message : "Ошибка генерации шифра";
+      message.error(text);
+    } finally {
+      setPreviewingDocNumber(false);
     }
   };
 
@@ -87,23 +155,44 @@ export default function MdrPage({ mdr, projects, onCreated }: Props): JSX.Elemen
             <Input placeholder="CTR" />
           </Form.Item>
           <Form.Item name="category" label="Категория" rules={[{ required: true }]}>
-            <Input placeholder="PIPING" />
+            <Select
+              showSearch
+              optionFilterProp="label"
+              loading={loadingReferences}
+              options={categoryOptions}
+              placeholder="Выберите категорию"
+            />
           </Form.Item>
           <Form.Item name="title_object" label="Титульный объект" rules={[{ required: true }]}>
             <Input placeholder="Unit-1" />
           </Form.Item>
           <Form.Item name="discipline_code" label="Дисциплина" rules={[{ required: true }]}>
-            <Input placeholder="PD" />
+            <Select
+              showSearch
+              optionFilterProp="label"
+              loading={loadingReferences}
+              options={disciplineOptions}
+              placeholder="Выберите дисциплину"
+            />
           </Form.Item>
           <Form.Item name="doc_type" label="Тип документа" rules={[{ required: true }]}>
-            <Input placeholder="DRAWING" />
+            <Select
+              showSearch
+              optionFilterProp="label"
+              loading={loadingReferences}
+              options={docTypeOptions}
+              placeholder="Выберите тип документа"
+            />
           </Form.Item>
           <Form.Item name="serial_number" label="Порядковый номер" rules={[{ required: true }]}>
             <Input placeholder="0001" />
           </Form.Item>
           <Form.Item name="doc_number" label="Шифр документа" rules={[{ required: true }]}>
-            <Input placeholder="IVA-PD-0001" />
+            <Input placeholder="Будет сгенерирован автоматически" />
           </Form.Item>
+          <Button onClick={() => void generateDocNumber()} loading={previewingDocNumber}>
+            Сгенерировать шифр
+          </Button>
           <Form.Item name="doc_name" label="Наименование" rules={[{ required: true }]}>
             <Input placeholder="Piping layout" />
           </Form.Item>

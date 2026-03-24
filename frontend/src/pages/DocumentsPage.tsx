@@ -50,6 +50,23 @@ export default function DocumentsPage({ documents, mdr, onReloadDocuments }: Pro
   const [uploadFile, setUploadFile] = useState<File | null>(null);
 
   const [docForm] = Form.useForm();
+  const selectedMdrId = Form.useWatch("mdr_id", docForm);
+  const selectedMdr = useMemo(
+    () => mdr.find((item) => item.id === selectedMdrId) ?? null,
+    [mdr, selectedMdrId],
+  );
+
+  useEffect(() => {
+    if (!selectedMdr) {
+      return;
+    }
+    docForm.setFieldsValue({
+      document_num: selectedMdr.doc_number,
+      discipline: selectedMdr.discipline_code,
+      title: selectedMdr.doc_name,
+    });
+  }, [docForm, selectedMdr]);
+
   const [revForm] = Form.useForm();
   const [commentForm] = Form.useForm();
   const [responseForm] = Form.useForm();

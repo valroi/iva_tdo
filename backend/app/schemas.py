@@ -146,7 +146,7 @@ class MDRBase(BaseModel):
 
 
 class MDRCreate(MDRBase):
-    pass
+    doc_number: str | None = None
 
 
 class MDRUpdate(BaseModel):
@@ -172,6 +172,20 @@ class MDRRead(MDRBase):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class MDRDocNumberPreviewRequest(BaseModel):
+    project_code: str
+    originator_code: str
+    category: str
+    title_object: str
+    discipline_code: str
+    doc_type: str
+    serial_number: str
+
+
+class MDRDocNumberPreviewResponse(BaseModel):
+    doc_number: str
 
 
 class DocumentCreate(BaseModel):
