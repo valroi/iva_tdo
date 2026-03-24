@@ -34,6 +34,7 @@ interface Props {
   currentUser: User;
   projects: ProjectItem[];
   onReload: () => Promise<void>;
+  onOpenMdr: (projectCode: string, category?: string) => void;
 }
 
 const projectMemberRoleOptions: { value: ProjectMemberRole; label: string }[] = [
@@ -42,7 +43,7 @@ const projectMemberRoleOptions: { value: ProjectMemberRole; label: string }[] = 
   { value: "observer", label: "observer" },
 ];
 
-export default function ProjectsPage({ currentUser, projects, onReload }: Props): JSX.Element {
+export default function ProjectsPage({ currentUser, projects, onReload, onOpenMdr }: Props): JSX.Element {
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(projects[0]?.id ?? null);
   const [members, setMembers] = useState<ProjectMember[]>([]);
   const [references, setReferences] = useState<ProjectReference[]>([]);
@@ -60,6 +61,7 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
   const [referenceEditOpen, setReferenceEditOpen] = useState(false);
   const [referenceEditForm] = Form.useForm();
   const [selectedReference, setSelectedReference] = useState<ProjectReference | null>(null);
+  const [selectedCategoryCode, setSelectedCategoryCode] = useState<string>();
 
   useEffect(() => {
     if (!selectedProjectId && projects.length > 0) {
@@ -109,25 +111,37 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
       key: "action",
       render: (_, row) => (
         <Space>
-          <Button size="small" onClick={() => setSelectedProjectId(row.id)}>
+          <Button
+            size="small"
+            onClick={() => {
+              setSelectedProjectId(row.id);
+              setSelectedCategoryCode(undefined);
+            }}
+          >
             Выбрать
           </Button>
           <Popconfirm
             title="Удалить проект?"
             description="Проект удалится только если в нем нет MDR"
             onConfirm={async () => {
-              await deleteProject(row.id);
-              message.success("Проект удален");
-              if (selectedProjectId === row.id) {
-                setSelectedProjectId(null);
-                setMembers([]);
-                setReferences([]);
+              try {
+                await deleteProject(row.id);
+                message.success("Проект удален");
+                if (selectedProjectId === row.id) {
+                  setSelectedProjectId(null);
+                  setSelectedCategoryCode(undefined);
+                  setMembers([]);
+                  setReferences([]);
+                }
+                await onReload();
+              } catch (error: unknown) {
+                const text = error instanceof Error ? error.message : "Не удалось удалить проект";
+                message.error(text);
               }
-              await onReload();
             }}
-            disabled={!canManageProjects}
+            disabled={!canDeleteProjects}
           >
-            <Button size="small" danger disabled={!canManageProjects}>
+            <Button size="small" danger disabled={!canDeleteProjects}>
               Удалить
             </Button>
           </Popconfirm>
@@ -208,7 +222,11 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
     },
   ];
 
+  const isMainAdmin = currentUser.email.toLowerCase() === "admin@ivamaris.io";
   const canManageProjects = currentUser.role === "admin" && Boolean(currentUser.can_manage_project_members);
+  const canDeleteProjects = isMainAdmin;
+  const selectedProject = projects.find((item) => item.id === selectedProjectId) ?? null;
+  const categoryRefs = references.filter((ref) => ref.ref_type === "document_category" && ref.is_active);
 
   return (
     <>
@@ -231,6 +249,40 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
       </Card>
 
       <Card title={`Карточка проекта / Project card: ${selectedProjectId ?? "—"}`}>
+        <Card
+          size="small"
+          style={{ marginBottom: 16 }}
+          title="Переход в MDR / Go to MDR"
+          extra={
+            <Typography.Text type="secondary">
+              Шаги: Проект → Категория → MDR
+            </Typography.Text>
+          }
+        >
+          <Space wrap>
+            <Typography.Text>
+              Проект: <strong>{selectedProject ? `${selectedProject.code} — ${selectedProject.name}` : "не выбран"}</strong>
+            </Typography.Text>
+            <Select
+              style={{ minWidth: 240 }}
+              placeholder="Категория / Category"
+              value={selectedCategoryCode}
+              onChange={setSelectedCategoryCode}
+              disabled={!selectedProject}
+              options={categoryRefs.map((ref) => ({ value: ref.code, label: `${ref.code} — ${ref.value}` }))}
+            />
+            <Button
+              type="primary"
+              disabled={!selectedProject}
+              onClick={() => {
+                if (!selectedProject) return;
+                onOpenMdr(selectedProject.code, selectedCategoryCode);
+              }}
+            >
+              Перейти в MDR / Open MDR
+            </Button>
+          </Space>
+        </Card>
         <Tabs
           items={[
             {

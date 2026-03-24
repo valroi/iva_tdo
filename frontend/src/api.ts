@@ -61,6 +61,19 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   });
 
   if (!response.ok) {
+    const contentType = response.headers.get("content-type") ?? "";
+    if (contentType.includes("application/json")) {
+      let payload: { detail?: unknown } | null = null;
+      try {
+        payload = (await response.json()) as { detail?: unknown };
+      } catch {
+        payload = null;
+      }
+      if (typeof payload?.detail === "string" && payload.detail.trim().length > 0) {
+        throw new Error(payload.detail);
+      }
+      throw new Error("API request failed");
+    }
     const errorText = await response.text();
     throw new Error(errorText || "API request failed");
   }

@@ -39,6 +39,7 @@ export default function App(): JSX.Element {
   const [authenticated, setAuthenticated] = useState(hasAccessToken());
   const [loading, setLoading] = useState(false);
   const [activeSection, setActiveSection] = useState<Section>("dashboard");
+  const [mdrPrefill, setMdrPrefill] = useState<{ projectCode?: string; category?: string } | null>(null);
 
   const [user, setUser] = useState<User | null>(null);
   const [mdr, setMdr] = useState<MDRRecord[]>([]);
@@ -172,9 +173,25 @@ export default function App(): JSX.Element {
                 />
               )}
               {activeSection === "projects" && user && (
-                <ProjectsPage currentUser={user} projects={projects} onReload={loadInitialData} />
+                <ProjectsPage
+                  currentUser={user}
+                  projects={projects}
+                  onReload={loadInitialData}
+                  onOpenMdr={(projectCode, category) => {
+                    setMdrPrefill({ projectCode, category });
+                    setActiveSection("mdr");
+                  }}
+                />
               )}
-              {activeSection === "mdr" && <MdrPage mdr={mdr} projects={projects} onCreated={loadInitialData} />}
+              {activeSection === "mdr" && (
+                <MdrPage
+                  mdr={mdr}
+                  projects={projects}
+                  onCreated={loadInitialData}
+                  preselectedProjectCode={mdrPrefill?.projectCode}
+                  preselectedCategory={mdrPrefill?.category}
+                />
+              )}
               {activeSection === "documents" && (
                 <DocumentsPage documents={documents} mdr={mdr} onReloadDocuments={loadInitialData} />
               )}

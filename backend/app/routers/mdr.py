@@ -1,11 +1,12 @@
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import get_current_user, is_main_admin
-from app.models import MDRRecord, Project, ProjectMember, ProjectReference, User, UserPermission, UserRole
+from app.models import Document, MDRRecord, Project, ProjectMember, ProjectReference, User, UserPermission, UserRole
 from app.schemas import (
     MDRCreate,
     MDRDocNumberPreviewRequest,
@@ -493,5 +494,19 @@ def delete_mdr(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="MDR not found")
     _require_mdr_write_access(db, current_user, mdr.project_code)
 
+    has_documents = db.query(Document.id).filter(Document.mdr_id == mdr.id).first() is not None
+    if has_documents:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete MDR record with linked documents. Delete linked documents first.",
+        )
+
     db.delete(mdr)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete MDR record because linked data exists.",
+        ) from None

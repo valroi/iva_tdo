@@ -1,4 +1,4 @@
-import { Button, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography, message } from "antd";
+import { Alert, Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
 
@@ -9,9 +9,23 @@ interface Props {
   mdr: MDRRecord[];
   projects: ProjectItem[];
   onCreated: () => Promise<void>;
+  preselectedProjectCode?: string;
+  preselectedCategory?: string;
 }
 
-export default function MdrPage({ mdr, projects, onCreated }: Props): JSX.Element {
+function byRefType(references: ProjectReference[], refType: string): { value: string; label: string }[] {
+  return references
+    .filter((ref) => ref.ref_type === refType && ref.is_active)
+    .map((ref) => ({ value: ref.code, label: `${ref.code} — ${ref.value}` }));
+}
+
+export default function MdrPage({
+  mdr,
+  projects,
+  onCreated,
+  preselectedProjectCode,
+  preselectedCategory,
+}: Props): JSX.Element {
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [editingRow, setEditingRow] = useState<MDRRecord | null>(null);
@@ -19,19 +33,29 @@ export default function MdrPage({ mdr, projects, onCreated }: Props): JSX.Elemen
   const [references, setReferences] = useState<ProjectReference[]>([]);
   const [loadingReferences, setLoadingReferences] = useState(false);
   const [previewingDocNumber, setPreviewingDocNumber] = useState(false);
+  const [selectedProjectCode, setSelectedProjectCode] = useState<string | undefined>(preselectedProjectCode);
+  const [selectedCategory, setSelectedCategory] = useState<string | undefined>(preselectedCategory);
   const [form] = Form.useForm();
   const [editForm] = Form.useForm();
-  const selectedProjectCode = Form.useWatch("project_code", form);
-  const editProjectCode = Form.useWatch("project_code", editForm);
 
-  const selectedCodeForRefs = open ? selectedProjectCode : editOpen ? editProjectCode : undefined;
+  const createCategory = Form.useWatch("category", form);
+  const editCategory = Form.useWatch("category", editForm);
+  const activeCategory = open ? createCategory : editOpen ? editCategory : selectedCategory;
 
   useEffect(() => {
-    if ((!open && !editOpen) || !selectedCodeForRefs) {
+    setSelectedProjectCode(preselectedProjectCode);
+  }, [preselectedProjectCode]);
+
+  useEffect(() => {
+    setSelectedCategory(preselectedCategory);
+  }, [preselectedCategory]);
+
+  useEffect(() => {
+    if (!selectedProjectCode) {
       setReferences([]);
       return;
     }
-    const project = projects.find((item) => item.code === selectedCodeForRefs);
+    const project = projects.find((item) => item.code === selectedProjectCode);
     if (!project) {
       setReferences([]);
       return;
@@ -44,29 +68,37 @@ export default function MdrPage({ mdr, projects, onCreated }: Props): JSX.Elemen
         message.error(text);
       })
       .finally(() => setLoadingReferences(false));
-  }, [editOpen, open, projects, selectedCodeForRefs]);
+  }, [projects, selectedProjectCode]);
 
-  const categoryOptions = useMemo(
+  const selectedProject = projects.find((project) => project.code === selectedProjectCode);
+  const categoryOptions = useMemo(() => byRefType(references, "document_category"), [references]);
+  const disciplineOptions = useMemo(() => byRefType(references, "discipline"), [references]);
+  const facilityOptions = useMemo(() => byRefType(references, "facility_title"), [references]);
+
+  const docTypeOptions = useMemo(() => {
+    if (activeCategory === "SE") {
+      return byRefType(references, "se_reporting_type");
+    }
+    if (activeCategory === "PD") {
+      return byRefType(references, "pd_book");
+    }
+    return byRefType(references, "document_type");
+  }, [activeCategory, references]);
+
+  const filteredMdr = useMemo(
     () =>
-      references
-        .filter((ref) => ref.ref_type === "document_category" && ref.is_active)
-        .map((ref) => ({ value: ref.code, label: `${ref.code} — ${ref.value}` })),
-    [references],
+      mdr.filter((row) => {
+        if (selectedProjectCode && row.project_code !== selectedProjectCode) {
+          return false;
+        }
+        if (selectedCategory && row.category !== selectedCategory) {
+          return false;
+        }
+        return true;
+      }),
+    [mdr, selectedCategory, selectedProjectCode],
   );
-  const disciplineOptions = useMemo(
-    () =>
-      references
-        .filter((ref) => ref.ref_type === "discipline" && ref.is_active)
-        .map((ref) => ({ value: ref.code, label: `${ref.code} — ${ref.value}` })),
-    [references],
-  );
-  const docTypeOptions = useMemo(
-    () =>
-      references
-        .filter((ref) => ref.ref_type === "document_type" && ref.is_active)
-        .map((ref) => ({ value: ref.code, label: `${ref.code} — ${ref.value}` })),
-    [references],
-  );
+  const canAddMdr = Boolean(selectedProjectCode && selectedCategory);
 
   const columns: ColumnsType<MDRRecord> = [
     { title: "Шифр", dataIndex: "doc_number", key: "doc_number" },
@@ -90,6 +122,8 @@ export default function MdrPage({ mdr, projects, onCreated }: Props): JSX.Elemen
             size="small"
             onClick={() => {
               setEditingRow(row);
+              setSelectedProjectCode(row.project_code);
+              setSelectedCategory(row.category);
               editForm.setFieldsValue({
                 project_code: row.project_code,
                 category: row.category,
@@ -108,9 +142,14 @@ export default function MdrPage({ mdr, projects, onCreated }: Props): JSX.Elemen
             title="Удалить запись MDR?"
             description="Удаление необратимо"
             onConfirm={async () => {
-              await deleteMdr(row.id);
-              message.success("Запись MDR удалена");
-              await onCreated();
+              try {
+                await deleteMdr(row.id);
+                message.success("Запись MDR удалена");
+                await onCreated();
+              } catch (error: unknown) {
+                const text = error instanceof Error ? error.message : "Не удалось удалить запись MDR";
+                message.error(text);
+              }
             }}
           >
             <Button danger size="small">
@@ -168,11 +207,63 @@ export default function MdrPage({ mdr, projects, onCreated }: Props): JSX.Elemen
         <Typography.Title level={4} style={{ margin: 0 }}>
           Реестр MDR
         </Typography.Title>
-        <Button type="primary" onClick={() => setOpen(true)}>
+        <Button
+          type="primary"
+          disabled={!canAddMdr}
+          onClick={() => {
+            form.setFieldsValue({
+              project_code: selectedProjectCode,
+              category: selectedCategory,
+            });
+            setOpen(true);
+          }}
+        >
           + Добавить MDR
         </Button>
       </Space>
-      <Table rowKey="id" columns={columns} dataSource={mdr} />
+
+      <Card style={{ marginBottom: 12 }}>
+        <Space wrap>
+          <Select
+            style={{ minWidth: 240 }}
+            placeholder="Проект / Project"
+            value={selectedProjectCode}
+            onChange={(value) => {
+              setSelectedProjectCode(value);
+              setSelectedCategory(undefined);
+            }}
+            options={projects.map((project) => ({
+              value: project.code,
+              label: `${project.code} — ${project.name}`,
+            }))}
+          />
+          <Select
+            style={{ minWidth: 240 }}
+            placeholder="Категория / Category"
+            value={selectedCategory}
+            onChange={setSelectedCategory}
+            disabled={!selectedProject}
+            loading={loadingReferences}
+            options={categoryOptions}
+          />
+          <Typography.Text type="secondary">
+            {selectedProjectCode && selectedCategory
+              ? `Показаны записи: ${filteredMdr.length}`
+              : "Выберите проект и категорию, затем добавляйте/удаляйте записи"}
+          </Typography.Text>
+        </Space>
+      </Card>
+
+      {!canAddMdr && (
+        <Alert
+          style={{ marginBottom: 12 }}
+          type="info"
+          showIcon
+          message="Сначала выберите проект и категорию / First choose project and category"
+        />
+      )}
+
+      <Table rowKey="id" columns={columns} dataSource={filteredMdr} />
 
       <Modal
         open={open}
@@ -193,6 +284,11 @@ export default function MdrPage({ mdr, projects, onCreated }: Props): JSX.Elemen
                 value: project.code,
                 label: `${project.code} — ${project.name}`,
               }))}
+              onChange={(value) => {
+                setSelectedProjectCode(value);
+                form.setFieldValue("category", undefined);
+                form.setFieldValue("doc_type", undefined);
+              }}
             />
           </Form.Item>
           <Form.Item name="category" label="Категория" rules={[{ required: true }]}>
@@ -202,6 +298,10 @@ export default function MdrPage({ mdr, projects, onCreated }: Props): JSX.Elemen
               loading={loadingReferences}
               options={categoryOptions}
               placeholder="Выберите категорию"
+              onChange={(value) => {
+                setSelectedCategory(value);
+                form.setFieldValue("doc_type", undefined);
+              }}
             />
           </Form.Item>
           <Form.Item name="title_object" label="Титульный объект" rules={[{ required: true }]}>
@@ -209,9 +309,7 @@ export default function MdrPage({ mdr, projects, onCreated }: Props): JSX.Elemen
               showSearch
               optionFilterProp="label"
               loading={loadingReferences}
-              options={references
-                .filter((ref) => ref.ref_type === "facility_title" && ref.is_active)
-                .map((ref) => ({ value: ref.code, label: `${ref.code} — ${ref.value}` }))}
+              options={facilityOptions}
               placeholder="Выберите титул"
             />
           </Form.Item>
@@ -269,6 +367,9 @@ export default function MdrPage({ mdr, projects, onCreated }: Props): JSX.Elemen
               optionFilterProp="label"
               loading={loadingReferences}
               options={categoryOptions}
+              onChange={() => {
+                editForm.setFieldValue("doc_type", undefined);
+              }}
             />
           </Form.Item>
           <Form.Item name="title_object" label="Титульный объект" rules={[{ required: true }]}>
@@ -276,9 +377,7 @@ export default function MdrPage({ mdr, projects, onCreated }: Props): JSX.Elemen
               showSearch
               optionFilterProp="label"
               loading={loadingReferences}
-              options={references
-                .filter((ref) => ref.ref_type === "facility_title" && ref.is_active)
-                .map((ref) => ({ value: ref.code, label: `${ref.code} — ${ref.value}` }))}
+              options={facilityOptions}
             />
           </Form.Item>
           <Form.Item name="discipline_code" label="Код дисциплины" rules={[{ required: true }]}>
