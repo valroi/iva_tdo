@@ -2,8 +2,8 @@ import { Button, Card, Form, Input, Modal, Select, Space, Table, Tag, Typography
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
 
-import { createTransmittal, listRevisions, listTransmittals } from "../api";
-import type { DocumentItem, Revision, Transmittal } from "../types";
+import { createTransmittal, listRevisions, listTransmittals, me } from "../api";
+import type { DocumentItem, Revision, Transmittal, User } from "../types";
 
 interface Props {
   documents: DocumentItem[];
@@ -15,6 +15,7 @@ export default function TransmittalsPage({ documents, onReloadAll: _onReloadAll 
   const [revisions, setRevisions] = useState<Revision[]>([]);
   const [transmittals, setTransmittals] = useState<Transmittal[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [form] = Form.useForm();
 
   const revisionOptions = useMemo(
@@ -30,6 +31,12 @@ export default function TransmittalsPage({ documents, onReloadAll: _onReloadAll 
     const items = await listTransmittals();
     setTransmittals(items);
   };
+
+  useEffect(() => {
+    me()
+      .then(setCurrentUser)
+      .catch(() => setCurrentUser(null));
+  }, []);
 
   useEffect(() => {
     void refreshTransmittals().catch((error: unknown) => {
@@ -62,6 +69,11 @@ export default function TransmittalsPage({ documents, onReloadAll: _onReloadAll 
     { title: "Создан", dataIndex: "created_at", key: "created_at" },
   ];
 
+  const canCreateTransmittal = useMemo(() => {
+    if (!currentUser) return false;
+    return currentUser.role === "admin" || currentUser.role === "contractor_manager" || currentUser.role === "contractor_author";
+  }, [currentUser]);
+
   const submit = async () => {
     const values = await form.validateFields();
     await createTransmittal({
@@ -83,10 +95,15 @@ export default function TransmittalsPage({ documents, onReloadAll: _onReloadAll 
         <Typography.Title level={4} style={{ margin: 0 }}>
           TRM центр
         </Typography.Title>
-        <Button type="primary" onClick={() => setModalOpen(true)}>
+        <Button type="primary" onClick={() => setModalOpen(true)} disabled={!canCreateTransmittal}>
           + Создать TRM
         </Button>
       </Space>
+      {!canCreateTransmittal && (
+        <Typography.Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
+          Создание TRM доступно ролям: admin, contractor_manager, contractor_author.
+        </Typography.Text>
+      )}
 
       <Card style={{ marginBottom: 12 }}>
         <Space wrap>

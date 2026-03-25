@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.deps import get_current_user
+from app.deps import get_current_user, require_roles
 from app.models import (
     IncomingControlEvent,
     IncomingDecision,
@@ -12,6 +12,7 @@ from app.models import (
     TransmittalItem,
     TransmittalStatus,
     User,
+    UserRole,
 )
 from app.schemas import (
     IncomingControlDecision,
@@ -36,7 +37,7 @@ def list_transmittals(
 def create_transmittal(
     payload: TransmittalCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles(UserRole.admin, UserRole.contractor_manager, UserRole.contractor_author)),
 ):
     existing = db.query(Transmittal).filter(Transmittal.trm_number == payload.trm_number).first()
     if existing:
@@ -99,7 +100,7 @@ def incoming_check(
     transmittal_id: int,
     payload: IncomingControlDecision,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_roles(UserRole.admin, UserRole.owner_manager, UserRole.owner_reviewer)),
 ):
     transmittal = db.query(Transmittal).filter(Transmittal.id == transmittal_id).first()
     if transmittal is None:

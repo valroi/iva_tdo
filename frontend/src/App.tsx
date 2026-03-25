@@ -243,11 +243,11 @@ export default function App(): JSX.Element {
               {activeSection === "transmittals" && (
                 <TransmittalsPage documents={documents} onReloadAll={loadInitialData} />
               )}
-              {activeSection === "incoming_control" && (
-                <IncomingControlPage onReloadAll={loadInitialData} />
+              {activeSection === "incoming_control" && user && (
+                <IncomingControlPage currentUser={user} onReloadAll={loadInitialData} />
               )}
-              {activeSection === "review_center" && (
-                <ReviewCenterPage documents={documents} onReloadAll={loadInitialData} />
+              {activeSection === "review_center" && user && (
+                <ReviewCenterPage documents={documents} currentUser={user} onReloadAll={loadInitialData} />
               )}
               {activeSection === "viewer" && <ViewerPage documents={documents} />}
               {activeSection === "tasks" && user && (

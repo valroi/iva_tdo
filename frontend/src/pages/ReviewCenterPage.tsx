@@ -9,14 +9,18 @@ import {
   listRevisions,
   setCrsReviewCode,
 } from "../api";
-import type { CommentItem, DocumentItem, Revision } from "../types";
+import type { CommentItem, DocumentItem, Revision, User } from "../types";
 
 interface Props {
   documents: DocumentItem[];
+  currentUser: User;
   onReloadAll: () => Promise<void>;
 }
 
-export default function ReviewCenterPage({ documents, onReloadAll }: Props): JSX.Element {
+export default function ReviewCenterPage({ documents, currentUser, onReloadAll }: Props): JSX.Element {
+  const canIssueCrs = currentUser.role === "admin" || currentUser.role === "owner_manager" || currentUser.role === "owner_reviewer";
+  const canIssueAcrs =
+    currentUser.role === "admin" || currentUser.role === "contractor_manager" || currentUser.role === "contractor_author";
   const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(documents[0]?.id ?? null);
   const [selectedRevisionId, setSelectedRevisionId] = useState<number | null>(null);
   const [revisions, setRevisions] = useState<Revision[]>([]);
@@ -170,7 +174,7 @@ export default function ReviewCenterPage({ documents, onReloadAll }: Props): JSX
                 <Form.Item name="page" label="Лист">
                   <Input type="number" />
                 </Form.Item>
-                <Button type="primary" onClick={() => void submitCrs()}>
+                <Button type="primary" onClick={() => void submitCrs()} disabled={!canIssueCrs}>
                   Добавить CRS
                 </Button>
               </Form>
@@ -201,7 +205,9 @@ export default function ReviewCenterPage({ documents, onReloadAll }: Props): JSX
                     ]}
                   />
                 </Form.Item>
-                <Button onClick={() => void submitReviewCode()}>Обновить review code</Button>
+                <Button onClick={() => void submitReviewCode()} disabled={!canIssueCrs}>
+                  Обновить review code
+                </Button>
               </Form>
             </Card>
 
@@ -222,7 +228,9 @@ export default function ReviewCenterPage({ documents, onReloadAll }: Props): JSX
                     ]}
                   />
                 </Form.Item>
-                <Button onClick={() => void submitAcrs()}>Отправить ACRS</Button>
+                <Button onClick={() => void submitAcrs()} disabled={!canIssueAcrs}>
+                  Отправить ACRS
+                </Button>
               </Form>
             </Card>
           </Space>
