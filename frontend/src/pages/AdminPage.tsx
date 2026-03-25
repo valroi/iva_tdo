@@ -14,12 +14,10 @@ import {
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
-  bulkDeleteProjectReferences,
   approveRegistrationRequest,
-  createQuickDemoSetup,
   createUser,
   deleteUser,
   deleteProjectReference,
@@ -38,8 +36,7 @@ import { roleDisplayRuEn, roleTooltipRuEn } from "../roles";
 import type {
   CompanyType,
   ProjectItem,
-  ProjectReferenceSelectionItem,
-  QuickDemoSetupResult,
+  ProjectReference,
   RegistrationRequest,
   User,
   UserRole,
@@ -64,18 +61,30 @@ const companyOptions: { value: CompanyType; label: string }[] = [
   { value: "contractor", label: "contractor" },
 ];
 
+const referenceTypeLabels: Record<string, string> = {
+  document_category: "Категории документации",
+  numbering_attribute: "Атрибуты нумерации",
+  discipline: "Дисциплины",
+  document_type: "Типы документов",
+  facility_title: "Титулы объектов",
+  pd_book: "Разделы ПД",
+  se_reporting_type: "Типы отчетности SE",
+  procurement_request_type: "Типы заявок на закупку",
+  equipment_type: "Типы оборудования",
+  identifier_pattern: "Шаблоны идентификаторов",
+  other: "Прочее",
+};
+
 export default function AdminPage({ currentUser }: Props): JSX.Element {
   const [users, setUsers] = useState<User[]>([]);
   const [requests, setRequests] = useState<RegistrationRequest[]>([]);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
-  const [referenceRows, setReferenceRows] = useState<ProjectReferenceSelectionItem[]>([]);
+  const [referenceRows, setReferenceRows] = useState<ProjectReference[]>([]);
   const [isMainAdmin, setIsMainAdmin] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [selectedReferenceIds, setSelectedReferenceIds] = useState<number[]>([]);
-  const [filterProjectIds, setFilterProjectIds] = useState<number[]>([]);
-  const [filterRefTypes, setFilterRefTypes] = useState<string[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [referenceEditOpen, setReferenceEditOpen] = useState(false);
-  const [selectedReference, setSelectedReference] = useState<ProjectReferenceSelectionItem | null>(null);
+  const [selectedReference, setSelectedReference] = useState<ProjectReference | null>(null);
   const [referenceEditForm] = Form.useForm();
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm] = Form.useForm();
@@ -93,10 +102,6 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectForm] = Form.useForm();
 
-  const [quickOpen, setQuickOpen] = useState(false);
-  const [quickForm] = Form.useForm();
-  const [quickResult, setQuickResult] = useState<QuickDemoSetupResult | null>(null);
-
   const loadData = async () => {
     setLoading(true);
     try {
@@ -104,17 +109,16 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
       setUsers(usersResp);
       const projectsResp = await listProjects();
       setProjects(projectsResp);
-      const refsChunks = await Promise.all(
-        projectsResp.map(async (project) => {
-          const refs = await listProjectReferences(project.id);
-          return refs.map((ref) => ({
-            ...ref,
-            project_code: project.code,
-            project_name: project.name,
-          }));
-        }),
-      );
-      setReferenceRows(refsChunks.flat());
+      if (projectsResp.length === 0) {
+        setReferenceRows([]);
+        setSelectedProjectId(null);
+      } else {
+        const fallbackProjectId = selectedProjectId ?? projectsResp[0].id;
+        const projectId = projectsResp.some((p) => p.id === fallbackProjectId) ? fallbackProjectId : projectsResp[0].id;
+        setSelectedProjectId(projectId);
+        const refs = await listProjectReferences(projectId);
+        setReferenceRows(refs);
+      }
 
       try {
         const reqResp = await listRegistrationRequests();
@@ -136,10 +140,7 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
     void loadData();
   }, []);
 
-  const visibleRoleOptions = useMemo(
-    () => roleOptions.filter((item) => isMainAdmin || item.value !== "admin"),
-    [isMainAdmin],
-  );
+  const visibleRoleOptions = roleOptions.filter((item) => isMainAdmin || item.value !== "admin");
 
   const userColumns: ColumnsType<User> = [
     { title: "ID", dataIndex: "id", key: "id", width: 80 },
@@ -302,30 +303,7 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
     },
   ];
 
-  const visibleReferenceRows = useMemo(() => {
-    return referenceRows.filter((row) => {
-      if (filterProjectIds.length > 0 && !filterProjectIds.includes(row.project_id)) {
-        return false;
-      }
-      if (filterRefTypes.length > 0 && !filterRefTypes.includes(row.ref_type)) {
-        return false;
-      }
-      return true;
-    });
-  }, [filterProjectIds, filterRefTypes, referenceRows]);
-
-  const selectedReferenceRows = useMemo(
-    () => visibleReferenceRows.filter((row) => selectedReferenceIds.includes(row.id)),
-    [selectedReferenceIds, visibleReferenceRows],
-  );
-
-  const referenceColumns: ColumnsType<ProjectReferenceSelectionItem> = [
-    {
-      title: "Проект",
-      key: "project",
-      render: (_, row) => `${row.project_code} — ${row.project_name}`,
-      width: 260,
-    },
+  const referenceColumns: ColumnsType<ProjectReference> = [
     { title: "Тип", dataIndex: "ref_type", key: "ref_type", width: 220 },
     { title: "Код", dataIndex: "code", key: "code", width: 140 },
     { title: "Значение", dataIndex: "value", key: "value" },
@@ -382,20 +360,6 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
           Администрирование: пользователи и права
         </Typography.Title>
         <Space>
-          <Button
-            onClick={() => {
-              setQuickResult(null);
-              quickForm.setFieldsValue({
-                contractor_email: "contractor.demo@ivamaris.io",
-                owner_email: "owner.demo@ivamaris.io",
-                password: "DemoPass123!",
-              });
-              setQuickOpen(true);
-            }}
-            disabled={!isMainAdmin}
-          >
-            Быстрый мастер
-          </Button>
           <Button type="primary" onClick={() => setCreateOpen(true)}>
             + Создать пользователя
           </Button>
@@ -448,73 +412,31 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
             label: "Справочники",
             children: (
               <Space direction="vertical" style={{ width: "100%" }} size={12}>
-                <Space wrap>
-                  <Select
-                    mode="multiple"
-                    allowClear
-                    style={{ minWidth: 320 }}
-                    placeholder="Фильтр по проектам"
-                    value={filterProjectIds}
-                    onChange={setFilterProjectIds}
-                    options={projects.map((p) => ({ value: p.id, label: `${p.code} — ${p.name}` }))}
-                  />
-                  <Select
-                    mode="multiple"
-                    allowClear
-                    style={{ minWidth: 320 }}
-                    placeholder="Фильтр по типам справочника"
-                    value={filterRefTypes}
-                    onChange={setFilterRefTypes}
-                    options={Array.from(new Set(referenceRows.map((r) => r.ref_type)))
-                      .sort((a, b) => a.localeCompare(b))
-                      .map((refType) => ({ value: refType, label: refType }))}
-                  />
-                  <Popconfirm
-                    title={`Удалить выбранные записи (${selectedReferenceRows.length})?`}
-                    description={
-                      selectedReferenceRows.length > 0
-                        ? `Проекты: ${Array.from(new Set(selectedReferenceRows.map((r) => r.project_code)))
-                            .sort((a, b) => a.localeCompare(b))
-                            .join(", ")}`
-                        : "Операция необратима. Удалятся значения справочников из выбранных проектов."
-                    }
-                    disabled={selectedReferenceRows.length === 0}
-                    onConfirm={async () => {
-                      try {
-                        const idsToDelete = selectedReferenceRows.map((row) => row.id);
-                        if (idsToDelete.some((id) => id === selectedReference?.id)) {
-                          setReferenceEditOpen(false);
-                          setSelectedReference(null);
-                        }
-                        const response = await bulkDeleteProjectReferences(idsToDelete);
-                        message.success(`Удалено записей: ${response.deleted_count}`);
-                        setSelectedReferenceIds((prev) => prev.filter((id) => !idsToDelete.includes(id)));
-                        await loadData();
-                      } catch (error: unknown) {
-                        const text =
-                          error instanceof Error ? error.message : "Не удалось удалить выбранные справочники";
-                        message.error(text);
-                      }
-                    }}
-                  >
-                    <Button danger disabled={selectedReferenceRows.length === 0}>
-                      Массовое удаление
-                    </Button>
-                  </Popconfirm>
-                  <Typography.Text type="secondary">
-                    Выбрано: {selectedReferenceIds.length}
-                  </Typography.Text>
-                </Space>
-                <Table
-                  rowKey="id"
-                  loading={loading}
-                  columns={referenceColumns}
-                  dataSource={visibleReferenceRows}
-                  rowSelection={{
-                    selectedRowKeys: selectedReferenceIds,
-                    onChange: (keys) => setSelectedReferenceIds(keys as number[]),
-                    preserveSelectedRowKeys: true,
+                <Select
+                  style={{ minWidth: 360 }}
+                  placeholder="Выберите проект"
+                  value={selectedProjectId ?? undefined}
+                  onChange={async (value) => {
+                    setSelectedProjectId(value);
+                    const refs = await listProjectReferences(value);
+                    setReferenceRows(refs);
                   }}
+                  options={projects.map((p) => ({ value: p.id, label: `${p.code} — ${p.name}` }))}
+                />
+                <Tabs
+                  type="card"
+                  items={Object.entries(referenceTypeLabels).map(([refType, label]) => ({
+                    key: refType,
+                    label,
+                    children: (
+                      <Table
+                        rowKey="id"
+                        loading={loading}
+                        columns={referenceColumns}
+                        dataSource={referenceRows.filter((row) => row.ref_type === refType)}
+                      />
+                    ),
+                  }))}
                 />
               </Space>
             ),
@@ -524,7 +446,7 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
 
       <Modal
         open={referenceEditOpen}
-        title={`Изменить справочник: ${selectedReference?.project_code ?? ""} / ${selectedReference?.code ?? ""}`}
+        title={`Изменить справочник: ${selectedReference?.code ?? ""}`}
         onCancel={() => setReferenceEditOpen(false)}
         onOk={async () => {
           if (!selectedReference) return;
@@ -749,47 +671,6 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
             <Input.TextArea rows={3} />
           </Form.Item>
         </Form>
-      </Modal>
-
-      <Modal
-        open={quickOpen}
-        title="Быстрый мастер демо-процесса"
-        onCancel={() => setQuickOpen(false)}
-        onOk={async () => {
-          const values = await quickForm.validateFields();
-          const result = await createQuickDemoSetup(values);
-          setQuickResult(result);
-          message.success("Демо-процесс создан");
-          await loadData();
-        }}
-        okText="Создать демо-процесс"
-      >
-        <Typography.Paragraph>
-          Создаст подрядчика, заказчика и готовую демо-цепочку: MDR → Document → Revision → Comment → Response.
-        </Typography.Paragraph>
-        <Form form={quickForm} layout="vertical">
-          <Form.Item name="contractor_email" label="Email подрядчика" rules={[{ required: true, type: "email" }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="owner_email" label="Email заказчика" rules={[{ required: true, type: "email" }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="password" label="Пароль для двух пользователей" rules={[{ required: true, min: 6 }]}>
-            <Input.Password />
-          </Form.Item>
-        </Form>
-
-        {quickResult && (
-          <div style={{ marginTop: 12, background: "#fafafa", border: "1px solid #f0f0f0", padding: 12 }}>
-            <Typography.Text strong>Созданы демо-учетные данные:</Typography.Text>
-            <div>Подрядчик: {quickResult.contractor_email}</div>
-            <div>Заказчик: {quickResult.owner_email}</div>
-            <div>Пароль: {quickResult.password}</div>
-            <div style={{ marginTop: 8 }}>
-              IDs: MDR #{quickResult.mdr_id}, Document #{quickResult.document_id}, Revision #{quickResult.revision_id}
-            </div>
-          </div>
-        )}
       </Modal>
 
       <Typography.Paragraph type="secondary" style={{ marginTop: 8 }}>

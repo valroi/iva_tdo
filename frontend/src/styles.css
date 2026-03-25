@@ -20,6 +20,7 @@ body {
   background: var(--surface) !important;
   display: flex;
   flex-direction: column;
+  box-shadow: 2px 0 10px rgba(16, 24, 40, 0.04);
 }
 
 .app-logo {
@@ -60,15 +61,19 @@ body {
   padding-bottom: 8px;
 }
 
+.ant-layout {
+  background: #f2f4f7 !important;
+}
+
 .app-content {
-  margin: 12px;
+  margin: 16px;
   background: transparent;
 }
 
 .ant-card {
-  border-radius: 10px;
+  border-radius: 12px;
   border: 1px solid var(--border);
-  box-shadow: var(--shadow-soft);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.05), 0 2px 8px rgba(16, 24, 40, 0.06);
 }
 
 .ant-btn {
@@ -84,7 +89,7 @@ body {
 }
 
 .ant-table-wrapper .ant-table {
-  border-radius: 10px;
+  border-radius: 12px;
   overflow: hidden;
 }
 

@@ -66,6 +66,7 @@ class ProjectCreate(BaseModel):
     code: str
     name: str
     description: str | None = None
+    category_codes: list[str] | None = None
 
 
 class ProjectUpdate(BaseModel):

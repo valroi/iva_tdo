@@ -59,6 +59,66 @@ type Section =
   | "admin"
   | "help";
 
+interface NavItem {
+  key: Section;
+  icon: JSX.Element;
+  label: string;
+}
+
+function buildRoleMenuItems(user: User | null): NavItem[] {
+  if (!user) return [];
+  const base: NavItem[] = [
+    { key: "dashboard", icon: <HomeOutlined />, label: "Обзор" },
+    { key: "projects", icon: <ProjectOutlined />, label: "Проекты" },
+  ];
+
+  if (user.role === "admin") {
+    return [
+      ...base,
+      { key: "registry_tree", icon: <ApartmentOutlined />, label: "Иерархия реестра" },
+      { key: "mdr", icon: <DatabaseOutlined />, label: "Реестр MDR" },
+      { key: "documents", icon: <FileOutlined />, label: "Документы" },
+      { key: "transmittals", icon: <SendOutlined />, label: "TRM центр" },
+      { key: "incoming_control", icon: <SafetyCertificateOutlined />, label: "Входной контроль" },
+      { key: "review_center", icon: <CheckSquareOutlined />, label: "Review Center" },
+      { key: "viewer", icon: <EyeOutlined />, label: "Viewer" },
+      { key: "tasks", icon: <CheckSquareOutlined />, label: "Мои задачи" },
+      { key: "notifications", icon: <BellOutlined />, label: "Уведомления" },
+      { key: "admin", icon: <TeamOutlined />, label: "Администрирование" },
+      { key: "help", icon: <ReadOutlined />, label: "Инструкция" },
+    ];
+  }
+
+  if (user.company_type === "contractor") {
+    return [
+      ...base,
+      { key: "registry_tree", icon: <ApartmentOutlined />, label: "Иерархия реестра" },
+      { key: "mdr", icon: <DatabaseOutlined />, label: "Реестр MDR" },
+      { key: "documents", icon: <FileOutlined />, label: "Документы" },
+      { key: "transmittals", icon: <SendOutlined />, label: "TRM центр" },
+      { key: "review_center", icon: <CheckSquareOutlined />, label: "Review Center" },
+      { key: "viewer", icon: <EyeOutlined />, label: "Viewer" },
+      { key: "tasks", icon: <CheckSquareOutlined />, label: "Мои задачи" },
+      { key: "notifications", icon: <BellOutlined />, label: "Уведомления" },
+      { key: "help", icon: <ReadOutlined />, label: "Инструкция" },
+    ];
+  }
+
+  if (user.company_type === "owner") {
+    return [
+      ...base,
+      { key: "incoming_control", icon: <SafetyCertificateOutlined />, label: "Входной контроль" },
+      { key: "review_center", icon: <CheckSquareOutlined />, label: "Review Center" },
+      { key: "viewer", icon: <EyeOutlined />, label: "Viewer" },
+      { key: "tasks", icon: <CheckSquareOutlined />, label: "Мои задачи" },
+      { key: "notifications", icon: <BellOutlined />, label: "Уведомления" },
+      { key: "help", icon: <ReadOutlined />, label: "Инструкция" },
+    ];
+  }
+
+  return [...base, { key: "viewer", icon: <EyeOutlined />, label: "Viewer" }, { key: "help", icon: <ReadOutlined />, label: "Инструкция" }];
+}
+
 export default function App(): JSX.Element {
   const [authenticated, setAuthenticated] = useState(hasAccessToken());
   const [loading, setLoading] = useState(false);
@@ -105,28 +165,14 @@ export default function App(): JSX.Element {
     }
   }, [authenticated, loadInitialData]);
 
-  const menuItems = useMemo(() => {
-    const items = [
-      { key: "dashboard", icon: <HomeOutlined />, label: "Обзор" },
-      { key: "projects", icon: <ProjectOutlined />, label: "Проекты" },
-      { key: "registry_tree", icon: <ApartmentOutlined />, label: "Иерархия реестра" },
-      { key: "mdr", icon: <DatabaseOutlined />, label: "Реестр MDR" },
-      { key: "documents", icon: <FileOutlined />, label: "Документы" },
-      { key: "transmittals", icon: <SendOutlined />, label: "TRM центр" },
-      { key: "incoming_control", icon: <SafetyCertificateOutlined />, label: "Входной контроль" },
-      { key: "review_center", icon: <CheckSquareOutlined />, label: "Review Center" },
-      { key: "viewer", icon: <EyeOutlined />, label: "Viewer" },
-      { key: "tasks", icon: <CheckSquareOutlined />, label: "Мои задачи" },
-      { key: "notifications", icon: <BellOutlined />, label: "Уведомления" },
-      { key: "help", icon: <ReadOutlined />, label: "Инструкция" },
-    ];
+  const menuItems = useMemo(() => buildRoleMenuItems(user), [user]);
 
-    if (user?.role === "admin") {
-      items.push({ key: "admin", icon: <TeamOutlined />, label: "Администрирование" });
+  useEffect(() => {
+    const allowed = new Set(menuItems.map((item) => item.key));
+    if (!allowed.has(activeSection)) {
+      setActiveSection(menuItems[0]?.key ?? "dashboard");
     }
-
-    return items;
-  }, [user?.role]);
+  }, [activeSection, menuItems]);
 
   const sectionTitleMap: Record<Section, string> = {
     dashboard: "Обзор",

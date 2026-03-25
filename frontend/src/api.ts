@@ -91,6 +91,30 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await response.json()) as T;
 }
 
+async function requestWithRetry<T>(path: string, init: RequestInit = {}, attempts = 3): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await request<T>(path, init);
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message.toLowerCase() : "";
+      const retryable =
+        message.includes("failed to fetch") ||
+        message.includes("networkerror") ||
+        message.includes("network error") ||
+        message.includes("load failed") ||
+        message.includes("timeout");
+      if (!retryable || attempt === attempts - 1) {
+        throw error;
+      }
+      const delayMs = 500 * (attempt + 1);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("API retry failed");
+}
+
 export async function login(email: string, password: string): Promise<void> {
   const tokens = await request<Tokens>("/auth/login", {
     method: "POST",
@@ -100,11 +124,11 @@ export async function login(email: string, password: string): Promise<void> {
 }
 
 export function me(): Promise<User> {
-  return request<User>("/auth/me");
+  return requestWithRetry<User>("/auth/me");
 }
 
 export function listMdr(): Promise<MDRRecord[]> {
-  return request<MDRRecord[]>("/mdr");
+  return requestWithRetry<MDRRecord[]>("/mdr");
 }
 
 export function createMdr(payload: Record<string, unknown>): Promise<MDRRecord> {
@@ -199,7 +223,7 @@ export function previewMdrDocNumber(payload: {
 }
 
 export function listDocuments(): Promise<DocumentItem[]> {
-  return request<DocumentItem[]>("/documents");
+  return requestWithRetry<DocumentItem[]>("/documents");
 }
 
 export function createDocument(payload: Record<string, unknown>): Promise<DocumentItem> {
@@ -246,7 +270,7 @@ export function respondToComment(
 }
 
 export function listNotifications(): Promise<NotificationItem[]> {
-  return request<NotificationItem[]>("/notifications");
+  return requestWithRetry<NotificationItem[]>("/notifications");
 }
 
 export function markNotificationRead(notificationId: number): Promise<NotificationItem> {
@@ -256,7 +280,7 @@ export function markNotificationRead(notificationId: number): Promise<Notificati
 }
 
 export function listWorkflowStatuses(): Promise<WorkflowStatus[]> {
-  return request<WorkflowStatus[]>("/workflow/statuses");
+  return requestWithRetry<WorkflowStatus[]>("/workflow/statuses");
 }
 
 export function listUsers(): Promise<User[]> {
@@ -420,13 +444,14 @@ export function issueAcrs(commentId: number, payload: CRSCreatePayload): Promise
 }
 
 export function listProjects(): Promise<ProjectItem[]> {
-  return request<ProjectItem[]>("/projects");
+  return requestWithRetry<ProjectItem[]>("/projects");
 }
 
 export function createProject(payload: {
   code: string;
   name: string;
   description?: string;
+  category_codes?: string[];
 }): Promise<ProjectItem> {
   return request<ProjectItem>("/projects", {
     method: "POST",

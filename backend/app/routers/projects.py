@@ -253,9 +253,34 @@ PD_BOOK_CODES: list[tuple[str, str]] = [
 ]
 
 
-def _default_project_references() -> list[tuple[str, str, str]]:
+def _normalize_project_category_codes(raw_codes: list[str] | None) -> list[str]:
+    known = {code for code, _ in DOCUMENT_CATEGORIES}
+    if raw_codes is None:
+        return [code for code, _ in DOCUMENT_CATEGORIES]
+    if len(raw_codes) == 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one category is required")
+
+    normalized: list[str] = []
+    for raw in raw_codes:
+        code = raw.strip().upper()
+        if code not in known:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unknown category code: {raw}",
+            )
+        if code not in normalized:
+            normalized.append(code)
+    return normalized
+
+
+def _default_project_references(category_codes: list[str] | None = None) -> list[tuple[str, str, str]]:
     refs: list[tuple[str, str, str]] = []
-    refs.extend(("document_category", code, value) for code, value in DOCUMENT_CATEGORIES)
+    enabled_categories = set(_normalize_project_category_codes(category_codes))
+    refs.extend(
+        ("document_category", code, value)
+        for code, value in DOCUMENT_CATEGORIES
+        if code in enabled_categories
+    )
     refs.extend(("numbering_attribute", code, value) for code, value in NUMBERING_ATTRIBUTES)
     refs.extend(("document_type", code, value) for code, value in DOCUMENT_TYPES)
     refs.extend(("discipline", code, value) for code, value in DISCIPLINES)
@@ -378,7 +403,7 @@ def create_project(
         )
     )
 
-    for ref_type, code, value in _default_project_references():
+    for ref_type, code, value in _default_project_references(payload.category_codes):
         db.add(
             ProjectReference(
                 project_id=project.id,

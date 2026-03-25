@@ -43,6 +43,16 @@ const projectMemberRoleOptions: { value: ProjectMemberRole; label: string }[] = 
   { value: "observer", label: "observer" },
 ];
 
+const projectCategoryOptions = [
+  { value: "PF", label: "PF — Pre-FEED" },
+  { value: "BEP", label: "BEP — Basic Engineering Package" },
+  { value: "SE", label: "SE — Engineering Survey" },
+  { value: "FD", label: "FD — FEED" },
+  { value: "PD", label: "PD — Design Documentation" },
+  { value: "DD", label: "DD — Detailed Design Documentation" },
+  { value: "PM", label: "PM — Project Management Documents" },
+];
+
 export default function ProjectsPage({ currentUser, projects, onReload, onOpenMdr }: Props): JSX.Element {
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(projects[0]?.id ?? null);
   const [members, setMembers] = useState<ProjectMember[]>([]);
@@ -341,7 +351,7 @@ export default function ProjectsPage({ currentUser, projects, onReload, onOpenMd
           await onReload();
         }}
       >
-        <Form form={projectForm} layout="vertical">
+        <Form form={projectForm} layout="vertical" initialValues={{ category_codes: ["SE"] }}>
           <Form.Item
             name="code"
             label="Код проекта (3 заглавные буквы / 3 uppercase letters)"
@@ -364,6 +374,13 @@ export default function ProjectsPage({ currentUser, projects, onReload, onOpenMd
           </Form.Item>
           <Form.Item name="description" label="Описание">
             <Input.TextArea rows={3} />
+          </Form.Item>
+          <Form.Item
+            name="category_codes"
+            label="Категории документации проекта"
+            rules={[{ required: true, type: "array", min: 1, message: "Выберите минимум одну категорию" }]}
+          >
+            <Select mode="multiple" options={projectCategoryOptions} placeholder="Выберите категории проекта" />
           </Form.Item>
         </Form>
       </Modal>

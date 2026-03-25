@@ -206,6 +206,7 @@ export interface ProjectItem {
   code: string;
   name: string;
   description: string | null;
+  category_codes?: string[] | null;
   created_by_id: number;
   created_at: string;
   updated_at: string;
