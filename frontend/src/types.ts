@@ -95,6 +95,48 @@ export interface Revision {
   created_at: string;
 }
 
+export type TRMStatus = "DRAFT" | "SENT" | "INCOMING_ACCEPTED" | "INCOMING_REJECTED";
+export type IncomingDecision = "ACCEPT" | "REJECT";
+
+export interface TransmittalItem {
+  id: number;
+  transmittal_id: number;
+  revision_id: number;
+  created_at: string;
+}
+
+export interface Transmittal {
+  id: number;
+  trm_number: string;
+  issue_purpose: string;
+  channel: string;
+  status: TRMStatus;
+  note: string | null;
+  created_by_id: number;
+  created_at: string;
+  submitted_at: string | null;
+}
+
+export interface IncomingControlEvent {
+  id: number;
+  transmittal_id: number;
+  actor_id: number;
+  decision: IncomingDecision;
+  reason: string | null;
+  created_at: string;
+}
+
+export interface CRSCreatePayload {
+  revision_id: number;
+  text: string;
+  status?: "OPEN" | "IN_PROGRESS" | "RESOLVED" | "REJECTED";
+  page?: number | null;
+  area_x?: number | null;
+  area_y?: number | null;
+  area_w?: number | null;
+  area_h?: number | null;
+}
+
 export interface CommentItem {
   id: number;
   revision_id: number;

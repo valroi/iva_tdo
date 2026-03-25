@@ -49,6 +49,17 @@ def seed_default_data(db: Session) -> None:
         ("AN", "Approved as Note", "#13c2c2", True),
         ("CO", "Commented", "#faad14", False),
         ("RJ", "Rejected", "#ff4d4f", False),
+        ("DRAFT", "Draft", "#8c8c8c", False),
+        ("SENT", "Sent (TRM)", "#1677ff", False),
+        ("IN_INCOMING_CHECK", "Incoming check", "#722ed1", False),
+        ("IN_REVIEW", "In review", "#2f54eb", False),
+        ("INCOMING_REJECTED", "Incoming rejected", "#cf1322", False),
+        ("COMMENTED", "Commented", "#fa8c16", False),
+        ("RE_REVIEW", "Re-review", "#2f54eb", False),
+        ("REWORK_REQUIRED", "Rework required", "#d48806", False),
+        ("REJECTED", "Rejected", "#ff4d4f", False),
+        ("APPROVED", "Approved", "#389e0d", True),
+        ("ISSUED", "Issued", "#13c2c2", True),
     ]
 
     for code, name, color, is_final in statuses:

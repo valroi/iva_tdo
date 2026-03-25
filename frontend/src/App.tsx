@@ -3,12 +3,15 @@ import {
   BellOutlined,
   CheckSquareOutlined,
   DatabaseOutlined,
+  EyeOutlined,
   FileOutlined,
   HomeOutlined,
   LogoutOutlined,
   ProjectOutlined,
   ReadOutlined,
+  SendOutlined,
   TeamOutlined,
+  SafetyCertificateOutlined,
 } from "@ant-design/icons";
 import { Avatar, Breadcrumb, Button, Layout, Menu, Space, Spin, Typography, message } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -33,6 +36,10 @@ import NotificationsPage from "./pages/NotificationsPage";
 import AdminPage from "./pages/AdminPage";
 import ProjectsPage from "./pages/ProjectsPage";
 import RegistryTreePage from "./pages/RegistryTreePage";
+import TransmittalsPage from "./pages/TransmittalsPage";
+import IncomingControlPage from "./pages/IncomingControlPage";
+import ReviewCenterPage from "./pages/ReviewCenterPage";
+import ViewerPage from "./pages/ViewerPage";
 import type { DocumentItem, MDRRecord, NotificationItem, ProjectItem, User, WorkflowStatus } from "./types";
 
 const { Header, Sider, Content } = Layout;
@@ -43,6 +50,10 @@ type Section =
   | "registry_tree"
   | "mdr"
   | "documents"
+  | "transmittals"
+  | "incoming_control"
+  | "review_center"
+  | "viewer"
   | "tasks"
   | "notifications"
   | "admin"
@@ -101,6 +112,10 @@ export default function App(): JSX.Element {
       { key: "registry_tree", icon: <ApartmentOutlined />, label: "Иерархия реестра" },
       { key: "mdr", icon: <DatabaseOutlined />, label: "Реестр MDR" },
       { key: "documents", icon: <FileOutlined />, label: "Документы" },
+      { key: "transmittals", icon: <SendOutlined />, label: "TRM центр" },
+      { key: "incoming_control", icon: <SafetyCertificateOutlined />, label: "Входной контроль" },
+      { key: "review_center", icon: <CheckSquareOutlined />, label: "Review Center" },
+      { key: "viewer", icon: <EyeOutlined />, label: "Viewer" },
       { key: "tasks", icon: <CheckSquareOutlined />, label: "Мои задачи" },
       { key: "notifications", icon: <BellOutlined />, label: "Уведомления" },
       { key: "help", icon: <ReadOutlined />, label: "Инструкция" },
@@ -119,6 +134,10 @@ export default function App(): JSX.Element {
     registry_tree: "Иерархия реестра",
     mdr: "Реестр MDR",
     documents: "Документы",
+    transmittals: "TRM центр",
+    incoming_control: "Входной контроль",
+    review_center: "Review Center",
+    viewer: "Viewer",
     tasks: "Мои задачи",
     notifications: "Уведомления",
     admin: "Администрирование",
@@ -221,6 +240,16 @@ export default function App(): JSX.Element {
               {activeSection === "documents" && (
                 <DocumentsPage documents={documents} mdr={mdr} onReloadDocuments={loadInitialData} />
               )}
+              {activeSection === "transmittals" && (
+                <TransmittalsPage documents={documents} onReloadAll={loadInitialData} />
+              )}
+              {activeSection === "incoming_control" && (
+                <IncomingControlPage onReloadAll={loadInitialData} />
+              )}
+              {activeSection === "review_center" && (
+                <ReviewCenterPage documents={documents} onReloadAll={loadInitialData} />
+              )}
+              {activeSection === "viewer" && <ViewerPage documents={documents} />}
               {activeSection === "tasks" && user && (
                 <MyTasksPage currentUser={user} notifications={notifications} documents={documents} mdr={mdr} />
               )}

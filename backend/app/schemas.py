@@ -5,9 +5,11 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from app.models import (
     CommentStatus,
     CompanyType,
+    IncomingDecision,
     ProjectMemberRole,
     RegistrationRequestStatus,
     ReviewCode,
+    TransmittalStatus,
     UserRole,
 )
 
@@ -288,6 +290,12 @@ class RevisionCreate(BaseModel):
     review_deadline: date | None = None
 
 
+class RevisionStatusUpdate(BaseModel):
+    status: str
+    review_code: ReviewCode | None = None
+    review_comment: str | None = None
+
+
 class RevisionRead(BaseModel):
     id: int
     document_id: int
@@ -438,6 +446,105 @@ class FileUploadResponse(BaseModel):
     file_path: str
     content_type: str
     file_size: int
+
+
+class TransmittalCreate(BaseModel):
+    trm_number: str
+    issue_purpose: str
+    channel: str = "tdms"
+    note: str | None = None
+    revision_ids: list[int] = Field(min_length=1, max_length=500)
+
+
+class IncomingControlDecision(BaseModel):
+    decision: IncomingDecision
+    reason: str | None = None
+
+
+class TransmittalRead(BaseModel):
+    id: int
+    trm_number: str
+    issue_purpose: str
+    channel: str
+    status: TransmittalStatus
+    note: str | None
+    created_by_id: int
+    created_at: datetime
+    submitted_at: datetime | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TransmittalItemRead(BaseModel):
+    id: int
+    transmittal_id: int
+    revision_id: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class IncomingControlEventRead(BaseModel):
+    id: int
+    transmittal_id: int
+    actor_id: int
+    decision: IncomingDecision
+    reason: str | None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CRSCreate(BaseModel):
+    revision_id: int
+    text: str
+    status: CommentStatus = CommentStatus.OPEN
+    page: int | None = None
+    area_x: float | None = None
+    area_y: float | None = None
+    area_w: float | None = None
+    area_h: float | None = None
+
+
+class CRSRead(BaseModel):
+    id: int
+    revision_id: int
+    parent_id: int | None
+    author_id: int
+    text: str
+    status: CommentStatus
+    page: int | None
+    area_x: float | None
+    area_y: float | None
+    area_w: float | None
+    area_h: float | None
+    created_at: datetime
+    resolved_at: datetime | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CRSIssueCodeUpdate(BaseModel):
+    review_code: ReviewCode
+    status: CommentStatus = CommentStatus.OPEN
+
+
+class ACRSRead(BaseModel):
+    id: int
+    revision_id: int
+    parent_id: int | None
+    author_id: int
+    text: str
+    status: CommentStatus
+    page: int | None
+    area_x: float | None
+    area_y: float | None
+    area_w: float | None
+    area_h: float | None
+    created_at: datetime
+    resolved_at: datetime | None
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DataResetResponse(BaseModel):

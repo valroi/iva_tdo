@@ -3,6 +3,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -105,6 +106,25 @@ def upload_document_file(
         content_type=file.content_type or "application/pdf",
         file_size=len(file_bytes),
     )
+
+
+@router.get("/documents/view/{revision_id}")
+def view_document_file(
+    revision_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    revision = db.query(Revision).filter(Revision.id == revision_id).first()
+    if revision is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
+    if not revision.file_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File is not uploaded")
+
+    file_path = Path(revision.file_path)
+    if not file_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stored file not found")
+
+    return FileResponse(path=file_path, media_type="application/pdf", filename=file_path.name)
 
 
 @router.get("/documents/{document_id}/revisions", response_model=list[RevisionRead])

@@ -1,7 +1,10 @@
 import type {
   CommentItem,
   CompanyType,
+  CRSCreatePayload,
   DocumentItem,
+  IncomingControlEvent,
+  IncomingDecision,
   MDRBulkImportResponse,
   MDRRecord,
   NotificationItem,
@@ -12,6 +15,8 @@ import type {
   QuickDemoSetupResult,
   RegistrationRequest,
   Revision,
+  Transmittal,
+  TransmittalItem,
   User,
   UserRole,
   WorkflowStatus,
@@ -208,6 +213,10 @@ export function listRevisions(documentId: number): Promise<Revision[]> {
   return request<Revision[]>(`/documents/${documentId}/revisions`);
 }
 
+export function getRevision(revisionId: number): Promise<Revision> {
+  return request<Revision>(`/revisions/${revisionId}`);
+}
+
 export function createRevision(payload: Record<string, unknown>): Promise<Revision> {
   return request<Revision>("/revisions", {
     method: "POST",
@@ -344,6 +353,69 @@ export function uploadRevisionPdf(revisionId: number, file: File): Promise<{
   return request("/documents/upload", {
     method: "POST",
     body,
+  });
+}
+
+export function buildDocumentViewUrl(revisionId: number): string {
+  return `${PREFIX}/documents/view/${revisionId}`;
+}
+
+export function listTransmittals(): Promise<Transmittal[]> {
+  return request<Transmittal[]>("/transmittals");
+}
+
+export function createTransmittal(payload: {
+  trm_number: string;
+  issue_purpose: string;
+  channel?: string;
+  note?: string | null;
+  revision_ids: number[];
+}): Promise<Transmittal> {
+  return request<Transmittal>("/transmittals", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function listTransmittalItems(transmittalId: number): Promise<TransmittalItem[]> {
+  return request<TransmittalItem[]>(`/transmittals/${transmittalId}/items`);
+}
+
+export function submitIncomingCheck(
+  transmittalId: number,
+  payload: { decision: IncomingDecision; reason?: string | null },
+): Promise<IncomingControlEvent> {
+  return request<IncomingControlEvent>(`/transmittals/${transmittalId}/incoming-check`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function listCrsItems(revisionId: number): Promise<CommentItem[]> {
+  return request<CommentItem[]>(`/review/revisions/${revisionId}/crs`);
+}
+
+export function issueCrs(payload: CRSCreatePayload): Promise<CommentItem> {
+  return request<CommentItem>("/review/crs", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function setCrsReviewCode(
+  commentId: number,
+  payload: { review_code: "AP" | "AN" | "CO" | "RJ"; status?: "OPEN" | "IN_PROGRESS" | "RESOLVED" | "REJECTED" },
+): Promise<CommentItem> {
+  return request<CommentItem>(`/review/crs/${commentId}/code`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function issueAcrs(commentId: number, payload: CRSCreatePayload): Promise<CommentItem> {
+  return request<CommentItem>(`/review/acrs/${commentId}`, {
+    method: "POST",
+    body: JSON.stringify(payload),
   });
 }
 
