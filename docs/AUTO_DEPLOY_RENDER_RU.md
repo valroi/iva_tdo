@@ -27,13 +27,17 @@
 В репозитории GitHub:
 
 1. `Settings` -> `Secrets and variables` -> `Actions` -> `New repository secret`
-2. Добавить:
-   - `RENDER_BACKEND_DEPLOY_HOOK_URL` = URL backend hook
-   - `RENDER_FRONTEND_DEPLOY_HOOK_URL` = URL frontend hook
+2. Добавить (поддерживаются оба варианта имен):
+   - backend:
+     - `RENDER_BACKEND_DEPLOY_HOOK_URL` **или**
+     - `RENDER_BACKEND_DEPLOY_HOOK`
+   - frontend:
+     - `RENDER_FRONTEND_DEPLOY_HOOK_URL` **или**
+     - `RENDER_FRONTEND_DEPLOY_HOOK`
 
 ## Как работает авто-деплой
 
-- Пуш в ветку `cursor/-bc-3072b8d9-e1a5-40ee-ba8e-b3e207efb0d0-aaef`:
+- Пуш в `main` и `cursor/**`:
   - запускаются проверки
   - при успехе автоматически вызывается деплой Render
 
