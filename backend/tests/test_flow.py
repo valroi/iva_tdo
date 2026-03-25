@@ -332,6 +332,38 @@ def test_main_flow_and_user_governance():
         )
         assert response.status_code == 200, response.text
 
+        # Review center flow should update revision and MDR progress milestones.
+        crs = client.post(
+            "/api/v1/review/crs",
+            json={"revision_id": revision_id, "text": "Need to clarify note", "status": "OPEN", "page": 2},
+            headers=_auth_header(owner_access),
+        )
+        assert crs.status_code == 201, crs.text
+        crs_id = crs.json()["id"]
+
+        crs_code = client.put(
+            f"/api/v1/review/crs/{crs_id}/code",
+            json={"review_code": "CO", "status": "OPEN"},
+            headers=_auth_header(owner_access),
+        )
+        assert crs_code.status_code == 200, crs_code.text
+
+        acrs = client.post(
+            f"/api/v1/review/acrs/{crs_id}",
+            json={"revision_id": revision_id, "text": "Adjusted per comment", "status": "RESOLVED"},
+            headers=_auth_header(contractor_access),
+        )
+        assert acrs.status_code == 201, acrs.text
+
+        mdr_after_review = client.get(
+            f"/api/v1/mdr/{mdr_id}",
+            headers=_auth_header(contractor_access),
+        )
+        assert mdr_after_review.status_code == 200, mdr_after_review.text
+        mdr_payload = mdr_after_review.json()
+        assert mdr_payload["progress_percent"] >= 80
+        assert mdr_payload["dates"].get("80") is not None
+
         # Self-registration + main admin approval flow.
         registration_request = client.post(
             "/api/v1/auth/register-request",

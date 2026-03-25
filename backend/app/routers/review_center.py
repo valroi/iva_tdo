@@ -25,11 +25,25 @@ from app.schemas import (
 router = APIRouter()
 
 
+MDR_PROGRESS_MILESTONES = (70, 75, 80, 85, 90, 100)
+
+
 def _ensure_revision(db: Session, revision_id: int) -> Revision:
     revision = db.query(Revision).filter(Revision.id == revision_id).first()
     if revision is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
     return revision
+
+
+def _apply_mdr_progress(mdr, next_progress: float) -> None:
+    reached_progress = max(float(mdr.progress_percent or 0), float(next_progress))
+    now_iso = datetime.utcnow().isoformat()
+    dates = dict(mdr.dates or {})
+    for milestone in MDR_PROGRESS_MILESTONES:
+        if reached_progress >= milestone and not dates.get(str(milestone)):
+            dates[str(milestone)] = now_iso
+    mdr.progress_percent = reached_progress
+    mdr.dates = dates
 
 
 def _ensure_can_issue_crs(user: User) -> None:
@@ -135,6 +149,23 @@ def set_crs_review_code(
 
     db.add(comment)
     db.add(revision)
+
+    # Keep MDR progress in sync with review events:
+    # 75% after first IFR review, 85% after second IFR review (rev B+).
+    document = revision.document
+    if document is not None:
+        mdr = document.mdr
+        if mdr is not None:
+            is_ifr = revision.issue_purpose.upper() == "IFR"
+            if is_ifr:
+                next_progress = 85.0 if revision.revision_code.upper() >= "B" else 75.0
+                _apply_mdr_progress(mdr, next_progress)
+            mdr.review_code = payload.review_code
+            mdr.status = revision.status
+            mdr.revision = revision.revision_code
+            mdr.issue_purpose = revision.issue_purpose
+            mdr.trm_number = revision.trm_number
+            db.add(mdr)
     db.add(
         RevisionWorkflowEvent(
             revision_id=revision.id,
@@ -183,6 +214,19 @@ def issue_acrs(
     db.add(response)
     db.add(parent)
     db.add(revision)
+
+    # When contractor sends answered comments with corrected docs,
+    # keep MDR at least on rework/re-review milestone.
+    document = revision.document
+    if document is not None:
+        mdr = document.mdr
+        if mdr is not None:
+            _apply_mdr_progress(mdr, 80.0)
+            mdr.status = revision.status
+            mdr.revision = revision.revision_code
+            mdr.issue_purpose = revision.issue_purpose
+            mdr.trm_number = revision.trm_number
+            db.add(mdr)
     db.add(
         RevisionWorkflowEvent(
             revision_id=revision.id,
