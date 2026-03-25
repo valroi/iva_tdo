@@ -37,10 +37,21 @@ interface Props {
   onOpenMdr: (projectCode: string, category?: string) => void;
 }
 
+const projectMemberRoleLabels: Record<ProjectMemberRole, string> = {
+  main_admin: "Главный админ проекта",
+  participant: "Участник проекта",
+  observer: "Наблюдатель (только просмотр)",
+};
+
+const projectMemberRoleDescriptions: Record<ProjectMemberRole, string> = {
+  main_admin: "Системная роль создателя проекта. Назначается автоматически.",
+  participant: "Рабочий участник проекта: основные действия в рамках прав пользователя.",
+  observer: "Доступ только на просмотр в рамках проекта.",
+};
+
 const projectMemberRoleOptions: { value: ProjectMemberRole; label: string }[] = [
-  { value: "main_admin", label: "main_admin" },
-  { value: "participant", label: "participant" },
-  { value: "observer", label: "observer" },
+  { value: "participant", label: projectMemberRoleLabels.participant },
+  { value: "observer", label: projectMemberRoleLabels.observer },
 ];
 
 const projectCategoryOptions = [
@@ -64,6 +75,7 @@ export default function ProjectsPage({ currentUser, projects, onReload, onOpenMd
 
   const [memberOpen, setMemberOpen] = useState(false);
   const [memberForm] = Form.useForm();
+  const [isAddingMember, setIsAddingMember] = useState(false);
 
   const [referenceOpen, setReferenceOpen] = useState(false);
   const [referenceForm] = Form.useForm();
@@ -174,7 +186,11 @@ export default function ProjectsPage({ currentUser, projects, onReload, onOpenMd
       title: "Роль в проекте",
       dataIndex: "member_role",
       key: "member_role",
-      render: (value: ProjectMemberRole) => <Tag color="blue">{value}</Tag>,
+      render: (value: ProjectMemberRole) => (
+        <Tooltip title={projectMemberRoleDescriptions[value]}>
+          <Tag color="blue">{projectMemberRoleLabels[value]}</Tag>
+        </Tooltip>
+      ),
     },
     {
       title: "Приглашение подрядчика",
@@ -389,20 +405,29 @@ export default function ProjectsPage({ currentUser, projects, onReload, onOpenMd
         open={memberOpen}
         title="Добавить участника в проект"
         onCancel={() => setMemberOpen(false)}
+        okButtonProps={{ loading: isAddingMember }}
         onOk={async () => {
-          if (!selectedProjectId) {
-            message.warning("Сначала выберите проект");
-            return;
+          setIsAddingMember(true);
+          try {
+            if (!selectedProjectId) {
+              message.warning("Сначала выберите проект");
+              return;
+            }
+            const values = await memberForm.validateFields();
+            await addProjectMember(selectedProjectId, values);
+            message.success("Участник добавлен");
+            setMemberOpen(false);
+            memberForm.resetFields();
+            await reloadProjectData();
+          } catch (error: unknown) {
+            const text = error instanceof Error ? error.message : "Не удалось добавить участника";
+            message.error(text);
+          } finally {
+            setIsAddingMember(false);
           }
-          const values = await memberForm.validateFields();
-          await addProjectMember(selectedProjectId, values);
-          message.success("Участник добавлен");
-          setMemberOpen(false);
-          memberForm.resetFields();
-          await reloadProjectData();
         }}
       >
-        <Form form={memberForm} layout="vertical">
+        <Form form={memberForm} layout="vertical" initialValues={{ member_role: "participant" }}>
           <Form.Item name="user_id" label="Пользователь" rules={[{ required: true }]}>
             <Select
               showSearch
@@ -411,7 +436,17 @@ export default function ProjectsPage({ currentUser, projects, onReload, onOpenMd
             />
           </Form.Item>
           <Form.Item name="member_role" label="Роль в проекте" rules={[{ required: true }]}>
-            <Select options={projectMemberRoleOptions} />
+            <Select
+              options={projectMemberRoleOptions}
+              optionRender={(option) => {
+                const role = option.value as ProjectMemberRole;
+                return (
+                  <Tooltip title={projectMemberRoleDescriptions[role]}>
+                    <span>{String(option.label)}</span>
+                  </Tooltip>
+                );
+              }}
+            />
           </Form.Item>
         </Form>
       </Modal>
