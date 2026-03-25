@@ -87,7 +87,7 @@ class ProjectRead(BaseModel):
 
 class ProjectMemberCreate(BaseModel):
     user_id: int
-    member_role: ProjectMemberRole = ProjectMemberRole.observer
+    member_role: ProjectMemberRole | None = None
 
 
 class ProjectMemberRead(BaseModel):

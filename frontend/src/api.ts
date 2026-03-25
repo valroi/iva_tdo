@@ -91,6 +91,20 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await response.json()) as T;
 }
 
+async function requestWithTimeout<T>(path: string, init: RequestInit = {}, timeoutMs = 20_000): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await request<T>(path, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("Превышено время ожидания ответа сервера");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 export async function login(email: string, password: string): Promise<void> {
   const tokens = await request<Tokens>("/auth/login", {
     method: "POST",
@@ -446,12 +460,16 @@ export function listProjectMembers(projectId: number): Promise<ProjectMember[]> 
 
 export function addProjectMember(
   projectId: number,
-  payload: { user_id: number; member_role: ProjectMemberRole },
+  payload: { user_id: number; member_role?: ProjectMemberRole },
 ): Promise<ProjectMember> {
-  return request<ProjectMember>(`/projects/${projectId}/members`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+  return requestWithTimeout<ProjectMember>(
+    `/projects/${projectId}/members`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+    20_000,
+  );
 }
 
 export function deleteProjectMember(projectId: number, memberId: number): Promise<void> {
