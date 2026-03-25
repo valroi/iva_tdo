@@ -44,25 +44,27 @@ jobs:
   deploy_frontend:
     runs-on: ubuntu-latest
     needs: verify
-    if: ${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK_URL != '' }}
+    env:
+      RENDER_FRONTEND_DEPLOY_HOOK_URL: ${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK_URL }}
     steps:
       - name: Trigger Render frontend deploy
-        run: curl -fsS -X POST "${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK_URL }}"
+        run: |
+          if [ -z "${RENDER_FRONTEND_DEPLOY_HOOK_URL}" ]; then
+            echo "RENDER_FRONTEND_DEPLOY_HOOK_URL is not set, skipping deploy."
+            exit 0
+          fi
+          curl -fsS -X POST "${RENDER_FRONTEND_DEPLOY_HOOK_URL}"
 
   deploy_backend:
     runs-on: ubuntu-latest
     needs: verify
-    if: ${{ secrets.RENDER_BACKEND_DEPLOY_HOOK_URL != '' }}
+    env:
+      RENDER_BACKEND_DEPLOY_HOOK_URL: ${{ secrets.RENDER_BACKEND_DEPLOY_HOOK_URL }}
     steps:
       - name: Trigger Render backend deploy
-        run: curl -fsS -X POST "${{ secrets.RENDER_BACKEND_DEPLOY_HOOK_URL }}"
-
-  deploy_hooks_hint:
-    runs-on: ubuntu-latest
-    needs: verify
-    if: ${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK_URL == '' || secrets.RENDER_BACKEND_DEPLOY_HOOK_URL == '' }}
-    steps:
-      - name: Missing hooks notice
         run: |
-          echo "One or more deploy hook secrets are missing."
-          echo "Set RENDER_FRONTEND_DEPLOY_HOOK_URL and RENDER_BACKEND_DEPLOY_HOOK_URL in GitHub repo secrets."
+          if [ -z "${RENDER_BACKEND_DEPLOY_HOOK_URL}" ]; then
+            echo "RENDER_BACKEND_DEPLOY_HOOK_URL is not set, skipping deploy."
+            exit 0
+          fi
+          curl -fsS -X POST "${RENDER_BACKEND_DEPLOY_HOOK_URL}"
