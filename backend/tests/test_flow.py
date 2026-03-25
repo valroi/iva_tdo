@@ -160,10 +160,11 @@ def test_main_flow_and_user_governance():
 
         add_owner_member = client.post(
             f"/api/v1/projects/{project_id}/members",
-            json={"user_id": owner_id, "member_role": "participant"},
+            json={"user_id": owner_id},
             headers=_auth_header(main_admin_access),
         )
         assert add_owner_member.status_code == 201, add_owner_member.text
+        assert add_owner_member.json()["member_role"] == "participant"
         owner_member_id = add_owner_member.json()["id"]
         assert add_owner_member.json()["member_role"] == "participant"
 

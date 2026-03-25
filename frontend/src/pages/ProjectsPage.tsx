@@ -28,7 +28,7 @@ import {
   listUsers,
   updateProjectReference,
 } from "../api";
-import type { ProjectItem, ProjectMember, ProjectMemberRole, ProjectReference, User } from "../types";
+import type { ProjectItem, ProjectMember, ProjectReference, User } from "../types";
 
 interface Props {
   currentUser: User;
@@ -37,22 +37,17 @@ interface Props {
   onOpenMdr: (projectCode: string, category?: string) => void;
 }
 
-const projectMemberRoleLabels: Record<ProjectMemberRole, string> = {
+const projectMemberRoleLabels = {
   main_admin: "Главный админ проекта",
   participant: "Участник проекта",
   observer: "Наблюдатель (только просмотр)",
 };
 
-const projectMemberRoleDescriptions: Record<ProjectMemberRole, string> = {
+const projectMemberRoleDescriptions = {
   main_admin: "Системная роль создателя проекта. Назначается автоматически.",
   participant: "Рабочий участник проекта: основные действия в рамках прав пользователя.",
   observer: "Доступ только на просмотр в рамках проекта.",
 };
-
-const projectMemberRoleOptions: { value: ProjectMemberRole; label: string }[] = [
-  { value: "participant", label: projectMemberRoleLabels.participant },
-  { value: "observer", label: projectMemberRoleLabels.observer },
-];
 
 const projectCategoryOptions = [
   { value: "PF", label: "PF — Pre-FEED" },
@@ -414,7 +409,7 @@ export default function ProjectsPage({ currentUser, projects, onReload, onOpenMd
               return;
             }
             const values = await memberForm.validateFields();
-            await addProjectMember(selectedProjectId, values);
+            await addProjectMember(selectedProjectId, { user_id: values.user_id });
             message.success("Участник добавлен");
             setMemberOpen(false);
             memberForm.resetFields();
@@ -427,7 +422,7 @@ export default function ProjectsPage({ currentUser, projects, onReload, onOpenMd
           }
         }}
       >
-        <Form form={memberForm} layout="vertical" initialValues={{ member_role: "participant" }}>
+        <Form form={memberForm} layout="vertical">
           <Form.Item name="user_id" label="Пользователь" rules={[{ required: true }]}>
             <Select
               showSearch
@@ -435,19 +430,9 @@ export default function ProjectsPage({ currentUser, projects, onReload, onOpenMd
               options={users.map((u) => ({ value: u.id, label: `${u.full_name} (${u.email})` }))}
             />
           </Form.Item>
-          <Form.Item name="member_role" label="Роль в проекте" rules={[{ required: true }]}>
-            <Select
-              options={projectMemberRoleOptions}
-              optionRender={(option) => {
-                const role = option.value as ProjectMemberRole;
-                return (
-                  <Tooltip title={projectMemberRoleDescriptions[role]}>
-                    <span>{String(option.label)}</span>
-                  </Tooltip>
-                );
-              }}
-            />
-          </Form.Item>
+          <Typography.Text type="secondary">
+            Пользователь будет добавлен как: <strong>Участник проекта</strong>.
+          </Typography.Text>
         </Form>
       </Modal>
 

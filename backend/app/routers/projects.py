@@ -499,7 +499,7 @@ def add_project_member(
     if target_user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-    requested_role = payload.member_role
+    requested_role = payload.member_role or ProjectMemberRole.participant
     if requested_role == ProjectMemberRole.main_admin:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

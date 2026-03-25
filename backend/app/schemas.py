@@ -88,7 +88,7 @@ class ProjectRead(BaseModel):
 
 class ProjectMemberCreate(BaseModel):
     user_id: int
-    member_role: ProjectMemberRole
+    member_role: ProjectMemberRole = ProjectMemberRole.participant
 
 
 class ProjectMemberRead(BaseModel):

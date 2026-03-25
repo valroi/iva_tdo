@@ -471,7 +471,7 @@ export function listProjectMembers(projectId: number): Promise<ProjectMember[]> 
 
 export function addProjectMember(
   projectId: number,
-  payload: { user_id: number; member_role: ProjectMemberRole },
+  payload: { user_id: number; member_role?: ProjectMemberRole },
 ): Promise<ProjectMember> {
   return request<ProjectMember>(`/projects/${projectId}/members`, {
     method: "POST",
