@@ -165,6 +165,7 @@ def test_main_flow_and_user_governance():
         )
         assert add_owner_member.status_code == 201, add_owner_member.text
         owner_member_id = add_owner_member.json()["id"]
+        assert add_owner_member.json()["member_role"] == "participant"
 
         refs = client.get(
             f"/api/v1/projects/{project_id}/references",

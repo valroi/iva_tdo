@@ -499,13 +499,31 @@ def add_project_member(
     if target_user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
+    requested_role = payload.member_role
+    if requested_role == ProjectMemberRole.main_admin:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="main_admin role is reserved and assigned automatically",
+        )
+
     existing = (
         db.query(ProjectMember)
         .filter(ProjectMember.project_id == project_id, ProjectMember.user_id == payload.user_id)
         .first()
     )
     if existing is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already in project")
+        if existing.member_role == requested_role:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already in project with this role")
+        if existing.member_role == ProjectMemberRole.main_admin:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot change main admin role from this action",
+            )
+        existing.member_role = requested_role
+        db.add(existing)
+        db.commit()
+        db.refresh(existing)
+        return existing
 
     if not _can_manage_members(db, project_id, current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No rights to add project members")
@@ -513,7 +531,7 @@ def add_project_member(
     member = ProjectMember(
         project_id=project_id,
         user_id=payload.user_id,
-        member_role=payload.member_role,
+        member_role=requested_role,
         can_manage_contractor_users=False,
     )
     db.add(member)
