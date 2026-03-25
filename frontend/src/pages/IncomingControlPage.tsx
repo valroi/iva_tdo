@@ -1,18 +1,23 @@
-import { Button, Card, Input, Select, Space, Table, Tag, Typography, message } from "antd";
+import { Alert, Button, Card, Input, Space, Table, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
 
 import { listTransmittals, submitIncomingCheck } from "../api";
-import type { IncomingDecision, Transmittal } from "../types";
+import type { IncomingDecision, Transmittal, User } from "../types";
 
 interface Props {
+  currentUser: User;
   onReloadAll: () => Promise<void>;
 }
 
-export default function IncomingControlPage({ onReloadAll }: Props): JSX.Element {
+export default function IncomingControlPage({ currentUser, onReloadAll }: Props): JSX.Element {
   const [loading, setLoading] = useState(false);
   const [transmittals, setTransmittals] = useState<Transmittal[]>([]);
   const [reasonById, setReasonById] = useState<Record<number, string>>({});
+  const canIncomingControl = useMemo(
+    () => ["admin", "owner_manager", "owner_reviewer"].includes(currentUser.role),
+    [currentUser.role],
+  );
 
   const loadData = async () => {
     setLoading(true);
@@ -107,6 +112,14 @@ export default function IncomingControlPage({ onReloadAll }: Props): JSX.Element
         </Typography.Title>
         <Button onClick={() => void loadData()}>Обновить</Button>
       </Space>
+      {!canIncomingControl && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="Только роли Owner/Admin могут выполнять входной контроль"
+        />
+      )}
 
       <Table rowKey="id" loading={loading} columns={columns} dataSource={queue} />
     </Card>
