@@ -1,0 +1,68 @@
+name: Verify and deploy (Render)
+
+on:
+  push:
+    branches:
+      - "cursor/-bc-3072b8d9-e1a5-40ee-ba8e-b3e207efb0d0-aaef"
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: python -m pip install -r requirements.txt
+
+      - name: Run backend tests
+        working-directory: backend
+        run: python -m pytest -q
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+  deploy_frontend:
+    runs-on: ubuntu-latest
+    needs: verify
+    if: ${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK_URL != '' }}
+    steps:
+      - name: Trigger Render frontend deploy
+        run: curl -fsS -X POST "${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK_URL }}"
+
+  deploy_backend:
+    runs-on: ubuntu-latest
+    needs: verify
+    if: ${{ secrets.RENDER_BACKEND_DEPLOY_HOOK_URL != '' }}
+    steps:
+      - name: Trigger Render backend deploy
+        run: curl -fsS -X POST "${{ secrets.RENDER_BACKEND_DEPLOY_HOOK_URL }}"
+
+  deploy_hooks_hint:
+    runs-on: ubuntu-latest
+    needs: verify
+    if: ${{ secrets.RENDER_FRONTEND_DEPLOY_HOOK_URL == '' || secrets.RENDER_BACKEND_DEPLOY_HOOK_URL == '' }}
+    steps:
+      - name: Missing hooks notice
+        run: |
+          echo "One or more deploy hook secrets are missing."
+          echo "Set RENDER_FRONTEND_DEPLOY_HOOK_URL and RENDER_BACKEND_DEPLOY_HOOK_URL in GitHub repo secrets."
