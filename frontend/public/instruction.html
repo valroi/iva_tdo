@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>IvaMaris TDO — Инструкция пользователя</title>
+    <style>
+      body { font-family: Inter, Arial, sans-serif; margin: 0; background: #f5f6f8; color: #1f2937; }
+      .wrap { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
+      .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+      h1 { font-size: 24px; margin: 0 0 12px; }
+      h2 { font-size: 18px; margin: 0 0 10px; }
+      li { margin: 6px 0; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border: 1px solid #e5e7eb; padding: 8px; text-align: left; font-size: 13px; }
+      .muted { color: #6b7280; }
+      .yes { color: #059669; font-weight: 600; }
+      .no { color: #dc2626; font-weight: 600; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <h1>IvaMaris TDO — инструкция пользователя</h1>
+        <p class="muted">Страница для рабочих пользователей проекта (не для разработчиков).</p>
+      </div>
+
+      <div class="card">
+        <h2>Основной процесс работы</h2>
+        <ol>
+          <li>Главный админ создает карточку проекта: код, название, описание.</li>
+          <li>Главный админ назначает руководителя ТДО подрядчика.</li>
+          <li>Руководитель ТДО подрядчика добавляет участников подрядчика в проект.</li>
+          <li>Базовые справочники накатываются автоматически, главный админ при необходимости их редактирует.</li>
+          <li>Подрядчик формирует MDR и создает документы/ревизии.</li>
+          <li>Подрядчик загружает PDF в ревизию кнопкой «PDF».</li>
+          <li>Заказчик проверяет ревизию и оставляет комментарии.</li>
+          <li>Подрядчик отвечает на комментарии до согласования.</li>
+        </ol>
+      </div>
+
+      <div class="card">
+        <h2>Матрица ролей и процессов</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Процесс</th>
+              <th>Главный админ</th>
+              <th>Админ</th>
+              <th>Рук. ТДО подрядчика</th>
+              <th>Автор подрядчика</th>
+              <th>Owner manager</th>
+              <th>Owner reviewer</th>
+              <th>Viewer</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>Создание карточки проекта</td><td class="yes">Да</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td></tr>
+            <tr><td>Удаление карточки проекта (без MDR)</td><td class="yes">Да</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td></tr>
+            <tr><td>Назначение руководителя ТДО</td><td class="yes">Да</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td></tr>
+            <tr><td>Добавление подрядчиков в проект</td><td class="yes">Да</td><td class="no">Нет</td><td class="yes">Да</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td></tr>
+            <tr><td>Удаление участников подрядчика из проекта</td><td class="yes">Да</td><td class="no">Нет</td><td class="yes">Да</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td></tr>
+            <tr><td>Редактирование справочников проекта</td><td class="yes">Да</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td></tr>
+            <tr><td>Создание MDR</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td></tr>
+            <tr><td>Загрузка PDF в ревизию</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td></tr>
+            <tr><td>Комментарий к ревизии</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="no">Нет</td></tr>
+            <tr><td>Ответ на комментарий</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </body>
+</html>
