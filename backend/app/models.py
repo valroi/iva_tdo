@@ -66,6 +66,18 @@ class MatrixReviewRole(str, enum.Enum):
     I = "I"
 
 
+class TransmittalStatus(str, enum.Enum):
+    DRAFT = "DRAFT"
+    SENT = "SENT"
+    INCOMING_ACCEPTED = "INCOMING_ACCEPTED"
+    INCOMING_REJECTED = "INCOMING_REJECTED"
+
+
+class IncomingDecision(str, enum.Enum):
+    ACCEPT = "ACCEPT"
+    REJECT = "REJECT"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -390,6 +402,7 @@ class Revision(Base):
 
     document: Mapped["Document"] = relationship("Document", back_populates="revisions")
     comments: Mapped[list["Comment"]] = relationship("Comment", back_populates="revision")
+    transmittal_items: Mapped[list["TransmittalItem"]] = relationship("TransmittalItem", back_populates="revision")
 
 
 class RevisionAttachment(Base):
@@ -414,6 +427,56 @@ class RevisionWorkflowEvent(Base):
     action: Mapped[str] = mapped_column(String(80), nullable=False)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class Transmittal(Base):
+    __tablename__ = "transmittals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    trm_number: Mapped[str] = mapped_column(String(120), unique=True, nullable=False, index=True)
+    issue_purpose: Mapped[str] = mapped_column(String(40), nullable=False)
+    channel: Mapped[str] = mapped_column(String(40), default="tdms", nullable=False)
+    status: Mapped[TransmittalStatus] = mapped_column(
+        Enum(TransmittalStatus),
+        default=TransmittalStatus.DRAFT,
+        nullable=False,
+    )
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    items: Mapped[list["TransmittalItem"]] = relationship("TransmittalItem", back_populates="transmittal")
+    incoming_checks: Mapped[list["IncomingControlEvent"]] = relationship(
+        "IncomingControlEvent",
+        back_populates="transmittal",
+    )
+
+
+class TransmittalItem(Base):
+    __tablename__ = "transmittal_items"
+    __table_args__ = (UniqueConstraint("transmittal_id", "revision_id", name="uq_transmittal_revision"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    transmittal_id: Mapped[int] = mapped_column(ForeignKey("transmittals.id"), nullable=False, index=True)
+    revision_id: Mapped[int] = mapped_column(ForeignKey("revisions.id"), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    transmittal: Mapped["Transmittal"] = relationship("Transmittal", back_populates="items")
+    revision: Mapped["Revision"] = relationship("Revision", back_populates="transmittal_items")
+
+
+class IncomingControlEvent(Base):
+    __tablename__ = "incoming_control_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    transmittal_id: Mapped[int] = mapped_column(ForeignKey("transmittals.id"), nullable=False, index=True)
+    actor_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    decision: Mapped[IncomingDecision] = mapped_column(Enum(IncomingDecision), nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    transmittal: Mapped["Transmittal"] = relationship("Transmittal", back_populates="incoming_checks")
 
 
 class Comment(Base):
