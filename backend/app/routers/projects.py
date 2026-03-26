@@ -1,6 +1,7 @@
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -329,6 +330,11 @@ def _can_manage_references(user: User) -> bool:
     return user.role.value == "admin"
 
 
+def _is_project_member_role_enum_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "invalid input value for enum" in text and "projectmemberrole" in text
+
+
 @router.get("", response_model=list[ProjectRead])
 def list_projects(
     db: Session = Depends(get_db),
@@ -496,7 +502,33 @@ def add_project_member(
             )
         existing.member_role = requested_role
         db.add(existing)
-        db.commit()
+        try:
+            db.commit()
+        except DataError as exc:
+            db.rollback()
+            # Some old DB environments may still have enum without "participant".
+            if requested_role == ProjectMemberRole.participant and _is_project_member_role_enum_error(exc):
+                existing = (
+                    db.query(ProjectMember)
+                    .filter(ProjectMember.project_id == project_id, ProjectMember.user_id == payload.user_id)
+                    .first()
+                )
+                if existing is None:
+                    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already in project")
+                if existing.member_role == ProjectMemberRole.observer:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="User already in project with this role",
+                    )
+                existing.member_role = ProjectMemberRole.observer
+                db.add(existing)
+                db.commit()
+                db.refresh(existing)
+                return existing
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid project member role")
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already in project")
         db.refresh(existing)
         return existing
 
@@ -510,7 +542,30 @@ def add_project_member(
         can_manage_contractor_users=False,
     )
     db.add(member)
-    db.commit()
+    try:
+        db.commit()
+    except DataError as exc:
+        db.rollback()
+        # Compatibility fallback for old postgres enum values.
+        if requested_role == ProjectMemberRole.participant and _is_project_member_role_enum_error(exc):
+            fallback_member = ProjectMember(
+                project_id=project_id,
+                user_id=payload.user_id,
+                member_role=ProjectMemberRole.observer,
+                can_manage_contractor_users=False,
+            )
+            db.add(fallback_member)
+            try:
+                db.commit()
+            except IntegrityError:
+                db.rollback()
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already in project")
+            db.refresh(fallback_member)
+            return fallback_member
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid project member role")
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already in project")
     db.refresh(member)
     return member
 
