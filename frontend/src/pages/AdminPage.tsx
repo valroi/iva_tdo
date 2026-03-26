@@ -73,7 +73,6 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
   const [loading, setLoading] = useState(false);
   const [selectedReferenceIds, setSelectedReferenceIds] = useState<number[]>([]);
   const [filterProjectIds, setFilterProjectIds] = useState<number[]>([]);
-  const [filterRefTypes, setFilterRefTypes] = useState<string[]>([]);
   const [referenceEditOpen, setReferenceEditOpen] = useState(false);
   const [selectedReference, setSelectedReference] = useState<ProjectReferenceSelectionItem | null>(null);
   const [referenceEditForm] = Form.useForm();
@@ -307,17 +306,29 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
       if (filterProjectIds.length > 0 && !filterProjectIds.includes(row.project_id)) {
         return false;
       }
-      if (filterRefTypes.length > 0 && !filterRefTypes.includes(row.ref_type)) {
-        return false;
-      }
       return true;
     });
-  }, [filterProjectIds, filterRefTypes, referenceRows]);
+  }, [filterProjectIds, referenceRows]);
 
   const selectedReferenceRows = useMemo(
     () => visibleReferenceRows.filter((row) => selectedReferenceIds.includes(row.id)),
     [selectedReferenceIds, visibleReferenceRows],
   );
+  const referenceRowsByType = useMemo(() => {
+    const grouped = new Map<string, ProjectReferenceSelectionItem[]>();
+    visibleReferenceRows.forEach((row) => {
+      if (!grouped.has(row.ref_type)) {
+        grouped.set(row.ref_type, []);
+      }
+      grouped.get(row.ref_type)?.push(row);
+    });
+    return Array.from(grouped.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([refType, rows]) => ({
+        refType,
+        rows: rows.slice().sort((a, b) => a.code.localeCompare(b.code)),
+      }));
+  }, [visibleReferenceRows]);
 
   const referenceColumns: ColumnsType<ProjectReferenceSelectionItem> = [
     {
@@ -326,7 +337,6 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
       render: (_, row) => `${row.project_code} — ${row.project_name}`,
       width: 260,
     },
-    { title: "Тип", dataIndex: "ref_type", key: "ref_type", width: 220 },
     { title: "Код", dataIndex: "code", key: "code", width: 140 },
     { title: "Значение", dataIndex: "value", key: "value" },
     {
@@ -458,17 +468,6 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
                     onChange={setFilterProjectIds}
                     options={projects.map((p) => ({ value: p.id, label: `${p.code} — ${p.name}` }))}
                   />
-                  <Select
-                    mode="multiple"
-                    allowClear
-                    style={{ minWidth: 320 }}
-                    placeholder="Фильтр по типам справочника"
-                    value={filterRefTypes}
-                    onChange={setFilterRefTypes}
-                    options={Array.from(new Set(referenceRows.map((r) => r.ref_type)))
-                      .sort((a, b) => a.localeCompare(b))
-                      .map((refType) => ({ value: refType, label: refType }))}
-                  />
                   <Popconfirm
                     title={`Удалить выбранные записи (${selectedReferenceRows.length})?`}
                     description={
@@ -505,17 +504,29 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
                     Выбрано: {selectedReferenceIds.length}
                   </Typography.Text>
                 </Space>
-                <Table
-                  rowKey="id"
-                  loading={loading}
-                  columns={referenceColumns}
-                  dataSource={visibleReferenceRows}
-                  rowSelection={{
-                    selectedRowKeys: selectedReferenceIds,
-                    onChange: (keys) => setSelectedReferenceIds(keys as number[]),
-                    preserveSelectedRowKeys: true,
-                  }}
-                />
+                {referenceRowsByType.length === 0 ? (
+                  <Typography.Text type="secondary">Нет данных справочников для выбранных фильтров.</Typography.Text>
+                ) : (
+                  referenceRowsByType.map((group) => (
+                    <div key={group.refType}>
+                      <Typography.Title level={5} style={{ marginBottom: 8 }}>
+                        {group.refType}
+                      </Typography.Title>
+                      <Table
+                        rowKey="id"
+                        loading={loading}
+                        columns={referenceColumns}
+                        dataSource={group.rows}
+                        pagination={false}
+                        rowSelection={{
+                          selectedRowKeys: selectedReferenceIds,
+                          onChange: (keys) => setSelectedReferenceIds(keys as number[]),
+                          preserveSelectedRowKeys: true,
+                        }}
+                      />
+                    </div>
+                  ))
+                )}
               </Space>
             ),
           },
