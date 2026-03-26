@@ -32,12 +32,16 @@ import { useEffect, useMemo, useState } from "react";
 import {
   buildDocumentViewUrl,
   createDocument,
+  createMdr,
   createMdrBulk,
+  createProjectReference,
   createRevision,
   downloadMdrImportTemplate,
+  generateTrmNumber,
   importMdrFromXlsx,
   listComments,
   listProjectReferences,
+  previewMdrDocNumber,
   listRevisions,
   uploadRevisionPdf,
 } from "../api";
@@ -53,6 +57,19 @@ interface TreeSelection {
   documentId?: number;
   revisionId?: number;
 }
+
+const projectRefTypeTitlesRu: Record<string, string> = {
+  document_category: "Категории документации",
+  numbering_attribute: "Атрибуты нумерации",
+  document_type: "Типы документов",
+  discipline: "Дисциплины",
+  se_reporting_type: "Типы отчетов ИИ",
+  facility_title: "Титулы / Объекты",
+  pd_book: "Разделы ПД",
+  procurement_request_type: "Типы запросов закупки",
+  equipment_type: "Типы оборудования",
+  identifier_pattern: "Шаблоны идентификаторов",
+};
 
 interface Props {
   currentUser: User;
@@ -108,6 +125,11 @@ export default function RegistryTreePage({
 
   const [docOpen, setDocOpen] = useState(false);
   const [docForm] = Form.useForm();
+  const [docNumberGenerating, setDocNumberGenerating] = useState(false);
+  const [categoryCreateOpen, setCategoryCreateOpen] = useState(false);
+  const [categoryCreateForm] = Form.useForm();
+  const [mdrCreateOpen, setMdrCreateOpen] = useState(false);
+  const [mdrCreateForm] = Form.useForm();
   const [revisionUploadOpen, setRevisionUploadOpen] = useState(false);
   const [revisionOpen, setRevisionOpen] = useState(false);
   const [revisionForm] = Form.useForm();
@@ -416,6 +438,26 @@ export default function RegistryTreePage({
       ? refsForSelectedProject.filter((r) => r.ref_type === "pd_book" && r.is_active)
       : refsForSelectedProject.filter((r) => r.ref_type === "document_type" && r.is_active)
   ).map((r) => ({ value: r.code, label: `${r.code} — ${r.value}` }));
+  const selectedMdrRow = selected.mdrId ? mdr.find((row) => row.id === selected.mdrId) ?? null : null;
+  const docDisciplineOptions = refsForSelectedProject
+    .filter((r) => r.ref_type === "discipline" && r.is_active)
+    .map((r) => ({ value: r.code, label: `${r.code} — ${r.value}` }));
+  const docTypeOptionsForSelectedMdr = selectedMdrRow
+    ? (
+        selectedMdrRow.category === "SE"
+          ? refsForSelectedProject.filter((r) => r.ref_type === "se_reporting_type" && r.is_active)
+          : selectedMdrRow.category === "PD"
+            ? refsForSelectedProject.filter((r) => r.ref_type === "pd_book" && r.is_active)
+            : refsForSelectedProject.filter((r) => r.ref_type === "document_type" && r.is_active)
+      ).map((r) => ({ value: r.code, label: `${r.code} — ${r.value}` }))
+    : [];
+  const mdrCreateCategory = Form.useWatch("category", mdrCreateForm);
+  const mdrCreateDocTypeOptions = (mdrCreateCategory === "SE"
+    ? refsForSelectedProject.filter((r) => r.ref_type === "se_reporting_type" && r.is_active)
+    : mdrCreateCategory === "PD"
+      ? refsForSelectedProject.filter((r) => r.ref_type === "pd_book" && r.is_active)
+      : refsForSelectedProject.filter((r) => r.ref_type === "document_type" && r.is_active)
+  ).map((r) => ({ value: r.code, label: `${r.code} — ${r.value}` }));
 
   const mdrColumns: ColumnsType<MDRRecord> = [
     { title: "Шифр / Number", dataIndex: "doc_number", key: "doc_number" },
@@ -615,6 +657,80 @@ export default function RegistryTreePage({
     await onReloadAll();
   };
 
+  const submitCreateCategory = async () => {
+    if (!selected.projectCode) {
+      message.warning("Сначала выберите проект в дереве");
+      return;
+    }
+    const values = await categoryCreateForm.validateFields();
+    const project = projects.find((item) => item.code === selected.projectCode);
+    if (!project) {
+      message.error("Проект не найден");
+      return;
+    }
+    await createProjectReference(project.id, {
+      ref_type: "document_category",
+      code: String(values.code).trim().toUpperCase(),
+      value: String(values.value).trim(),
+      is_active: true,
+    });
+    message.success("Категория документации добавлена");
+    setCategoryCreateOpen(false);
+    categoryCreateForm.resetFields();
+    setRefsByProject((prev) => ({ ...prev, [project.code]: undefined as unknown as ProjectReference[] }));
+    await onReloadAll();
+  };
+
+  const submitCreateMdrRow = async () => {
+    if (!selected.projectCode || !selected.category) {
+      message.warning("Сначала выберите категорию в дереве");
+      return;
+    }
+    const values = await mdrCreateForm.validateFields();
+    await createMdr({
+      document_key: String(values.document_key).trim(),
+      project_code: selected.projectCode,
+      category: selected.category,
+      title_object: values.title_object,
+      discipline_code: values.discipline_code,
+      doc_type: values.doc_type,
+      doc_name: values.doc_name,
+      doc_weight: values.doc_weight ?? 1,
+      progress_percent: 0,
+      status: "DRAFT",
+      dates: {},
+    });
+    message.success("Строка MDR создана");
+    setMdrCreateOpen(false);
+    mdrCreateForm.resetFields();
+    await onReloadAll();
+  };
+
+  const generateDocumentNumber = async () => {
+    if (!selected.mdrId) {
+      message.warning("Сначала выберите строку MDR");
+      return;
+    }
+    const selectedMdr = mdr.find((row) => row.id === selected.mdrId);
+    if (!selectedMdr) {
+      message.error("MDR запись не найдена");
+      return;
+    }
+    setDocNumberGenerating(true);
+    try {
+      const result = await previewMdrDocNumber({
+        project_code: selectedMdr.project_code,
+        category: selectedMdr.category,
+        title_object: selectedMdr.title_object ?? "",
+        discipline_code: selectedMdr.discipline_code,
+        doc_type: selectedMdr.doc_type,
+      });
+      docForm.setFieldValue("document_num", result.doc_number);
+    } finally {
+      setDocNumberGenerating(false);
+    }
+  };
+
   const submitCreateRevision = async () => {
     if (!selected.documentId) {
       message.warning("Выберите документ");
@@ -634,6 +750,11 @@ export default function RegistryTreePage({
     await onReloadAll();
   };
 
+  const generateRevisionTrm = async () => {
+    const result = await generateTrmNumber();
+    revisionForm.setFieldValue("trm_number", result.trm_number);
+  };
+
   const submitRevisionPdf = async () => {
     if (!selected.revisionId || !uploadFile) {
       message.warning("Выберите ревизию и PDF");
@@ -650,7 +771,10 @@ export default function RegistryTreePage({
   const canCreateDocument = selected.mdrId !== undefined;
   const canCreateRevision =
     selected.documentId !== undefined &&
-    (currentUser.role === "admin" || currentUser.role === "contractor_manager" || currentUser.role === "contractor_author");
+    (currentUser.role === "admin" ||
+      currentUser.role === "contractor" ||
+      currentUser.role === "contractor_manager" ||
+      currentUser.role === "contractor_author");
   const selectedDocumentCard = selected.documentId
     ? documents.find((doc) => doc.id === selected.documentId) ?? null
     : null;
@@ -677,7 +801,20 @@ export default function RegistryTreePage({
 
       <Row gutter={16}>
         <Col span={8}>
-          <Card title="Структура проекта" styles={{ body: { maxHeight: 760, overflow: "auto" } }}>
+          <Card
+            title="Структура проекта"
+            extra={
+              <Space>
+                <Button size="small" onClick={() => setCategoryCreateOpen(true)} disabled={!selected.projectCode}>
+                  + Категория
+                </Button>
+                <Button size="small" onClick={() => setMdrCreateOpen(true)} disabled={!(selected.projectCode && selected.category)}>
+                  + Строка документа
+                </Button>
+              </Space>
+            }
+            styles={{ body: { maxHeight: 760, overflow: "auto" } }}
+          >
             <Tree
               showIcon
               selectedKeys={selectedTreeKey ? [selectedTreeKey] : []}
@@ -999,15 +1136,89 @@ export default function RegistryTreePage({
       <Modal open={docOpen} onCancel={() => setDocOpen(false)} onOk={() => void submitCreateDocument()} title="Создать документ">
         <Form form={docForm} layout="vertical">
           <Form.Item name="document_num" label="Шифр документа" rules={[{ required: true }]}>
-            <Input placeholder="Используйте шифр MDR или дочерний номер" />
+            <Input
+              placeholder="Используйте автогенерацию по маске"
+              addonAfter={
+                <Button size="small" loading={docNumberGenerating} onClick={() => void generateDocumentNumber()}>
+                  Сгенерировать
+                </Button>
+              }
+            />
           </Form.Item>
           <Form.Item name="title" label="Название" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
           <Form.Item name="discipline" label="Дисциплина" rules={[{ required: true }]}>
-            <Input />
+            <Select
+              showSearch
+              placeholder="Выберите дисциплину"
+              options={docDisciplineOptions}
+              filterOption={(input, option) => String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())}
+            />
+          </Form.Item>
+          <Form.Item name="doc_type" label="Тип документа" rules={[{ required: true }]}>
+            <Select
+              showSearch
+              placeholder="Выберите тип документа"
+              options={docTypeOptionsForSelectedMdr}
+              filterOption={(input, option) => String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())}
+            />
           </Form.Item>
           <Form.Item name="weight" label="Вес" initialValue={1}>
+            <InputNumber min={0} max={100} style={{ width: "100%" }} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        open={categoryCreateOpen}
+        title="Добавить категорию документации"
+        onCancel={() => setCategoryCreateOpen(false)}
+        onOk={() => void submitCreateCategory()}
+      >
+        <Form form={categoryCreateForm} layout="vertical">
+          <Form.Item name="code" label="Код категории" rules={[{ required: true }]}>
+            <Input placeholder="Например: ID" />
+          </Form.Item>
+          <Form.Item name="value" label="Наименование категории" rules={[{ required: true }]}>
+            <Input placeholder="Исходная документация / Issued Documents" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        open={mdrCreateOpen}
+        title="Создать строку документа (MDR)"
+        onCancel={() => setMdrCreateOpen(false)}
+        onOk={() => void submitCreateMdrRow()}
+      >
+        <Form
+          form={mdrCreateForm}
+          layout="vertical"
+          initialValues={{
+            category: selected.category,
+            doc_weight: 1,
+          }}
+        >
+          <Form.Item name="document_key" label="Внутренний ключ" rules={[{ required: true }]}>
+            <Input placeholder="Например: DOC-KEY-001" />
+          </Form.Item>
+          <Form.Item name="category" label="Категория" rules={[{ required: true }]}>
+            <Select options={categoryOptions} />
+          </Form.Item>
+          <Form.Item name="title_object" label="Титул/Объект" rules={[{ required: true }]}>
+            <Select showSearch options={titleOptions} />
+          </Form.Item>
+          <Form.Item name="discipline_code" label="Дисциплина" rules={[{ required: true }]}>
+            <Select showSearch options={disciplineOptions} />
+          </Form.Item>
+          <Form.Item name="doc_type" label="Тип документа" rules={[{ required: true }]}>
+            <Select showSearch options={mdrCreateDocTypeOptions} />
+          </Form.Item>
+          <Form.Item name="doc_name" label="Наименование документа" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="doc_weight" label="Вес" rules={[{ required: true }]}>
             <InputNumber min={0} max={100} style={{ width: "100%" }} />
           </Form.Item>
         </Form>
@@ -1031,7 +1242,14 @@ export default function RegistryTreePage({
             />
           </Form.Item>
           <Form.Item name="trm_number" label="TRM номер">
-            <Input placeholder="TRM-001" />
+            <Input
+              placeholder="Автогенерация TRM"
+              addonAfter={
+                <Button size="small" onClick={() => void generateRevisionTrm()}>
+                  Сгенерировать
+                </Button>
+              }
+            />
           </Form.Item>
         </Form>
       </Modal>

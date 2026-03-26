@@ -15,7 +15,7 @@ export default function IncomingControlPage({ currentUser, onReloadAll }: Props)
   const [transmittals, setTransmittals] = useState<Transmittal[]>([]);
   const [reasonById, setReasonById] = useState<Record<number, string>>({});
   const canIncomingControl = useMemo(
-    () => ["admin", "owner_manager", "owner_reviewer"].includes(currentUser.role),
+    () => ["admin", "owner", "owner_manager", "owner_reviewer", "viewer"].includes(currentUser.role),
     [currentUser.role],
   );
 
@@ -117,7 +117,7 @@ export default function IncomingControlPage({ currentUser, onReloadAll }: Props)
           type="warning"
           showIcon
           style={{ marginBottom: 12 }}
-          message="Только роли Owner/Admin могут выполнять входной контроль"
+          message="Только роли заказчика/Admin могут выполнять входной контроль"
         />
       )}
 

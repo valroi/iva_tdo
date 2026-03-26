@@ -212,6 +212,10 @@ export function previewMdrDocNumber(payload: {
   });
 }
 
+export function generateTrmNumber(): Promise<{ trm_number: string }> {
+  return request<{ trm_number: string }>("/transmittals/next-number");
+}
+
 export function listDocuments(): Promise<DocumentItem[]> {
   return request<DocumentItem[]>("/documents");
 }
@@ -379,7 +383,7 @@ export function listTransmittals(): Promise<Transmittal[]> {
 }
 
 export function createTransmittal(payload: {
-  trm_number: string;
+  trm_number?: string;
   issue_purpose: string;
   channel?: string;
   note?: string | null;

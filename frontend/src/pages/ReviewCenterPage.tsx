@@ -18,9 +18,17 @@ interface Props {
 }
 
 export default function ReviewCenterPage({ documents, currentUser, onReloadAll }: Props): JSX.Element {
-  const canIssueCrs = currentUser.role === "admin" || currentUser.role === "owner_manager" || currentUser.role === "owner_reviewer";
+  const canIssueCrs =
+    currentUser.role === "admin" ||
+    currentUser.role === "owner" ||
+    currentUser.role === "owner_manager" ||
+    currentUser.role === "owner_reviewer" ||
+    currentUser.role === "viewer";
   const canIssueAcrs =
-    currentUser.role === "admin" || currentUser.role === "contractor_manager" || currentUser.role === "contractor_author";
+    currentUser.role === "admin" ||
+    currentUser.role === "contractor" ||
+    currentUser.role === "contractor_manager" ||
+    currentUser.role === "contractor_author";
   const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(documents[0]?.id ?? null);
   const [selectedRevisionId, setSelectedRevisionId] = useState<number | null>(null);
   const [revisions, setRevisions] = useState<Revision[]>([]);

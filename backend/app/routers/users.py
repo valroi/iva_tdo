@@ -133,7 +133,7 @@ def quick_demo_setup(
         hashed_password=get_password_hash(payload.password),
         full_name="Demo Contractor",
         company_type=CompanyType.contractor,
-        role=UserRole.contractor_manager,
+        role=UserRole.contractor,
         is_active=True,
     )
     owner = User(
@@ -141,7 +141,7 @@ def quick_demo_setup(
         hashed_password=get_password_hash(payload.password),
         full_name="Demo Owner",
         company_type=CompanyType.owner,
-        role=UserRole.owner_reviewer,
+        role=UserRole.owner,
         is_active=True,
     )
     db.add(contractor)
@@ -278,7 +278,7 @@ def approve_registration_request(
     if existing_user is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
-    target_role = payload.role or request_item.requested_role or UserRole.viewer
+    target_role = payload.role or request_item.requested_role or UserRole.owner
     target_company_type = payload.company_type or request_item.company_type
 
     _validate_admin_constraints(current_user, target_role, target_company_type)

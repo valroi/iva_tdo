@@ -2,7 +2,6 @@ import {
   ApartmentOutlined,
   BellOutlined,
   CheckSquareOutlined,
-  EyeOutlined,
   HomeOutlined,
   LogoutOutlined,
   ProjectOutlined,
@@ -33,7 +32,6 @@ import ProjectsPage from "./pages/ProjectsPage";
 import RegistryTreePage from "./pages/RegistryTreePage";
 import IncomingControlPage from "./pages/IncomingControlPage";
 import ReviewCenterPage from "./pages/ReviewCenterPage";
-import ViewerPage from "./pages/ViewerPage";
 import type { DocumentItem, MDRRecord, NotificationItem, ProjectItem, User, WorkflowStatus } from "./types";
 
 const { Header, Sider, Content } = Layout;
@@ -44,7 +42,6 @@ type Section =
   | "registry_tree"
   | "incoming_control"
   | "review_center"
-  | "viewer"
   | "tasks"
   | "notifications"
   | "admin"
@@ -103,7 +100,6 @@ export default function App(): JSX.Element {
       { key: "registry_tree", icon: <ApartmentOutlined />, label: "Иерархия реестра" },
       { key: "incoming_control", icon: <SafetyCertificateOutlined />, label: "Входной контроль" },
       { key: "review_center", icon: <CheckSquareOutlined />, label: "Review Center" },
-      { key: "viewer", icon: <EyeOutlined />, label: "Viewer" },
       { key: "tasks", icon: <CheckSquareOutlined />, label: "Мои задачи" },
       { key: "notifications", icon: <BellOutlined />, label: "Уведомления" },
       { key: "help", icon: <ReadOutlined />, label: "Инструкция" },
@@ -122,7 +118,6 @@ export default function App(): JSX.Element {
     registry_tree: "Иерархия реестра",
     incoming_control: "Входной контроль",
     review_center: "Review Center",
-    viewer: "Viewer",
     tasks: "Мои задачи",
     notifications: "Уведомления",
     admin: "Администрирование",
@@ -221,7 +216,6 @@ export default function App(): JSX.Element {
               {activeSection === "review_center" && user && (
                 <ReviewCenterPage documents={documents} currentUser={user} onReloadAll={loadInitialData} />
               )}
-              {activeSection === "viewer" && <ViewerPage documents={documents} />}
               {activeSection === "tasks" && user && (
                 <MyTasksPage currentUser={user} notifications={notifications} documents={documents} mdr={mdr} />
               )}

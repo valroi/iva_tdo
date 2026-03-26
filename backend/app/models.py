@@ -27,6 +27,9 @@ class CompanyType(str, enum.Enum):
 
 class UserRole(str, enum.Enum):
     admin = "admin"
+    owner = "owner"
+    contractor = "contractor"
+    # Legacy roles kept for backward compatibility with existing DB rows.
     owner_manager = "owner_manager"
     owner_reviewer = "owner_reviewer"
     contractor_manager = "contractor_manager"

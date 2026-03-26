@@ -17,8 +17,8 @@ import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
 
 import {
-  bulkDeleteProjectReferences,
   approveRegistrationRequest,
+  createProjectReference,
   createQuickDemoSetup,
   createUser,
   deleteUser,
@@ -51,11 +51,8 @@ interface Props {
 
 const roleOptions: { value: UserRole; label: string }[] = [
   { value: "admin", label: roleDisplayRuEn("admin") },
-  { value: "owner_manager", label: roleDisplayRuEn("owner_manager") },
-  { value: "owner_reviewer", label: roleDisplayRuEn("owner_reviewer") },
-  { value: "contractor_manager", label: roleDisplayRuEn("contractor_manager") },
-  { value: "contractor_author", label: roleDisplayRuEn("contractor_author") },
-  { value: "viewer", label: roleDisplayRuEn("viewer") },
+  { value: "owner", label: roleDisplayRuEn("owner") },
+  { value: "contractor", label: roleDisplayRuEn("contractor") },
 ];
 
 const companyOptions: { value: CompanyType; label: string }[] = [
@@ -64,6 +61,19 @@ const companyOptions: { value: CompanyType; label: string }[] = [
   { value: "contractor", label: "contractor" },
 ];
 
+const projectRefTypeTitlesRu: Record<string, string> = {
+  document_category: "Категории документации",
+  numbering_attribute: "Атрибуты нумерации",
+  document_type: "Типы документов",
+  discipline: "Дисциплины",
+  se_reporting_type: "Типы отчетов ИИ",
+  facility_title: "Титулы / Объекты",
+  pd_book: "Разделы ПД",
+  procurement_request_type: "Типы запросов закупки",
+  equipment_type: "Типы оборудования",
+  identifier_pattern: "Шаблоны идентификаторов",
+};
+
 export default function AdminPage({ currentUser }: Props): JSX.Element {
   const [users, setUsers] = useState<User[]>([]);
   const [requests, setRequests] = useState<RegistrationRequest[]>([]);
@@ -71,11 +81,12 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
   const [referenceRows, setReferenceRows] = useState<ProjectReferenceSelectionItem[]>([]);
   const [isMainAdmin, setIsMainAdmin] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [selectedReferenceIds, setSelectedReferenceIds] = useState<number[]>([]);
   const [filterProjectIds, setFilterProjectIds] = useState<number[]>([]);
   const [referenceEditOpen, setReferenceEditOpen] = useState(false);
   const [selectedReference, setSelectedReference] = useState<ProjectReferenceSelectionItem | null>(null);
   const [referenceEditForm] = Form.useForm();
+  const [referenceCreateOpen, setReferenceCreateOpen] = useState(false);
+  const [referenceCreateForm] = Form.useForm();
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm] = Form.useForm();
 
@@ -275,7 +286,7 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
             onClick={() => {
               setSelectedRequest(row);
               approveForm.setFieldsValue({
-                role: row.requested_role ?? "viewer",
+                role: row.requested_role ?? "owner",
                 company_type: row.company_type,
                 is_active: true,
               });
@@ -310,10 +321,6 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
     });
   }, [filterProjectIds, referenceRows]);
 
-  const selectedReferenceRows = useMemo(
-    () => visibleReferenceRows.filter((row) => selectedReferenceIds.includes(row.id)),
-    [selectedReferenceIds, visibleReferenceRows],
-  );
   const referenceRowsByType = useMemo(() => {
     const grouped = new Map<string, ProjectReferenceSelectionItem[]>();
     visibleReferenceRows.forEach((row) => {
@@ -468,41 +475,10 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
                     onChange={setFilterProjectIds}
                     options={projects.map((p) => ({ value: p.id, label: `${p.code} — ${p.name}` }))}
                   />
-                  <Popconfirm
-                    title={`Удалить выбранные записи (${selectedReferenceRows.length})?`}
-                    description={
-                      selectedReferenceRows.length > 0
-                        ? `Проекты: ${Array.from(new Set(selectedReferenceRows.map((r) => r.project_code)))
-                            .sort((a, b) => a.localeCompare(b))
-                            .join(", ")}`
-                        : "Операция необратима. Удалятся значения справочников из выбранных проектов."
-                    }
-                    disabled={selectedReferenceRows.length === 0}
-                    onConfirm={async () => {
-                      try {
-                        const idsToDelete = selectedReferenceRows.map((row) => row.id);
-                        if (idsToDelete.some((id) => id === selectedReference?.id)) {
-                          setReferenceEditOpen(false);
-                          setSelectedReference(null);
-                        }
-                        const response = await bulkDeleteProjectReferences(idsToDelete);
-                        message.success(`Удалено записей: ${response.deleted_count}`);
-                        setSelectedReferenceIds((prev) => prev.filter((id) => !idsToDelete.includes(id)));
-                        await loadData();
-                      } catch (error: unknown) {
-                        const text =
-                          error instanceof Error ? error.message : "Не удалось удалить выбранные справочники";
-                        message.error(text);
-                      }
-                    }}
-                  >
-                    <Button danger disabled={selectedReferenceRows.length === 0}>
-                      Массовое удаление
-                    </Button>
-                  </Popconfirm>
-                  <Typography.Text type="secondary">
-                    Выбрано: {selectedReferenceIds.length}
-                  </Typography.Text>
+                  <Button type="primary" onClick={() => setReferenceCreateOpen(true)}>
+                    + Добавить значение
+                  </Button>
+                  <Typography.Text type="secondary">Добавляйте/удаляйте записи справочников по кнопкам в строках.</Typography.Text>
                 </Space>
                 {referenceRowsByType.length === 0 ? (
                   <Typography.Text type="secondary">Нет данных справочников для выбранных фильтров.</Typography.Text>
@@ -510,7 +486,7 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
                   referenceRowsByType.map((group) => (
                     <div key={group.refType}>
                       <Typography.Title level={5} style={{ marginBottom: 8 }}>
-                        {group.refType}
+                        {projectRefTypeTitlesRu[group.refType] ?? group.refType}
                       </Typography.Title>
                       <Table
                         rowKey="id"
@@ -518,11 +494,6 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
                         columns={referenceColumns}
                         dataSource={group.rows}
                         pagination={false}
-                        rowSelection={{
-                          selectedRowKeys: selectedReferenceIds,
-                          onChange: (keys) => setSelectedReferenceIds(keys as number[]),
-                          preserveSelectedRowKeys: true,
-                        }}
                       />
                     </div>
                   ))
@@ -567,6 +538,74 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
       </Modal>
 
       <Modal
+        open={referenceCreateOpen}
+        title="Добавить запись справочника"
+        onCancel={() => setReferenceCreateOpen(false)}
+        onOk={async () => {
+          const values = await referenceCreateForm.validateFields();
+          try {
+            await createProjectReference(values.project_id, {
+              ref_type: values.ref_type,
+              code: values.code,
+              value: values.value,
+              is_active: values.is_active,
+            });
+            message.success("Запись справочника добавлена");
+            referenceCreateForm.resetFields();
+            setReferenceCreateOpen(false);
+            await loadData();
+          } catch (error: unknown) {
+            const text = error instanceof Error ? error.message : "Не удалось добавить запись справочника";
+            message.error(text);
+          }
+        }}
+      >
+        <Form
+          form={referenceCreateForm}
+          layout="vertical"
+          initialValues={{
+            is_active: true,
+            ref_type: "document_type",
+            project_id: projects[0]?.id,
+          }}
+        >
+          <Form.Item name="project_id" label="Проект" rules={[{ required: true }]}>
+            <Select options={projects.map((project) => ({ value: project.id, label: `${project.code} — ${project.name}` }))} />
+          </Form.Item>
+          <Form.Item name="ref_type" label="Тип справочника" rules={[{ required: true }]}>
+            <Select
+              options={[
+                { value: "document_category", label: projectRefTypeTitlesRu.document_category },
+                { value: "numbering_attribute", label: projectRefTypeTitlesRu.numbering_attribute },
+                { value: "document_type", label: projectRefTypeTitlesRu.document_type },
+                { value: "discipline", label: projectRefTypeTitlesRu.discipline },
+                { value: "se_reporting_type", label: projectRefTypeTitlesRu.se_reporting_type },
+                { value: "facility_title", label: projectRefTypeTitlesRu.facility_title },
+                { value: "pd_book", label: projectRefTypeTitlesRu.pd_book },
+                { value: "procurement_request_type", label: projectRefTypeTitlesRu.procurement_request_type },
+                { value: "equipment_type", label: projectRefTypeTitlesRu.equipment_type },
+                { value: "identifier_pattern", label: projectRefTypeTitlesRu.identifier_pattern },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="code" label="Код" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="value" label="Значение" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="is_active" label="Активен" rules={[{ required: true }]}>
+            <Select
+              options={[
+                { value: true, label: "Да" },
+                { value: false, label: "Нет" },
+              ]}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
         open={createOpen}
         title="Создать пользователя"
         onCancel={() => setCreateOpen(false)}
@@ -584,7 +623,7 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
           layout="vertical"
           initialValues={{
             company_type: "contractor",
-            role: "viewer",
+            role: "contractor",
             can_manage_mdr: false,
             can_manage_project_members: false,
           }}

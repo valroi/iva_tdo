@@ -1,3 +1,6 @@
+import re
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -25,6 +28,19 @@ from app.schemas import (
 router = APIRouter()
 
 
+def _next_trm_number(db: Session) -> str:
+    # Simple sequential TRM number generator: TRM-00001, TRM-00002, ...
+    max_seq = 0
+    for (trm_number,) in db.query(Transmittal.trm_number).all():
+        if not trm_number:
+            continue
+        value = trm_number.strip().upper()
+        match = re.match(r"^TRM[-_]?(\d+)$", value)
+        if match:
+            max_seq = max(max_seq, int(match.group(1)))
+    return f"TRM-{max_seq + 1:05d}"
+
+
 @router.get("/transmittals", response_model=list[TransmittalRead])
 def list_transmittals(
     db: Session = Depends(get_db),
@@ -33,13 +49,29 @@ def list_transmittals(
     return db.query(Transmittal).order_by(Transmittal.id.desc()).all()
 
 
+@router.get("/transmittals/next-number")
+def get_next_transmittal_number(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    return {"trm_number": _next_trm_number(db)}
+
+
 @router.post("/transmittals", response_model=TransmittalRead, status_code=status.HTTP_201_CREATED)
 def create_transmittal(
     payload: TransmittalCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(UserRole.admin, UserRole.contractor_manager, UserRole.contractor_author)),
+    current_user: User = Depends(
+        require_roles(
+            UserRole.admin,
+            UserRole.contractor,
+            UserRole.contractor_manager,
+            UserRole.contractor_author,
+        )
+    ),
 ):
-    existing = db.query(Transmittal).filter(Transmittal.trm_number == payload.trm_number).first()
+    trm_number = payload.trm_number or _next_trm_number(db)
+    existing = db.query(Transmittal).filter(Transmittal.trm_number == trm_number).first()
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Transmittal number already exists")
 
@@ -55,18 +87,19 @@ def create_transmittal(
         )
 
     transmittal = Transmittal(
-        trm_number=payload.trm_number,
+        trm_number=trm_number,
         issue_purpose=payload.issue_purpose,
         channel=payload.channel,
         note=payload.note,
         status=TransmittalStatus.SENT,
         created_by_id=current_user.id,
+        submitted_at=datetime.utcnow(),
     )
     db.add(transmittal)
     db.flush()
 
     for revision in revisions:
-        revision.trm_number = payload.trm_number
+        revision.trm_number = trm_number
         revision.status = "IN_INCOMING_CHECK"
         db.add(revision)
         db.add(TransmittalItem(transmittal_id=transmittal.id, revision_id=revision.id))
@@ -75,7 +108,7 @@ def create_transmittal(
         Notification(
             user_id=current_user.id,
             event_type="TRM_SUBMITTED",
-            message=f"TRM {payload.trm_number} submitted with {len(revisions)} revision(s)",
+            message=f"TRM {trm_number} submitted with {len(revisions)} revision(s)",
         )
     )
     db.commit()
@@ -100,7 +133,14 @@ def incoming_check(
     transmittal_id: int,
     payload: IncomingControlDecision,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(UserRole.admin, UserRole.owner_manager, UserRole.owner_reviewer)),
+    current_user: User = Depends(
+        require_roles(
+            UserRole.admin,
+            UserRole.owner,
+            UserRole.owner_manager,
+            UserRole.owner_reviewer,
+        )
+    ),
 ):
     transmittal = db.query(Transmittal).filter(Transmittal.id == transmittal_id).first()
     if transmittal is None:

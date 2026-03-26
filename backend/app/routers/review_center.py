@@ -33,12 +33,12 @@ def _ensure_revision(db: Session, revision_id: int) -> Revision:
 
 
 def _ensure_can_issue_crs(user: User) -> None:
-    if user.role not in {UserRole.admin, UserRole.owner_manager, UserRole.owner_reviewer}:
+    if user.role not in {UserRole.admin, UserRole.owner_manager, UserRole.owner_reviewer, UserRole.owner}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions to issue CRS")
 
 
 def _ensure_can_issue_acrs(user: User) -> None:
-    if user.role not in {UserRole.admin, UserRole.contractor_manager, UserRole.contractor_author}:
+    if user.role not in {UserRole.admin, UserRole.contractor_manager, UserRole.contractor_author, UserRole.contractor}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions to issue ACRS")
 
 
@@ -78,7 +78,10 @@ def issue_crs(
 
     contractor_receivers = (
         db.query(User)
-        .filter(User.role.in_([UserRole.contractor_manager, UserRole.contractor_author]), User.is_active.is_(True))
+        .filter(
+            User.role.in_([UserRole.contractor_manager, UserRole.contractor_author, UserRole.contractor]),
+            User.is_active.is_(True),
+        )
         .all()
     )
     for receiver in contractor_receivers:
@@ -194,7 +197,7 @@ def issue_acrs(
 
     owner_receivers = (
         db.query(User)
-        .filter(User.role.in_([UserRole.owner_manager, UserRole.owner_reviewer]), User.is_active.is_(True))
+        .filter(User.role.in_([UserRole.owner_manager, UserRole.owner_reviewer, UserRole.owner]), User.is_active.is_(True))
         .all()
     )
     for receiver in owner_receivers:

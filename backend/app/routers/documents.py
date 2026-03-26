@@ -169,7 +169,7 @@ def create_revision(
 
     owner_receivers = users_by_company_roles(
         db,
-        company_roles=[UserRole.owner_manager, UserRole.owner_reviewer],
+        company_roles=[UserRole.owner, UserRole.owner_manager, UserRole.owner_reviewer, UserRole.viewer],
     )
     for receiver in owner_receivers:
         db.add(
@@ -219,7 +219,7 @@ def create_comment(
 
     contractor_receivers = users_by_company_roles(
         db,
-        company_roles=[UserRole.contractor_manager, UserRole.contractor_author],
+        company_roles=[UserRole.contractor, UserRole.contractor_manager, UserRole.contractor_author],
     )
     for receiver in contractor_receivers:
         db.add(
@@ -260,7 +260,7 @@ def respond_comment(
 
     owner_receivers = users_by_company_roles(
         db,
-        company_roles=[UserRole.owner_manager, UserRole.owner_reviewer],
+        company_roles=[UserRole.owner, UserRole.owner_manager, UserRole.owner_reviewer, UserRole.viewer],
     )
     for receiver in owner_receivers:
         db.add(

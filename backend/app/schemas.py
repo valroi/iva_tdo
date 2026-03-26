@@ -416,7 +416,7 @@ class RegistrationRequestRead(BaseModel):
 
 
 class RegistrationApprovePayload(BaseModel):
-    role: UserRole = UserRole.viewer
+    role: UserRole = UserRole.owner
     company_type: CompanyType | None = None
     is_active: bool = True
 
@@ -449,7 +449,7 @@ class FileUploadResponse(BaseModel):
 
 
 class TransmittalCreate(BaseModel):
-    trm_number: str
+    trm_number: str | None = None
     issue_purpose: str
     channel: str = "tdms"
     note: str | None = None

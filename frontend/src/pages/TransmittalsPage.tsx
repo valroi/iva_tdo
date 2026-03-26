@@ -71,7 +71,12 @@ export default function TransmittalsPage({ documents, onReloadAll: _onReloadAll 
 
   const canCreateTransmittal = useMemo(() => {
     if (!currentUser) return false;
-    return currentUser.role === "admin" || currentUser.role === "contractor_manager" || currentUser.role === "contractor_author";
+    return (
+      currentUser.role === "admin" ||
+      currentUser.role === "contractor" ||
+      currentUser.role === "contractor_manager" ||
+      currentUser.role === "contractor_author"
+    );
   }, [currentUser]);
 
   const submit = async () => {
@@ -101,7 +106,7 @@ export default function TransmittalsPage({ documents, onReloadAll: _onReloadAll 
       </Space>
       {!canCreateTransmittal && (
         <Typography.Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
-          Создание TRM доступно ролям: admin, contractor_manager, contractor_author.
+          Создание TRM доступно ролям: admin, contractor.
         </Typography.Text>
       )}
 
