@@ -30,8 +30,10 @@ import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
 
 import {
+  buildDocumentViewUrl,
   createDocument,
   createMdrBulk,
+  createRevision,
   downloadMdrImportTemplate,
   importMdrFromXlsx,
   listComments,
@@ -58,6 +60,8 @@ interface Props {
   mdr: MDRRecord[];
   documents: DocumentItem[];
   onReloadAll: () => Promise<void>;
+  preselectedProjectCode?: string;
+  preselectedCategory?: string;
 }
 
 export default function RegistryTreePage({
@@ -66,6 +70,8 @@ export default function RegistryTreePage({
   mdr,
   documents,
   onReloadAll,
+  preselectedProjectCode,
+  preselectedCategory,
 }: Props): JSX.Element {
   const [treeBusy, setTreeBusy] = useState(false);
   const [selected, setSelected] = useState<TreeSelection>({ kind: "project" });
@@ -103,6 +109,13 @@ export default function RegistryTreePage({
   const [docOpen, setDocOpen] = useState(false);
   const [docForm] = Form.useForm();
   const [revisionUploadOpen, setRevisionUploadOpen] = useState(false);
+  const [revisionOpen, setRevisionOpen] = useState(false);
+  const [revisionForm] = Form.useForm();
+  const [docFilters, setDocFilters] = useState<{
+    documentIds: number[];
+    disciplines: string[];
+    docTypes: string[];
+  }>({ documentIds: [], disciplines: [], docTypes: [] });
 
   const mdrByProjectCategory = useMemo(() => {
     const map = new Map<string, MDRRecord[]>();
@@ -197,7 +210,11 @@ export default function RegistryTreePage({
       const refs = refsByProject[project.code] ?? [];
       const categories = refs
         .filter((r) => r.ref_type === "document_category" && r.is_active)
-        .sort((a, b) => a.code.localeCompare(b.code));
+        .sort((a, b) => a.code.localeCompare(b.code))
+        .filter((categoryRef) => {
+          const categoryMdrRows = mdrByProjectCategory.get(`${project.code}::${categoryRef.code}`) ?? [];
+          return categoryMdrRows.some((row) => (documentsByMdr.get(row.id) ?? []).length > 0);
+        });
       const categoryNodes: DataNode[] = categories.map((categoryRef) => {
         const category = categoryRef.code;
         const mdrRows = (mdrByProjectCategory.get(`${project.code}::${category}`) ?? []).sort((a, b) =>
@@ -247,6 +264,28 @@ export default function RegistryTreePage({
     return nodes;
   }, [commentsByRevision, documentsByMdr, mdrByProjectCategory, projects, refsByProject, revisionsByDoc]);
 
+  useEffect(() => {
+    if (!preselectedProjectCode) {
+      return;
+    }
+    if (preselectedCategory) {
+      const categoryKey = `category:${preselectedProjectCode}:${preselectedCategory}`;
+      setSelectedTreeKey(categoryKey);
+      setSelected({
+        kind: "category",
+        projectCode: preselectedProjectCode,
+        category: preselectedCategory,
+      });
+      return;
+    }
+    const projectKey = `project:${preselectedProjectCode}`;
+    setSelectedTreeKey(projectKey);
+    setSelected({
+      kind: "project",
+      projectCode: preselectedProjectCode,
+    });
+  }, [preselectedProjectCode, preselectedCategory]);
+
   const selectedMdrRows = useMemo(() => {
     if (selected.projectCode && selected.category) {
       return (mdrByProjectCategory.get(`${selected.projectCode}::${selected.category}`) ?? []).sort((a, b) =>
@@ -290,6 +329,75 @@ export default function RegistryTreePage({
     }
     return [];
   }, [commentsByRevision, selected.revisionId]);
+
+  const filteredMdrRows = useMemo(() => {
+    return selectedMdrRows.filter((row) => {
+      const docs = documentsByMdr.get(row.id) ?? [];
+      if (docFilters.documentIds.length > 0 && !docs.some((doc) => docFilters.documentIds.includes(doc.id))) {
+        return false;
+      }
+      if (docFilters.disciplines.length > 0 && !docFilters.disciplines.includes(row.discipline_code)) {
+        return false;
+      }
+      if (docFilters.docTypes.length > 0 && !docFilters.docTypes.includes(row.doc_type)) {
+        return false;
+      }
+      return true;
+    });
+  }, [docFilters.disciplines, docFilters.docTypes, docFilters.documentIds, documentsByMdr, selectedMdrRows]);
+
+  const filteredDocumentRows = useMemo(() => {
+    return selectedDocumentRows.filter((doc) => {
+      if (docFilters.documentIds.length > 0 && !docFilters.documentIds.includes(doc.id)) {
+        return false;
+      }
+      if (docFilters.disciplines.length > 0 && !docFilters.disciplines.includes(doc.discipline)) {
+        return false;
+      }
+      const mdrRow = mdr.find((row) => row.id === doc.mdr_id);
+      if (docFilters.docTypes.length > 0 && mdrRow && !docFilters.docTypes.includes(mdrRow.doc_type)) {
+        return false;
+      }
+      return true;
+    });
+  }, [docFilters.disciplines, docFilters.docTypes, docFilters.documentIds, mdr, selectedDocumentRows]);
+
+  const availableFilterOptions = useMemo(() => {
+    const visibleDocs =
+      selected.projectCode && selected.category
+        ? (mdrByProjectCategory.get(`${selected.projectCode}::${selected.category}`) ?? []).flatMap(
+            (row) => documentsByMdr.get(row.id) ?? [],
+          )
+        : selectedDocumentRows;
+
+    const documentsOpts = visibleDocs
+      .map((doc) => ({ value: doc.id, label: `${doc.document_num} — ${doc.title}` }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+    const disciplinesOpts = Array.from(new Set(visibleDocs.map((doc) => doc.discipline)))
+      .sort((a, b) => a.localeCompare(b))
+      .map((value) => ({ value, label: value }));
+    const docTypesOpts = Array.from(
+      new Set(
+        visibleDocs
+          .map((doc) => mdr.find((row) => row.id === doc.mdr_id)?.doc_type)
+          .filter((value): value is string => Boolean(value)),
+      ),
+    )
+      .sort((a, b) => a.localeCompare(b))
+      .map((value) => ({ value, label: value }));
+
+    return { documentsOpts, disciplinesOpts, docTypesOpts };
+  }, [documentsByMdr, mdr, mdrByProjectCategory, selected.category, selected.projectCode, selectedDocumentRows]);
+
+  useEffect(() => {
+    setDocFilters((prev) => ({
+      documentIds: prev.documentIds.filter((value) => availableFilterOptions.documentsOpts.some((item) => item.value === value)),
+      disciplines: prev.disciplines.filter((value) =>
+        availableFilterOptions.disciplinesOpts.some((item) => item.value === value),
+      ),
+      docTypes: prev.docTypes.filter((value) => availableFilterOptions.docTypesOpts.some((item) => item.value === value)),
+    }));
+  }, [availableFilterOptions.disciplinesOpts, availableFilterOptions.docTypesOpts, availableFilterOptions.documentsOpts]);
 
   const refsForSelectedProject = selected.projectCode ? refsByProject[selected.projectCode] ?? [] : [];
   const categoryOptions = refsForSelectedProject
@@ -507,6 +615,25 @@ export default function RegistryTreePage({
     await onReloadAll();
   };
 
+  const submitCreateRevision = async () => {
+    if (!selected.documentId) {
+      message.warning("Выберите документ");
+      return;
+    }
+    const values = await revisionForm.validateFields();
+    await createRevision({
+      document_id: selected.documentId,
+      revision_code: values.revision_code,
+      issue_purpose: values.issue_purpose,
+      status: values.status,
+      trm_number: values.trm_number,
+    });
+    message.success("Ревизия создана");
+    setRevisionOpen(false);
+    revisionForm.resetFields();
+    await onReloadAll();
+  };
+
   const submitRevisionPdf = async () => {
     if (!selected.revisionId || !uploadFile) {
       message.warning("Выберите ревизию и PDF");
@@ -521,6 +648,13 @@ export default function RegistryTreePage({
 
   const canManageMdr = currentUser.role === "admin" || Boolean(currentUser.can_manage_mdr);
   const canCreateDocument = selected.mdrId !== undefined;
+  const canCreateRevision =
+    selected.documentId !== undefined &&
+    (currentUser.role === "admin" || currentUser.role === "contractor_manager" || currentUser.role === "contractor_author");
+  const selectedDocumentCard = selected.documentId
+    ? documents.find((doc) => doc.id === selected.documentId) ?? null
+    : null;
+  const selectedDocumentMdr = selectedDocumentCard ? mdr.find((row) => row.id === selectedDocumentCard.mdr_id) ?? null : null;
 
   return (
     <Space direction="vertical" size={12} style={{ width: "100%" }}>
@@ -572,6 +706,9 @@ export default function RegistryTreePage({
                   <Button disabled={!canCreateDocument} onClick={() => setDocOpen(true)}>
                     Добавить документ
                   </Button>
+                  <Button disabled={!canCreateRevision} onClick={() => setRevisionOpen(true)}>
+                    Добавить ревизию
+                  </Button>
                   <Button disabled={!selected.revisionId} icon={<UploadOutlined />} onClick={() => setRevisionUploadOpen(true)}>
                     Загрузить PDF в ревизию
                   </Button>
@@ -592,6 +729,38 @@ export default function RegistryTreePage({
             </Card>
 
             <Card>
+              <Space wrap style={{ marginBottom: 12 }}>
+                <Select
+                  mode="multiple"
+                  allowClear
+                  placeholder="Фильтр: документ"
+                  style={{ minWidth: 260 }}
+                  value={docFilters.documentIds}
+                  onChange={(values) => setDocFilters((prev) => ({ ...prev, documentIds: values }))}
+                  options={availableFilterOptions.documentsOpts}
+                />
+                <Select
+                  mode="multiple"
+                  allowClear
+                  placeholder="Фильтр: дисциплина"
+                  style={{ minWidth: 220 }}
+                  value={docFilters.disciplines}
+                  onChange={(values) => setDocFilters((prev) => ({ ...prev, disciplines: values }))}
+                  options={availableFilterOptions.disciplinesOpts}
+                />
+                <Select
+                  mode="multiple"
+                  allowClear
+                  placeholder="Фильтр: тип документа"
+                  style={{ minWidth: 220 }}
+                  value={docFilters.docTypes}
+                  onChange={(values) => setDocFilters((prev) => ({ ...prev, docTypes: values }))}
+                  options={availableFilterOptions.docTypesOpts}
+                />
+                <Button onClick={() => setDocFilters({ documentIds: [], disciplines: [], docTypes: [] })}>
+                  Сбросить фильтры
+                </Button>
+              </Space>
               <Tabs
                 items={[
                   {
@@ -602,7 +771,7 @@ export default function RegistryTreePage({
                         rowKey="id"
                         size="small"
                         columns={mdrColumns}
-                        dataSource={selectedMdrRows}
+                        dataSource={filteredMdrRows}
                         pagination={{ pageSize: 10 }}
                       />
                     ),
@@ -615,7 +784,7 @@ export default function RegistryTreePage({
                         rowKey="id"
                         size="small"
                         columns={docColumns}
-                        dataSource={selectedDocumentRows}
+                        dataSource={filteredDocumentRows}
                         pagination={{ pageSize: 10 }}
                       />
                     ),
@@ -649,6 +818,53 @@ export default function RegistryTreePage({
                 ]}
               />
             </Card>
+
+            {selectedDocumentCard && (
+              <Card title={`Карточка документа: ${selectedDocumentCard.document_num}`}>
+                <Row gutter={16}>
+                  <Col span={12}>
+                    <Typography.Paragraph>
+                      <strong>Название:</strong> {selectedDocumentCard.title}
+                    </Typography.Paragraph>
+                    <Typography.Paragraph>
+                      <strong>Дисциплина:</strong> {selectedDocumentCard.discipline}
+                    </Typography.Paragraph>
+                    <Typography.Paragraph>
+                      <strong>Вес:</strong> {selectedDocumentCard.weight}
+                    </Typography.Paragraph>
+                    <Typography.Paragraph>
+                      <strong>Создан:</strong> {selectedDocumentCard.created_at}
+                    </Typography.Paragraph>
+                  </Col>
+                  <Col span={12}>
+                    <Typography.Paragraph>
+                      <strong>Проект:</strong> {selectedDocumentMdr?.project_code ?? "—"}
+                    </Typography.Paragraph>
+                    <Typography.Paragraph>
+                      <strong>Категория:</strong> {selectedDocumentMdr?.category ?? "—"}
+                    </Typography.Paragraph>
+                    <Typography.Paragraph>
+                      <strong>Тип документа:</strong> {selectedDocumentMdr?.doc_type ?? "—"}
+                    </Typography.Paragraph>
+                    <Typography.Paragraph>
+                      <strong>Прогресс:</strong> {selectedDocumentMdr?.progress_percent ?? 0}%
+                    </Typography.Paragraph>
+                    <Typography.Paragraph>
+                      <strong>Код ревью:</strong> {selectedDocumentMdr?.review_code ?? "—"}
+                    </Typography.Paragraph>
+                  </Col>
+                </Row>
+                <Space>
+                  {selectedRevisionRows[0] && selectedRevisionRows[0].file_path ? (
+                    <Button href={buildDocumentViewUrl(selectedRevisionRows[0].id)} target="_blank">
+                      Открыть PDF текущей ревизии
+                    </Button>
+                  ) : (
+                    <Typography.Text type="secondary">PDF в текущей ревизии еще не загружен</Typography.Text>
+                  )}
+                </Space>
+              </Card>
+            )}
           </Space>
         </Col>
       </Row>
@@ -793,6 +1009,29 @@ export default function RegistryTreePage({
           </Form.Item>
           <Form.Item name="weight" label="Вес" initialValue={1}>
             <InputNumber min={0} max={100} style={{ width: "100%" }} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal open={revisionOpen} onCancel={() => setRevisionOpen(false)} onOk={() => void submitCreateRevision()} title="Создать ревизию">
+        <Form form={revisionForm} layout="vertical" initialValues={{ status: "SUBMITTED" }}>
+          <Form.Item name="revision_code" label="Код ревизии" rules={[{ required: true }]}>
+            <Input placeholder="A" />
+          </Form.Item>
+          <Form.Item name="issue_purpose" label="Цель выпуска" rules={[{ required: true }]}>
+            <Input placeholder="IFR" />
+          </Form.Item>
+          <Form.Item name="status" label="Статус" rules={[{ required: true }]}>
+            <Select
+              options={[
+                { value: "DRAFT", label: "DRAFT" },
+                { value: "SUBMITTED", label: "SUBMITTED" },
+                { value: "IN_REVIEW", label: "IN_REVIEW" },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="trm_number" label="TRM номер">
+            <Input placeholder="TRM-001" />
           </Form.Item>
         </Form>
       </Modal>

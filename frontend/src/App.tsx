@@ -2,14 +2,11 @@ import {
   ApartmentOutlined,
   BellOutlined,
   CheckSquareOutlined,
-  DatabaseOutlined,
   EyeOutlined,
-  FileOutlined,
   HomeOutlined,
   LogoutOutlined,
   ProjectOutlined,
   ReadOutlined,
-  SendOutlined,
   TeamOutlined,
   SafetyCertificateOutlined,
 } from "@ant-design/icons";
@@ -28,15 +25,12 @@ import {
 } from "./api";
 import LoginForm from "./components/LoginForm";
 import DashboardPage from "./pages/DashboardPage";
-import DocumentsPage from "./pages/DocumentsPage";
 import HelpPage from "./pages/HelpPage";
-import MdrPage from "./pages/MdrPage";
 import MyTasksPage from "./pages/MyTasksPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import AdminPage from "./pages/AdminPage";
 import ProjectsPage from "./pages/ProjectsPage";
 import RegistryTreePage from "./pages/RegistryTreePage";
-import TransmittalsPage from "./pages/TransmittalsPage";
 import IncomingControlPage from "./pages/IncomingControlPage";
 import ReviewCenterPage from "./pages/ReviewCenterPage";
 import ViewerPage from "./pages/ViewerPage";
@@ -48,9 +42,6 @@ type Section =
   | "dashboard"
   | "projects"
   | "registry_tree"
-  | "mdr"
-  | "documents"
-  | "transmittals"
   | "incoming_control"
   | "review_center"
   | "viewer"
@@ -63,7 +54,7 @@ export default function App(): JSX.Element {
   const [authenticated, setAuthenticated] = useState(hasAccessToken());
   const [loading, setLoading] = useState(false);
   const [activeSection, setActiveSection] = useState<Section>("dashboard");
-  const [mdrPrefill, setMdrPrefill] = useState<{ projectCode?: string; category?: string } | null>(null);
+  const [registryPrefill, setRegistryPrefill] = useState<{ projectCode?: string; category?: string } | null>(null);
 
   const [user, setUser] = useState<User | null>(null);
   const [mdr, setMdr] = useState<MDRRecord[]>([]);
@@ -110,9 +101,6 @@ export default function App(): JSX.Element {
       { key: "dashboard", icon: <HomeOutlined />, label: "Обзор" },
       { key: "projects", icon: <ProjectOutlined />, label: "Проекты" },
       { key: "registry_tree", icon: <ApartmentOutlined />, label: "Иерархия реестра" },
-      { key: "mdr", icon: <DatabaseOutlined />, label: "Реестр MDR" },
-      { key: "documents", icon: <FileOutlined />, label: "Документы" },
-      { key: "transmittals", icon: <SendOutlined />, label: "TRM центр" },
       { key: "incoming_control", icon: <SafetyCertificateOutlined />, label: "Входной контроль" },
       { key: "review_center", icon: <CheckSquareOutlined />, label: "Review Center" },
       { key: "viewer", icon: <EyeOutlined />, label: "Viewer" },
@@ -132,9 +120,6 @@ export default function App(): JSX.Element {
     dashboard: "Обзор",
     projects: "Проекты",
     registry_tree: "Иерархия реестра",
-    mdr: "Реестр MDR",
-    documents: "Документы",
-    transmittals: "TRM центр",
     incoming_control: "Входной контроль",
     review_center: "Review Center",
     viewer: "Viewer",
@@ -214,8 +199,8 @@ export default function App(): JSX.Element {
                   projects={projects}
                   onReload={loadInitialData}
                   onOpenMdr={(projectCode, category) => {
-                    setMdrPrefill({ projectCode, category });
-                    setActiveSection("mdr");
+                    setRegistryPrefill({ projectCode, category });
+                    setActiveSection("registry_tree");
                   }}
                 />
               )}
@@ -226,22 +211,9 @@ export default function App(): JSX.Element {
                   mdr={mdr}
                   documents={documents}
                   onReloadAll={loadInitialData}
+                  preselectedProjectCode={registryPrefill?.projectCode}
+                  preselectedCategory={registryPrefill?.category}
                 />
-              )}
-              {activeSection === "mdr" && (
-                <MdrPage
-                  mdr={mdr}
-                  projects={projects}
-                  onCreated={loadInitialData}
-                  preselectedProjectCode={mdrPrefill?.projectCode}
-                  preselectedCategory={mdrPrefill?.category}
-                />
-              )}
-              {activeSection === "documents" && (
-                <DocumentsPage documents={documents} mdr={mdr} onReloadDocuments={loadInitialData} />
-              )}
-              {activeSection === "transmittals" && (
-                <TransmittalsPage documents={documents} onReloadAll={loadInitialData} />
               )}
               {activeSection === "incoming_control" && user && (
                 <IncomingControlPage currentUser={user} onReloadAll={loadInitialData} />
