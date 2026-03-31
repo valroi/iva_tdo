@@ -66,6 +66,36 @@ def seed_default_data(db: Session) -> None:
             main_admin.is_active = True
             db.add(main_admin)
 
+    demo_users = [
+        ("tdolead_ctr@mail.ru", "Contractor TDO Lead", CompanyType.contractor),
+        ("dev_ctr@mail.ru", "Contractor Developer", CompanyType.contractor),
+        ("owner_lr@mail.ru", "Owner Lead Reviewer", CompanyType.owner),
+        ("owner_rev@mail.ru", "Owner Reviewer", CompanyType.owner),
+    ]
+    for email, full_name, company_type in demo_users:
+        user = db.query(User).filter(User.email == email).first()
+        if user is None:
+            user = User(
+                email=email,
+                hashed_password=get_password_hash("Password_123!"),
+                full_name=full_name,
+                company_code=("CTR" if company_type == CompanyType.contractor else "OWN"),
+                company_type=company_type,
+                role=UserRole.user,
+                permissions=default_permissions_for_role(UserRole.user),
+                is_active=True,
+            )
+            db.add(user)
+        else:
+            user.hashed_password = get_password_hash("Password_123!")
+            user.full_name = full_name
+            user.company_type = company_type
+            user.company_code = user.company_code or ("CTR" if company_type == CompanyType.contractor else "OWN")
+            user.role = UserRole.user
+            user.permissions = user.permissions or default_permissions_for_role(UserRole.user)
+            user.is_active = True
+            db.add(user)
+
     statuses = [
         ("AP", "Approved", "#52c41a", True),
         ("AN", "Approved as Note", "#13c2c2", True),
