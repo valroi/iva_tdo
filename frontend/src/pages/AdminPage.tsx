@@ -159,7 +159,19 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
   const [sessions, setSessions] = useState<UserSession[]>([]);
   const [editOpen, setEditOpen] = useState(false);
   const [editForm] = Form.useForm<{ email: string; full_name: string; company_code?: string; company_type: CompanyType; is_active: boolean }>();
-  const [slaForm] = Form.useForm<{ initial_days: number; next_days: number }>();
+  const [slaForm] = Form.useForm<{
+    initial_days: number;
+    next_days: number;
+    owner_dcc_incoming_days: number;
+    owner_specialist_review_days: number;
+    owner_lr_approval_days: number;
+    contractor_consideration_days: number;
+    contractor_ap_issue_days: number;
+    contractor_an_issue_days: number;
+    contractor_co_rj_issue_days: number;
+    owner_final_approval_days: number;
+    owner_stamp_days: number;
+  }>();
 
   const loadData = async () => {
     setLoading(true);
@@ -447,6 +459,33 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
                   <Form.Item name="next_days" label="Следующая ревизия (дней)" rules={[{ required: true }]}>
                     <Input type="number" min={1} max={365} />
                   </Form.Item>
+                  <Form.Item name="owner_dcc_incoming_days" label="Входной контроль ТДО заказчика (дн.)" rules={[{ required: true }]}>
+                    <Input type="number" min={0.1} step={0.1} />
+                  </Form.Item>
+                  <Form.Item name="owner_specialist_review_days" label="Проверка специалистов заказчика (дн.)" rules={[{ required: true }]}>
+                    <Input type="number" min={0.1} step={0.1} />
+                  </Form.Item>
+                  <Form.Item name="owner_lr_approval_days" label="Консолидация LR заказчика (дн.)" rules={[{ required: true }]}>
+                    <Input type="number" min={0.1} step={0.1} />
+                  </Form.Item>
+                  <Form.Item name="contractor_consideration_days" label="Рассмотрение комментариев подрядчиком (дн.)" rules={[{ required: true }]}>
+                    <Input type="number" min={0.1} step={0.1} />
+                  </Form.Item>
+                  <Form.Item name="contractor_ap_issue_days" label="Перевыпуск при AP (дн.)" rules={[{ required: true }]}>
+                    <Input type="number" min={0.1} step={0.1} />
+                  </Form.Item>
+                  <Form.Item name="contractor_an_issue_days" label="Перевыпуск при AN (дн.)" rules={[{ required: true }]}>
+                    <Input type="number" min={0.1} step={0.1} />
+                  </Form.Item>
+                  <Form.Item name="contractor_co_rj_issue_days" label="Перевыпуск при CO/RJ (дн.)" rules={[{ required: true }]}>
+                    <Input type="number" min={0.1} step={0.1} />
+                  </Form.Item>
+                  <Form.Item name="owner_final_approval_days" label="Финальное рассмотрение заказчиком (дн.)" rules={[{ required: true }]}>
+                    <Input type="number" min={0.1} step={0.1} />
+                  </Form.Item>
+                  <Form.Item name="owner_stamp_days" label="Проставление штампа (дн.)" rules={[{ required: true }]}>
+                    <Input type="number" min={0.1} step={0.1} />
+                  </Form.Item>
                   <Button
                     type="primary"
                     disabled={!isMainAdmin}
@@ -455,6 +494,15 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
                       await updateAdminReviewSlaSettings({
                         initial_days: Number(values.initial_days),
                         next_days: Number(values.next_days),
+                        owner_dcc_incoming_days: Number(values.owner_dcc_incoming_days),
+                        owner_specialist_review_days: Number(values.owner_specialist_review_days),
+                        owner_lr_approval_days: Number(values.owner_lr_approval_days),
+                        contractor_consideration_days: Number(values.contractor_consideration_days),
+                        contractor_ap_issue_days: Number(values.contractor_ap_issue_days),
+                        contractor_an_issue_days: Number(values.contractor_an_issue_days),
+                        contractor_co_rj_issue_days: Number(values.contractor_co_rj_issue_days),
+                        owner_final_approval_days: Number(values.owner_final_approval_days),
+                        owner_stamp_days: Number(values.owner_stamp_days),
                       });
                       message.success("SLA настройки обновлены");
                     }}

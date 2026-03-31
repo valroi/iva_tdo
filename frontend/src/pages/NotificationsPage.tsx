@@ -29,6 +29,8 @@ export default function NotificationsPage({ notifications, onReload, onOpenTarge
       },
     },
     { title: "Сообщение", dataIndex: "message", key: "message" },
+    { title: "Дата задачи", dataIndex: "created_at", key: "created_at", width: 180 },
+    { title: "Срок", dataIndex: "task_deadline", key: "task_deadline", width: 130, render: (v: string | null | undefined) => v ?? "—" },
     {
       title: "Прочитано",
       dataIndex: "is_read",

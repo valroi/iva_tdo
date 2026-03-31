@@ -1,13 +1,14 @@
 import { Card, Col, Row, Statistic, Table, Tag } from "antd";
 import type { ColumnsType } from "antd/es/table";
 
-import type { DocumentItem, MDRRecord, NotificationItem, WorkflowStatus } from "../types";
+import type { DocumentItem, MDRRecord, NotificationItem, User, WorkflowStatus } from "../types";
 
 interface Props {
   mdr: MDRRecord[];
   documents: DocumentItem[];
   notifications: NotificationItem[];
   workflowStatuses: WorkflowStatus[];
+  currentUser: User;
 }
 
 interface StatusRow {
@@ -21,6 +22,7 @@ export default function DashboardPage({
   documents,
   notifications,
   workflowStatuses,
+  currentUser,
 }: Props): JSX.Element {
   const unread = notifications.filter((n) => !n.is_read).length;
 
@@ -38,6 +40,13 @@ export default function DashboardPage({
       render: (value: string) => <Tag color="blue">{value}</Tag>,
     },
     { title: "Название", dataIndex: "name", key: "name" },
+  ];
+  const myTasks = notifications.filter((item) => !item.is_read).slice(0, 12);
+  const taskColumns: ColumnsType<NotificationItem> = [
+    { title: "Тип", dataIndex: "event_type", key: "event_type", width: 180 },
+    { title: "Задача", dataIndex: "message", key: "message" },
+    { title: "Появилась", dataIndex: "created_at", key: "created_at", width: 170 },
+    { title: "Дедлайн", dataIndex: "task_deadline", key: "task_deadline", width: 130, render: (v) => v ?? "—" },
   ];
 
   return (
@@ -67,6 +76,9 @@ export default function DashboardPage({
 
       <Card title="Коды рассмотрения (редактируются в backend)" className="hrp-card">
         <Table columns={columns} dataSource={statusRows} pagination={false} size="small" />
+      </Card>
+      <Card title={`Мои задачи по роли (${currentUser.company_type})`} className="hrp-card" style={{ marginTop: 16 }}>
+        <Table columns={taskColumns} dataSource={myTasks} pagination={false} size="small" rowKey="id" />
       </Card>
     </div>
   );

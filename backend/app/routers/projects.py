@@ -707,6 +707,26 @@ def create_review_matrix_item(
     user = db.query(User).filter(User.id == payload.user_id).first()
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if user.company_type != CompanyType.owner:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only owner users can be assigned to review matrix",
+        )
+    member = (
+        db.query(ProjectMember)
+        .filter(ProjectMember.project_id == project_id, ProjectMember.user_id == payload.user_id)
+        .first()
+    )
+    if member is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User must be project member",
+        )
+    if member.member_role not in {ProjectMemberRole.owner_member, ProjectMemberRole.observer}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only owner-side project members can be assigned to matrix",
+        )
 
     exists = (
         db.query(ReviewMatrixMember)

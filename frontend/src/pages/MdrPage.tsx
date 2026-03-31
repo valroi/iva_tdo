@@ -14,6 +14,7 @@ interface Props {
 }
 
 export default function MdrPage({ mdr, projects, currentUser, projectReferences, onCreated }: Props): JSX.Element {
+  const canManageMdr = currentUser.role === "admin" || currentUser.permissions.can_create_mdr;
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [composing, setComposing] = useState(false);
@@ -99,6 +100,10 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
   }, [mdr]);
 
   const submit = async () => {
+    if (!canManageMdr) {
+      message.error("Недостаточно прав для создания документа");
+      return;
+    }
     const values = await form.validateFields();
     if (docNumberExists) {
       message.error("Нельзя сохранить: шифр уже существует в проекте");
@@ -248,19 +253,21 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
         <Typography.Title level={4} style={{ margin: 0 }}>
           Реестр документов
         </Typography.Title>
-        <Button
-          type="primary"
-          onClick={() => {
-            form.setFieldsValue({
-              document_key: nextDocumentKey,
-              project_code: defaultProjectCode,
-              originator_code: defaultOriginator,
-            });
-            setOpen(true);
-          }}
-        >
-          + Добавить документ
-        </Button>
+        {canManageMdr && (
+          <Button
+            type="primary"
+            onClick={() => {
+              form.setFieldsValue({
+                document_key: nextDocumentKey,
+                project_code: defaultProjectCode,
+                originator_code: defaultOriginator,
+              });
+              setOpen(true);
+            }}
+          >
+            + Добавить документ
+          </Button>
+        )}
       </Space>
       <Table rowKey="id" columns={columns} dataSource={mdr} size="small" />
 

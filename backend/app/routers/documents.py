@@ -101,6 +101,7 @@ def list_tdo_queue(
                 revision_code=revision.revision_code,
                 issue_purpose=revision.issue_purpose,
                 status=revision.status,
+                created_at=revision.created_at,
                 review_deadline=revision.review_deadline,
                 file_path=revision.file_path,
                 author_id=revision.author_id,
@@ -203,6 +204,7 @@ def list_owner_review_queue(
                 revision_code=revision.revision_code,
                 issue_purpose=revision.issue_purpose,
                 status=revision.status,
+                created_at=revision.created_at,
                 review_deadline=revision.review_deadline,
                 file_path=revision.file_path,
                 author_id=revision.author_id,
@@ -278,6 +280,17 @@ def _sla_days_for_revision(
     return 14 if is_initial_revision else 7
 
 
+def _setting_days(db: Session, key: str, default: float) -> float:
+    item = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+    if item is None:
+        return default
+    try:
+        value = float(str(item.value).strip())
+        return value if value > 0 else default
+    except ValueError:
+        return default
+
+
 @router.get("/documents", response_model=list[DocumentRead])
 def list_documents(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     docs = db.query(Document).order_by(Document.id.desc()).all()
@@ -325,7 +338,7 @@ def get_document(document_id: int, db: Session = Depends(get_db), _: User = Depe
 def create_document(
     payload: DocumentCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permissions("can_create_mdr")),
 ):
     mdr = db.query(MDRRecord).filter(MDRRecord.id == payload.mdr_id).first()
     if not mdr:
@@ -630,6 +643,12 @@ def make_tdo_decision(
     note = (payload.note or "").strip()
     if payload.action == "SEND_TO_OWNER":
         revision.status = "UNDER_REVIEW"
+        owner_review_days = (
+            _setting_days(db, "review_sla_owner_dcc_incoming_days", 1)
+            + _setting_days(db, "review_sla_owner_specialist_review_days", 7)
+            + _setting_days(db, "review_sla_owner_lr_approval_days", 1)
+        )
+        revision.review_deadline = (datetime.utcnow() + timedelta(days=owner_review_days)).date()
         matrix_level_1 = (
             db.query(ReviewMatrixMember)
             .filter(

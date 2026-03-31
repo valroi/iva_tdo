@@ -116,6 +116,7 @@ export interface NotificationItem {
   project_code?: string | null;
   document_num?: string | null;
   revision_id?: number | null;
+  task_deadline?: string | null;
   is_read: boolean;
   created_at: string;
 }
@@ -128,6 +129,7 @@ export interface TdoQueueItem {
   revision_code: string;
   issue_purpose: string;
   status: string;
+  created_at: string;
   review_deadline: string | null;
   file_path: string | null;
   author_id?: number | null;

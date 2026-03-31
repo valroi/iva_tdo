@@ -185,12 +185,13 @@ export default function App(): JSX.Element {
             <Spin />
           ) : (
             <div className="page-surface">
-              {activeSection === "dashboard" && (
+              {activeSection === "dashboard" && user && (
                 <DashboardPage
                   mdr={mdr}
                   documents={documents}
                   notifications={notifications}
                   workflowStatuses={workflowStatuses}
+                  currentUser={user}
                 />
               )}
               {activeSection === "projects" && user && (

@@ -53,6 +53,19 @@ settings = get_settings()
 
 SLA_INITIAL_KEY = "review_sla_default_initial_days"
 SLA_NEXT_KEY = "review_sla_default_next_days"
+SLA_KEYS_DEFAULTS: dict[str, float] = {
+    SLA_INITIAL_KEY: 14,
+    SLA_NEXT_KEY: 7,
+    "review_sla_owner_dcc_incoming_days": 1,
+    "review_sla_owner_specialist_review_days": 7,
+    "review_sla_owner_lr_approval_days": 1,
+    "review_sla_contractor_consideration_days": 0.5,
+    "review_sla_contractor_ap_issue_days": 2,
+    "review_sla_contractor_an_issue_days": 5,
+    "review_sla_contractor_co_rj_issue_days": 8,
+    "review_sla_owner_final_approval_days": 1,
+    "review_sla_owner_stamp_days": 1,
+}
 
 
 def _default_company_code(company_type: CompanyType) -> str:
@@ -111,11 +124,28 @@ def get_admin_review_sla_settings(
     db: Session = Depends(get_db),
     _: User = Depends(require_main_admin),
 ):
-    initial = db.query(SystemSetting).filter(SystemSetting.key == SLA_INITIAL_KEY).first()
-    next_item = db.query(SystemSetting).filter(SystemSetting.key == SLA_NEXT_KEY).first()
+    values: dict[str, float] = {}
+    for key, default in SLA_KEYS_DEFAULTS.items():
+        item = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+        if item is None:
+            values[key] = default
+            continue
+        try:
+            values[key] = float(item.value)
+        except ValueError:
+            values[key] = default
     return AdminReviewSlaSettingsRead(
-        initial_days=int(initial.value) if initial else 14,
-        next_days=int(next_item.value) if next_item else 7,
+        initial_days=values[SLA_INITIAL_KEY],
+        next_days=values[SLA_NEXT_KEY],
+        owner_dcc_incoming_days=values["review_sla_owner_dcc_incoming_days"],
+        owner_specialist_review_days=values["review_sla_owner_specialist_review_days"],
+        owner_lr_approval_days=values["review_sla_owner_lr_approval_days"],
+        contractor_consideration_days=values["review_sla_contractor_consideration_days"],
+        contractor_ap_issue_days=values["review_sla_contractor_ap_issue_days"],
+        contractor_an_issue_days=values["review_sla_contractor_an_issue_days"],
+        contractor_co_rj_issue_days=values["review_sla_contractor_co_rj_issue_days"],
+        owner_final_approval_days=values["review_sla_owner_final_approval_days"],
+        owner_stamp_days=values["review_sla_owner_stamp_days"],
     )
 
 
@@ -125,20 +155,28 @@ def update_admin_review_sla_settings(
     db: Session = Depends(get_db),
     _: User = Depends(require_main_admin),
 ):
-    initial = db.query(SystemSetting).filter(SystemSetting.key == SLA_INITIAL_KEY).first()
-    if initial is None:
-        initial = SystemSetting(key=SLA_INITIAL_KEY, value=str(payload.initial_days))
-    else:
-        initial.value = str(payload.initial_days)
-    next_item = db.query(SystemSetting).filter(SystemSetting.key == SLA_NEXT_KEY).first()
-    if next_item is None:
-        next_item = SystemSetting(key=SLA_NEXT_KEY, value=str(payload.next_days))
-    else:
-        next_item.value = str(payload.next_days)
-    db.add(initial)
-    db.add(next_item)
+    updates = {
+        SLA_INITIAL_KEY: payload.initial_days,
+        SLA_NEXT_KEY: payload.next_days,
+        "review_sla_owner_dcc_incoming_days": payload.owner_dcc_incoming_days,
+        "review_sla_owner_specialist_review_days": payload.owner_specialist_review_days,
+        "review_sla_owner_lr_approval_days": payload.owner_lr_approval_days,
+        "review_sla_contractor_consideration_days": payload.contractor_consideration_days,
+        "review_sla_contractor_ap_issue_days": payload.contractor_ap_issue_days,
+        "review_sla_contractor_an_issue_days": payload.contractor_an_issue_days,
+        "review_sla_contractor_co_rj_issue_days": payload.contractor_co_rj_issue_days,
+        "review_sla_owner_final_approval_days": payload.owner_final_approval_days,
+        "review_sla_owner_stamp_days": payload.owner_stamp_days,
+    }
+    for key, value in updates.items():
+        item = db.query(SystemSetting).filter(SystemSetting.key == key).first()
+        if item is None:
+            item = SystemSetting(key=key, value=str(value))
+        else:
+            item.value = str(value)
+        db.add(item)
     db.commit()
-    return AdminReviewSlaSettingsRead(initial_days=payload.initial_days, next_days=payload.next_days)
+    return AdminReviewSlaSettingsRead(**payload.model_dump())
 
 
 @router.post("", response_model=UserRead, status_code=status.HTTP_201_CREATED)

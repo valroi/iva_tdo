@@ -184,6 +184,16 @@ export default function ProjectsPage({
       item.value === "contractor_member" || item.value === "contractor_tdo_lead",
     );
   }, [currentUser.company_type, isAdmin]);
+  const ownerProjectMemberOptions = useMemo(() => {
+    const ownerMemberUserIds = new Set(
+      members
+        .filter((member) => member.member_role === "owner_member" || member.member_role === "observer")
+        .map((member) => member.user_id),
+    );
+    return users
+      .filter((user) => user.company_type === "owner" && ownerMemberUserIds.has(user.id))
+      .map((user) => ({ value: user.id, label: `${user.full_name} (${user.email})` }));
+  }, [members, users]);
 
   const projectColumns: ColumnsType<ProjectItem> = [
     { title: "Код", dataIndex: "code", key: "code" },
@@ -709,7 +719,12 @@ export default function ProjectsPage({
             />
           </Form.Item>
           <Form.Item name="user_id" label="Сотрудник" rules={[{ required: true }]}>
-            <Select options={users.map((u) => ({ value: u.id, label: `${u.full_name} (${u.email})` }))} />
+            <Select
+              showSearch
+              optionFilterProp="label"
+              options={ownerProjectMemberOptions}
+              placeholder="Только owner-участники проекта"
+            />
           </Form.Item>
           <Form.Item name="state" label="Состояние" rules={[{ required: true }]}>
             <Select options={[{ value: "R", label: "R" }, { value: "LR", label: "LR" }]} />

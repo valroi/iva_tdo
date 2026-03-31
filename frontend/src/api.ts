@@ -377,15 +377,38 @@ export function createQuickDemoSetup(payload: {
   });
 }
 
-export function getAdminReviewSlaSettings(): Promise<{ initial_days: number; next_days: number }> {
-  return request<{ initial_days: number; next_days: number }>("/users/admin-settings/review-sla");
+export interface AdminReviewSlaSettings {
+  initial_days: number;
+  next_days: number;
+  owner_dcc_incoming_days: number;
+  owner_specialist_review_days: number;
+  owner_lr_approval_days: number;
+  contractor_consideration_days: number;
+  contractor_ap_issue_days: number;
+  contractor_an_issue_days: number;
+  contractor_co_rj_issue_days: number;
+  owner_final_approval_days: number;
+  owner_stamp_days: number;
+}
+
+export function getAdminReviewSlaSettings(): Promise<AdminReviewSlaSettings> {
+  return request<AdminReviewSlaSettings>("/users/admin-settings/review-sla");
 }
 
 export function updateAdminReviewSlaSettings(payload: {
   initial_days: number;
   next_days: number;
-}): Promise<{ initial_days: number; next_days: number }> {
-  return request<{ initial_days: number; next_days: number }>("/users/admin-settings/review-sla", {
+  owner_dcc_incoming_days: number;
+  owner_specialist_review_days: number;
+  owner_lr_approval_days: number;
+  contractor_consideration_days: number;
+  contractor_ap_issue_days: number;
+  contractor_an_issue_days: number;
+  contractor_co_rj_issue_days: number;
+  owner_final_approval_days: number;
+  owner_stamp_days: number;
+}): Promise<AdminReviewSlaSettings> {
+  return request<AdminReviewSlaSettings>("/users/admin-settings/review-sla", {
     method: "PUT",
     body: JSON.stringify(payload),
   });

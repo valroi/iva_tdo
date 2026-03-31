@@ -344,6 +344,7 @@ class NotificationRead(BaseModel):
     project_code: str | None = None
     document_num: str | None = None
     revision_id: int | None = None
+    task_deadline: date | None = None
     is_read: bool
     created_at: datetime
 
@@ -438,6 +439,7 @@ class TdoQueueItem(BaseModel):
     revision_code: str
     issue_purpose: str
     status: str
+    created_at: datetime
     review_deadline: date | None
     file_path: str | None
     author_id: int | None = None
@@ -490,13 +492,31 @@ class RevisionCardRead(BaseModel):
 
 
 class AdminReviewSlaSettingsRead(BaseModel):
-    initial_days: int
-    next_days: int
+    initial_days: float
+    next_days: float
+    owner_dcc_incoming_days: float
+    owner_specialist_review_days: float
+    owner_lr_approval_days: float
+    contractor_consideration_days: float
+    contractor_ap_issue_days: float
+    contractor_an_issue_days: float
+    contractor_co_rj_issue_days: float
+    owner_final_approval_days: float
+    owner_stamp_days: float
 
 
 class AdminReviewSlaSettingsUpdate(BaseModel):
-    initial_days: int = Field(ge=1, le=365)
-    next_days: int = Field(ge=1, le=365)
+    initial_days: float = Field(ge=0.1, le=365)
+    next_days: float = Field(ge=0.1, le=365)
+    owner_dcc_incoming_days: float = Field(ge=0.1, le=60)
+    owner_specialist_review_days: float = Field(ge=0.1, le=60)
+    owner_lr_approval_days: float = Field(ge=0.1, le=60)
+    contractor_consideration_days: float = Field(ge=0.1, le=60)
+    contractor_ap_issue_days: float = Field(ge=0.1, le=60)
+    contractor_an_issue_days: float = Field(ge=0.1, le=60)
+    contractor_co_rj_issue_days: float = Field(ge=0.1, le=60)
+    owner_final_approval_days: float = Field(ge=0.1, le=60)
+    owner_stamp_days: float = Field(ge=0.1, le=60)
 
 
 class FileUploadResponse(BaseModel):

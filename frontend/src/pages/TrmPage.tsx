@@ -75,9 +75,16 @@ export default function TrmPage({ currentUser, onOpenRevision }: Props): JSX.Ele
   ];
 
   const ownerColumns: ColumnsType<TdoQueueItem> = [
+    {
+      title: "№",
+      key: "num",
+      width: 70,
+      render: (_, __, index) => index + 1,
+    },
     { title: "Проект", dataIndex: "project_code", key: "project_code", width: 90 },
     { title: "Документ", dataIndex: "document_num", key: "document_num", width: 240 },
     { title: "Рев", dataIndex: "revision_code", key: "revision_code", width: 80 },
+    { title: "Поступила", dataIndex: "created_at", key: "created_at", width: 170 },
     {
       title: "Автор ревизии",
       key: "author",
@@ -85,6 +92,7 @@ export default function TrmPage({ currentUser, onOpenRevision }: Props): JSX.Ele
       render: (_, row) => (row.author_email ? `${row.author_name ?? "—"} (${row.author_email})` : "—"),
     },
     { title: "Статус", dataIndex: "status", key: "status", width: 220 },
+    { title: "Дедлайн", dataIndex: "review_deadline", key: "review_deadline", width: 130, render: (v: string | null) => v ?? "—" },
     {
       title: "Действие",
       key: "link",

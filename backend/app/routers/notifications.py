@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import get_current_user
-from app.models import Notification, User
+from app.models import Notification, Revision, User
 from app.schemas import NotificationRead
 
 router = APIRouter()
@@ -11,12 +11,24 @@ router = APIRouter()
 
 @router.get("", response_model=list[NotificationRead])
 def list_notifications(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return (
+    items = (
         db.query(Notification)
         .filter(Notification.user_id == current_user.id)
         .order_by(Notification.id.desc())
         .all()
     )
+    result: list[NotificationRead] = []
+    for item in items:
+        deadline = None
+        if item.revision_id is not None:
+            rev = db.query(Revision).filter(Revision.id == item.revision_id).first()
+            deadline = rev.review_deadline if rev else None
+        result.append(
+            NotificationRead.model_validate(item, from_attributes=True).model_copy(
+                update={"task_deadline": deadline}
+            )
+        )
+    return result
 
 
 @router.put("/{notification_id}/read", response_model=NotificationRead)
