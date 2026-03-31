@@ -35,11 +35,14 @@ def seed_default_data(db: Session) -> None:
     # value "user". In that case, hard migration on startup crashes the whole app.
     # Keep startup resilient: try migration, and if enum is not ready - skip for now.
     try:
-        db.query(User).filter(User.role != UserRole.admin).update(
-            {User.role: UserRole.user, User.permissions: default_permissions_for_role(UserRole.user)}
-        )
+        with db.begin_nested():
+            db.query(User).filter(User.role != UserRole.admin).update(
+                {User.role: UserRole.user, User.permissions: default_permissions_for_role(UserRole.user)}
+            )
     except (DataError, ProgrammingError):
-        db.rollback()
+        # Keep startup resilient on legacy enum schemas without rolling back
+        # already-prepared admin updates in the outer transaction.
+        pass
 
     if settings.main_admin_email != settings.first_admin_email:
         main_admin = db.query(User).filter(User.email == settings.main_admin_email).first()
