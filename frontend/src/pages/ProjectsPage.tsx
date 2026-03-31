@@ -1,6 +1,7 @@
 import {
   Button,
   Card,
+  Divider,
   Form,
   Input,
   Modal,
@@ -10,6 +11,7 @@ import {
   Table,
   Tabs,
   Tag,
+  Tree,
   Typography,
   message,
 } from "antd";
@@ -31,11 +33,26 @@ import {
   updateProjectReference,
   updateReviewMatrixItem,
 } from "../api";
-import type { ProjectItem, ProjectMember, ProjectMemberRole, ProjectReference, ReviewMatrixMember, User } from "../types";
+import DocumentsPage from "./DocumentsPage";
+import MdrPage from "./MdrPage";
+import type {
+  DocumentItem,
+  MDRRecord,
+  ProjectItem,
+  ProjectMember,
+  ProjectMemberRole,
+  ProjectReference,
+  ReviewMatrixMember,
+  User,
+} from "../types";
 
 interface Props {
   currentUser: User;
   projects: ProjectItem[];
+  mdr: MDRRecord[];
+  documents: DocumentItem[];
+  notificationTarget?: { project_code?: string | null; document_num?: string | null; revision_id?: number | null } | null;
+  onNotificationTargetHandled?: () => void;
   onReload: () => Promise<void>;
 }
 
@@ -49,6 +66,7 @@ const projectMemberRoleOptions: { value: ProjectMemberRole; label: string }[] = 
 
 const referenceTabs: { key: string; label: string }[] = [
   { key: "document_category", label: "Категории документов" },
+  { key: "title_object", label: "Титульные объекты" },
   { key: "discipline", label: "Дисциплины" },
   { key: "document_type", label: "Типы документов" },
   { key: "identifier_pattern", label: "Шаблоны шифрования" },
@@ -56,10 +74,19 @@ const referenceTabs: { key: string; label: string }[] = [
   { key: "se_reporting_type", label: "SE отчеты" },
   { key: "procurement_request_type", label: "Типы запросов закупки" },
   { key: "equipment_type", label: "Типы оборудования" },
+  { key: "review_sla_days", label: "SLA обсуждения ревизий" },
   { key: "other", label: "Прочее" },
 ];
 
-export default function ProjectsPage({ currentUser, projects, onReload }: Props): JSX.Element {
+export default function ProjectsPage({
+  currentUser,
+  projects,
+  mdr,
+  documents,
+  notificationTarget,
+  onNotificationTargetHandled,
+  onReload,
+}: Props): JSX.Element {
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(projects[0]?.id ?? null);
   const [members, setMembers] = useState<ProjectMember[]>([]);
   const [references, setReferences] = useState<ProjectReference[]>([]);
@@ -84,12 +111,25 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
   const [matrixForm] = Form.useForm();
   const [matrixEditForm] = Form.useForm();
   const [selectedMatrixItem, setSelectedMatrixItem] = useState<ReviewMatrixMember | null>(null);
+  const isAdmin = currentUser.role === "admin";
+  const canManageMatrix = isAdmin || currentUser.permissions.can_manage_review_matrix;
+  const canEditReferences = isAdmin || currentUser.permissions.can_edit_project_references;
+  const canManageMembers =
+    isAdmin || currentUser.permissions.can_manage_projects || canManageMatrix || currentUser.permissions.can_manage_users;
 
   useEffect(() => {
     if (!selectedProjectId && projects.length > 0) {
       setSelectedProjectId(projects[0].id);
     }
   }, [projects, selectedProjectId]);
+
+  useEffect(() => {
+    if (!notificationTarget?.project_code) return;
+    const targetProject = projects.find((item) => item.code === notificationTarget.project_code);
+    if (targetProject && targetProject.id !== selectedProjectId) {
+      setSelectedProjectId(targetProject.id);
+    }
+  }, [notificationTarget?.project_code, projects, selectedProjectId]);
 
   useEffect(() => {
     listUsers()
@@ -124,6 +164,26 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
   const userById = useMemo(() => {
     return new Map(users.map((u) => [u.id, u]));
   }, [users]);
+  const selectableMemberUsers = useMemo(() => {
+    if (isAdmin) return users;
+    const isContractorLead = currentUser.company_type === "contractor";
+    if (!isContractorLead) return users;
+    const ownCode = (currentUser.company_code ?? "").toUpperCase();
+    return users.filter(
+      (user) =>
+        user.company_type === "contractor" &&
+        user.role === "user" &&
+        (user.company_code ?? "").toUpperCase() === ownCode,
+    );
+  }, [currentUser.company_code, currentUser.company_type, isAdmin, users]);
+  const selectableMemberRoles = useMemo(() => {
+    if (isAdmin || currentUser.company_type !== "contractor") {
+      return projectMemberRoleOptions;
+    }
+    return projectMemberRoleOptions.filter((item) =>
+      item.value === "contractor_member" || item.value === "contractor_tdo_lead",
+    );
+  }, [currentUser.company_type, isAdmin]);
 
   const projectColumns: ColumnsType<ProjectItem> = [
     { title: "Код", dataIndex: "code", key: "code" },
@@ -140,20 +200,29 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
           </Button>
           <Popconfirm
             title="Удалить проект?"
-            description="Проект удалится только если в нем нет MDR"
+            description="Проект и все связанные данные будут удалены без восстановления"
             onConfirm={async () => {
-              await deleteProject(row.id);
-              message.success("Проект удален");
-              if (selectedProjectId === row.id) {
-                setSelectedProjectId(null);
-                setMembers([]);
-                setReferences([]);
+              try {
+                await deleteProject(row.id, { purge: true, confirmCode: row.code });
+                message.success("Проект удален");
+                if (selectedProjectId === row.id) {
+                  setSelectedProjectId(null);
+                  setMembers([]);
+                  setReferences([]);
+                }
+                await onReload();
+              } catch (error) {
+                const text = error instanceof Error ? error.message : "Не удалось удалить проект";
+                message.error(text);
               }
-              await onReload();
             }}
-            disabled={currentUser.role !== "admin"}
+            disabled={!isAdmin && !currentUser.permissions.can_manage_projects}
           >
-            <Button size="small" danger disabled={currentUser.role !== "admin"}>
+            <Button
+              size="small"
+              danger
+              disabled={!isAdmin && !currentUser.permissions.can_manage_projects}
+            >
               Удалить
             </Button>
           </Popconfirm>
@@ -169,6 +238,9 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
       key: "user",
       render: (_, row) => {
         const user = userById.get(row.user_id);
+        if (row.user_full_name || row.user_email) {
+          return `${row.user_full_name ?? "—"} (${row.user_email ?? "—"})`;
+        }
         return user ? `${user.full_name} (${user.email})` : `user_id=${row.user_id}`;
       },
     },
@@ -190,6 +262,7 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
       render: (_, row) => (
         <Popconfirm
           title="Удалить участника?"
+          disabled={!canManageMembers}
           onConfirm={async () => {
             if (!selectedProjectId) return;
             await deleteProjectMember(selectedProjectId, row.id);
@@ -197,7 +270,7 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
             await reloadProjectData();
           }}
         >
-          <Button size="small" danger>
+          <Button size="small" danger disabled={!canManageMembers}>
             Удалить
           </Button>
         </Popconfirm>
@@ -221,7 +294,7 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
       render: (_, row) => (
         <Button
           size="small"
-          disabled={currentUser.role !== "admin"}
+          disabled={!canEditReferences}
           onClick={() => {
             setSelectedReference(row);
             referenceEditForm.setFieldsValue({ value: row.value, is_active: row.is_active });
@@ -237,8 +310,14 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
   const matrixColumns: ColumnsType<ReviewMatrixMember> = [
     { title: "Дисциплина", dataIndex: "discipline_code", key: "discipline_code" },
     { title: "Тип документа", dataIndex: "doc_type", key: "doc_type" },
-    { title: "Пользователь", key: "user_id", render: (_, row) => userById.get(row.user_id)?.full_name ?? row.user_id },
-    { title: "Уровень", dataIndex: "level", key: "level" },
+    {
+      title: "Пользователь",
+      key: "user_id",
+      render: (_, row) =>
+        row.user_full_name
+          ? `${row.user_full_name} (${row.user_email ?? "—"})`
+          : userById.get(row.user_id)?.full_name ?? row.user_id,
+    },
     { title: "Состояние", dataIndex: "state", key: "state", render: (v: "LR" | "R") => <Tag>{v}</Tag> },
     {
       title: "Действие",
@@ -272,24 +351,82 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
     },
   ];
 
-  const contractorUsers = users.filter((u) => u.company_type === "contractor");
+  const selectedProject = projects.find((p) => p.id === selectedProjectId) ?? null;
+  const projectMdr = useMemo(
+    () => (selectedProject ? mdr.filter((row) => row.project_code === selectedProject.code) : []),
+    [mdr, selectedProject],
+  );
+  const projectMdrIds = useMemo(() => new Set(projectMdr.map((row) => row.id)), [projectMdr]);
+  const projectDocuments = useMemo(() => documents.filter((item) => projectMdrIds.has(item.mdr_id)), [documents, projectMdrIds]);
+  const disciplineOptions = useMemo(
+    () =>
+      references
+        .filter((ref) => ref.ref_type === "discipline" && ref.is_active)
+        .map((ref) => ({ value: ref.code, label: `${ref.code} - ${ref.value}` })),
+    [references],
+  );
+  const documentTypeOptions = useMemo(
+    () =>
+      references
+        .filter((ref) => ref.ref_type === "document_type" && ref.is_active)
+        .map((ref) => ({ value: ref.code, label: `${ref.code} - ${ref.value}` })),
+    [references],
+  );
+  const hierarchyTree = useMemo(
+    () => [
+      {
+        key: `project-${selectedProject?.id ?? "none"}`,
+        title: selectedProject ? `${selectedProject.code} - ${selectedProject.name}` : "Проект не выбран",
+        children: [
+          {
+            key: "mdr-root",
+            title: `Реестр документов (${projectMdr.length})`,
+            children: Object.entries(
+              projectMdr.reduce<Record<string, typeof projectMdr>>((acc, item) => {
+                const key = item.category || "UNSPECIFIED";
+                acc[key] = acc[key] ?? [];
+                acc[key].push(item);
+                return acc;
+              }, {}),
+            ).map(([category, items]) => {
+              const usedWeight = items.reduce((sum, item) => sum + Number(item.doc_weight || 0), 0);
+              return {
+                key: `category-${category}`,
+                title: `${category} (вес: ${usedWeight.toFixed(1)} / 1000)`,
+                children: items.map((item) => ({
+                  key: `mdr-${item.id}`,
+                  title: `${item.doc_number} - ${item.doc_name}`,
+                })),
+              };
+            }),
+          },
+        ],
+      },
+    ],
+    [projectMdr, selectedProject],
+  );
 
   return (
-    <>
+    <div className="projects-module">
       <Space style={{ marginBottom: 12, width: "100%", justifyContent: "space-between" }}>
         <Typography.Title level={4} style={{ margin: 0 }}>
           Проекты
         </Typography.Title>
-        <Button type="primary" onClick={() => setProjectOpen(true)} disabled={currentUser.role !== "admin"}>
+        <Button type="primary" onClick={() => setProjectOpen(true)} disabled={!isAdmin && !currentUser.permissions.can_manage_projects}>
           + Создать проект
         </Button>
       </Space>
 
-      <Card style={{ marginBottom: 16 }}>
+      <Card style={{ marginBottom: 16 }} className="hrp-card">
         <Table rowKey="id" columns={projectColumns} dataSource={projects} pagination={false} />
       </Card>
 
-      <Card title={`Карточка проекта: ${selectedProjectId ?? "—"}`}>
+      <Card title={`Карточка проекта: ${selectedProjectId ?? "—"}`} className="hrp-card">
+        <Typography.Text type="secondary">
+          Иерархия проекта: проект -&gt; реестр документов -&gt; ревизии и комментарии.
+        </Typography.Text>
+        <Divider style={{ margin: "12px 0" }} />
+        <Tree defaultExpandAll treeData={hierarchyTree} style={{ marginBottom: 16 }} />
         <Tabs
           items={[
             {
@@ -300,7 +437,7 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
                   <Space style={{ marginBottom: 12 }}>
                     <Button
                       onClick={() => setMemberOpen(true)}
-                      disabled={!selectedProjectId}
+                      disabled={!selectedProjectId || !canManageMembers}
                     >
                       + Добавить участника
                     </Button>
@@ -309,21 +446,56 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
                 </>
               ),
             },
-            {
+            ...(canManageMatrix
+              ? [
+                  {
               key: "matrix",
-              label: "Матрица проверки",
+              label: "Матрица назначений",
               children: (
                 <>
                   <Space style={{ marginBottom: 12 }}>
-                    <Button onClick={() => setMatrixOpen(true)} disabled={!selectedProjectId}>
+                    <Button
+                      onClick={() => setMatrixOpen(true)}
+                      disabled={!selectedProjectId || !canManageMatrix}
+                    >
                       + Добавить строку матрицы
                     </Button>
                   </Space>
                   <Table rowKey="id" columns={matrixColumns} dataSource={reviewMatrix} pagination={false} />
                 </>
               ),
+                  },
+                ]
+              : []),
+            {
+              key: "mdr",
+              label: "Реестр документов",
+              children: (
+                <MdrPage
+                  mdr={projectMdr}
+                  projects={selectedProject ? [selectedProject] : []}
+                  currentUser={currentUser}
+                  projectReferences={references}
+                  onCreated={onReload}
+                />
+              ),
             },
             {
+              key: "documents",
+              label: "Ревизии и комментарии",
+              children: (
+                <DocumentsPage
+                  documents={projectDocuments}
+                  mdr={projectMdr}
+                  currentUser={currentUser}
+                  projectMembers={members}
+                  notificationTarget={notificationTarget}
+                  onNotificationTargetHandled={onNotificationTargetHandled}
+                />
+              ),
+            },
+            ...(canEditReferences
+              ? [{
               key: "references",
               label: "Справочники проекта",
               children: (
@@ -331,7 +503,7 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
                   <Space style={{ marginBottom: 12 }}>
                     <Button
                       onClick={() => setReferenceOpen(true)}
-                      disabled={!selectedProjectId || currentUser.role !== "admin"}
+                      disabled={!selectedProjectId || !canEditReferences}
                     >
                       + Добавить значение
                     </Button>
@@ -343,18 +515,27 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
                       key: tab.key,
                       label: tab.label,
                       children: (
-                        <Table
-                          rowKey="id"
-                          columns={referenceColumns}
-                          dataSource={references.filter((ref) => ref.ref_type === tab.key)}
-                          pagination={false}
-                        />
+                        <>
+                          {tab.key === "review_sla_days" && (
+                            <Typography.Text type="secondary">
+                              Формат кода: <b>CATEGORY:ISSUE_PURPOSE:INITIAL|NEXT</b>, значение - число дней.
+                              Примеры: <b>PD:IFR:INITIAL = 20</b>, <b>*:*:NEXT = 7</b>.
+                            </Typography.Text>
+                          )}
+                          <Table
+                            rowKey="id"
+                            columns={referenceColumns}
+                            dataSource={references.filter((ref) => ref.ref_type === tab.key)}
+                            pagination={false}
+                          />
+                        </>
                       ),
                     }))}
                   />
                 </>
               ),
-            },
+            }]
+              : []),
           ]}
         />
       </Card>
@@ -373,20 +554,19 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
         }}
       >
         <Form form={projectForm} layout="vertical">
-          <Form.Item name="code" label="Код проекта" rules={[{ required: true }]}>
-            <Input placeholder="IVA" />
+          <Form.Item
+            name="code"
+            label="Код проекта"
+            normalize={(value: string) => (value ?? "").toUpperCase().slice(0, 3)}
+            rules={[{ required: true }, { len: 3, message: "Ровно 3 символа" }, { pattern: /^[A-Z]{3}$/, message: "Только A-Z" }]}
+          >
+            <Input placeholder="IVA" maxLength={3} />
           </Form.Item>
           <Form.Item name="name" label="Название" rules={[{ required: true }]}>
             <Input placeholder="Город столиц" />
           </Form.Item>
           <Form.Item name="description" label="Описание">
             <Input.TextArea rows={3} />
-          </Form.Item>
-          <Form.Item name="contractor_tdo_manager_user_id" label="Руководитель ТДО подрядчика">
-            <Select
-              allowClear
-              options={contractorUsers.map((u) => ({ value: u.id, label: `${u.full_name} (${u.email})` }))}
-            />
           </Form.Item>
         </Form>
       </Modal>
@@ -413,11 +593,11 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
             <Select
               showSearch
               optionFilterProp="label"
-              options={users.map((u) => ({ value: u.id, label: `${u.full_name} (${u.email})` }))}
+              options={selectableMemberUsers.map((u) => ({ value: u.id, label: `${u.full_name} (${u.email})` }))}
             />
           </Form.Item>
           <Form.Item name="member_role" label="Роль в проекте" rules={[{ required: true }]}>
-            <Select options={projectMemberRoleOptions} />
+            <Select options={selectableMemberRoles} />
           </Form.Item>
         </Form>
       </Modal>
@@ -444,6 +624,7 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
             <Select
               options={[
                 { value: "document_category", label: "document_category" },
+                { value: "title_object", label: "title_object" },
                 { value: "numbering_attribute", label: "numbering_attribute" },
                 { value: "discipline", label: "discipline" },
                 { value: "document_type", label: "document_type" },
@@ -451,6 +632,7 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
                 { value: "procurement_request_type", label: "procurement_request_type" },
                 { value: "equipment_type", label: "equipment_type" },
                 { value: "identifier_pattern", label: "identifier_pattern" },
+                { value: "review_sla_days", label: "review_sla_days" },
                 { value: "other", label: "other" },
               ]}
             />
@@ -492,30 +674,42 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
 
       <Modal
         open={matrixOpen}
-        title="Добавить строку матрицы проверки"
+        title="Добавить строку в матрицу назначений"
         onCancel={() => setMatrixOpen(false)}
         onOk={async () => {
-          if (!selectedProjectId) return;
-          const values = await matrixForm.validateFields();
-          await createReviewMatrixItem(selectedProjectId, values);
-          message.success("Строка матрицы добавлена");
-          setMatrixOpen(false);
-          matrixForm.resetFields();
-          await reloadProjectData();
+          try {
+            if (!selectedProjectId) return;
+            const values = await matrixForm.validateFields();
+            await createReviewMatrixItem(selectedProjectId, { ...values, level: 1 });
+            message.success("Строка матрицы добавлена");
+            setMatrixOpen(false);
+            matrixForm.resetFields();
+            await reloadProjectData();
+          } catch (error) {
+            const text = error instanceof Error ? error.message : "Ошибка создания строки матрицы";
+            message.error(text);
+          }
         }}
       >
         <Form form={matrixForm} layout="vertical" initialValues={{ level: 1, state: "R" }}>
           <Form.Item name="discipline_code" label="Дисциплина" rules={[{ required: true }]}>
-            <Input placeholder="PI" />
+            <Select
+              showSearch
+              optionFilterProp="label"
+              options={disciplineOptions}
+              placeholder="Выберите из справочника дисциплин"
+            />
           </Form.Item>
           <Form.Item name="doc_type" label="Тип документа" rules={[{ required: true }]}>
-            <Input placeholder="DWG" />
+            <Select
+              showSearch
+              optionFilterProp="label"
+              options={documentTypeOptions}
+              placeholder="Выберите из справочника типов документов"
+            />
           </Form.Item>
           <Form.Item name="user_id" label="Сотрудник" rules={[{ required: true }]}>
             <Select options={users.map((u) => ({ value: u.id, label: `${u.full_name} (${u.email})` }))} />
-          </Form.Item>
-          <Form.Item name="level" label="Уровень" rules={[{ required: true }]}>
-            <Select options={[{ value: 1, label: "1" }, { value: 2, label: "2" }]} />
           </Form.Item>
           <Form.Item name="state" label="Состояние" rules={[{ required: true }]}>
             <Select options={[{ value: "R", label: "R" }, { value: "LR", label: "LR" }]} />
@@ -525,7 +719,7 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
 
       <Modal
         open={matrixEditOpen}
-        title="Изменить строку матрицы"
+        title="Изменить строку матрицы назначений"
         onCancel={() => setMatrixEditOpen(false)}
         onOk={async () => {
           if (!selectedMatrixItem) return;
@@ -537,14 +731,11 @@ export default function ProjectsPage({ currentUser, projects, onReload }: Props)
         }}
       >
         <Form form={matrixEditForm} layout="vertical">
-          <Form.Item name="level" label="Уровень" rules={[{ required: true }]}>
-            <Select options={[{ value: 1, label: "1" }, { value: 2, label: "2" }]} />
-          </Form.Item>
           <Form.Item name="state" label="Состояние" rules={[{ required: true }]}>
             <Select options={[{ value: "R", label: "R" }, { value: "LR", label: "LR" }]} />
           </Form.Item>
         </Form>
       </Modal>
-    </>
+    </div>
   );
 }

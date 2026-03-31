@@ -41,33 +41,33 @@ export default function DashboardPage({
   ];
 
   return (
-    <>
+    <div className="dashboard-module">
       <Row gutter={16} style={{ marginBottom: 16 }}>
         <Col span={6}>
-          <Card>
+          <Card className="hrp-card dashboard-stat-card">
             <Statistic title="Записи MDR" value={mdr.length} />
           </Card>
         </Col>
         <Col span={6}>
-          <Card>
+          <Card className="hrp-card dashboard-stat-card">
             <Statistic title="Документы" value={documents.length} />
           </Card>
         </Col>
         <Col span={6}>
-          <Card>
+          <Card className="hrp-card dashboard-stat-card">
             <Statistic title="Уведомления" value={notifications.length} />
           </Card>
         </Col>
         <Col span={6}>
-          <Card>
+          <Card className="hrp-card dashboard-stat-card">
             <Statistic title="Непрочитанные" value={unread} valueStyle={{ color: unread > 0 ? "#cf1322" : "#3f8600" }} />
           </Card>
         </Col>
       </Row>
 
-      <Card title="Коды рассмотрения (редактируются в backend)">
-        <Table columns={columns} dataSource={statusRows} pagination={false} />
+      <Card title="Коды рассмотрения (редактируются в backend)" className="hrp-card">
+        <Table columns={columns} dataSource={statusRows} pagination={false} size="small" />
       </Card>
-    </>
+    </div>
   );
 }

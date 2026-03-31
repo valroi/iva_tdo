@@ -1,15 +1,20 @@
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.deps import get_current_user, is_main_admin
+from app.deps import get_current_user, has_permission, is_main_admin
 from app.models import (
+    Comment,
     CompanyType,
+    Document,
     MDRRecord,
     Project,
     ProjectMember,
     ProjectMemberRole,
     ProjectReference,
+    Revision,
     ReviewMatrixMember,
     User,
 )
@@ -239,6 +244,11 @@ IDENTIFIER_PATTERNS: list[tuple[str, str]] = [
     ("TSC_TEA", "TSC/TEA: AAA-BBB-CC(C)-DDDDDDD-EE-JJJ-NNNNN"),
 ]
 
+REVIEW_SLA_DAYS: list[tuple[str, str]] = [
+    ("*:*:INITIAL", "14"),
+    ("*:*:NEXT", "7"),
+]
+
 
 def _default_project_references() -> list[tuple[str, str, str]]:
     refs: list[tuple[str, str, str]] = []
@@ -250,6 +260,7 @@ def _default_project_references() -> list[tuple[str, str, str]]:
     refs.extend(("procurement_request_type", code, value) for code, value in PROCUREMENT_REQUEST_TYPES)
     refs.extend(("equipment_type", code, value) for code, value in EQUIPMENT_TYPE_CODES)
     refs.extend(("identifier_pattern", code, value) for code, value in IDENTIFIER_PATTERNS)
+    refs.extend(("review_sla_days", code, value) for code, value in REVIEW_SLA_DAYS)
     return refs
 
 
@@ -290,6 +301,26 @@ def _can_manage_project_matrix(db: Session, project_id: int, user: User) -> bool
     return _is_contractor_tdo_lead(db, project_id, user.id)
 
 
+def _project_member_read(member: ProjectMember, db: Session) -> ProjectMemberRead:
+    linked = db.query(User).filter(User.id == member.user_id).first()
+    return ProjectMemberRead.model_validate(member, from_attributes=True).model_copy(
+        update={
+            "user_email": linked.email if linked else None,
+            "user_full_name": linked.full_name if linked else None,
+        }
+    )
+
+
+def _review_matrix_read(item: ReviewMatrixMember, db: Session) -> ReviewMatrixMemberRead:
+    linked = db.query(User).filter(User.id == item.user_id).first()
+    return ReviewMatrixMemberRead.model_validate(item, from_attributes=True).model_copy(
+        update={
+            "user_email": linked.email if linked else None,
+            "user_full_name": linked.full_name if linked else None,
+        }
+    )
+
+
 @router.get("", response_model=list[ProjectRead])
 def list_projects(
     db: Session = Depends(get_db),
@@ -313,8 +344,8 @@ def create_project(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not is_main_admin(current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Main admin required")
+    if not has_permission(current_user, "can_manage_projects"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Project management permission required")
 
     existing = db.query(Project).filter(Project.code == payload.code).first()
     if existing is not None:
@@ -337,25 +368,6 @@ def create_project(
             can_manage_contractor_users=True,
         )
     )
-
-    if payload.contractor_tdo_manager_user_id is not None:
-        contractor_user = db.query(User).filter(User.id == payload.contractor_tdo_manager_user_id).first()
-        if contractor_user is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Contractor manager user not found")
-        if contractor_user.company_type != CompanyType.contractor:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Contractor manager must belong to contractor side",
-            )
-
-        db.add(
-            ProjectMember(
-                project_id=project.id,
-                user_id=contractor_user.id,
-                member_role=ProjectMemberRole.contractor_tdo_lead,
-                can_manage_contractor_users=True,
-            )
-        )
 
     for ref_type, code, value in _default_project_references():
         db.add(
@@ -380,8 +392,8 @@ def update_project(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not is_main_admin(current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Main admin required")
+    if not has_permission(current_user, "can_manage_projects"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Project management permission required")
 
     project = _get_project_or_404(db, project_id)
     for field, value in payload.model_dump(exclude_unset=True).items():
@@ -396,22 +408,43 @@ def update_project(
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_project(
     project_id: int,
+    purge: bool = Query(default=False),
+    confirm_code: str | None = Query(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not is_main_admin(current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Main admin required")
+    if not has_permission(current_user, "can_manage_projects"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Project management permission required")
 
     project = _get_project_or_404(db, project_id)
 
-    mdr_exists = db.query(MDRRecord.id).filter(MDRRecord.project_code == project.code).first()
-    if mdr_exists is not None:
+    mdr_rows = db.query(MDRRecord.id).filter(MDRRecord.project_code == project.code).all()
+    mdr_ids = [row[0] for row in mdr_rows]
+    if mdr_ids and not purge:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot delete project with existing MDR records",
         )
+    if purge and (confirm_code or "").strip().upper() != project.code.upper():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"confirm_code must match project code: {project.code}",
+        )
+
+    if mdr_ids:
+        document_rows = db.query(Document.id).filter(Document.mdr_id.in_(mdr_ids)).all()
+        document_ids = [row[0] for row in document_rows]
+        if document_ids:
+            revision_rows = db.query(Revision.id).filter(Revision.document_id.in_(document_ids)).all()
+            revision_ids = [row[0] for row in revision_rows]
+            if revision_ids:
+                db.query(Comment).filter(Comment.revision_id.in_(revision_ids)).delete(synchronize_session=False)
+                db.query(Revision).filter(Revision.id.in_(revision_ids)).delete(synchronize_session=False)
+            db.query(Document).filter(Document.id.in_(document_ids)).delete(synchronize_session=False)
+        db.query(MDRRecord).filter(MDRRecord.id.in_(mdr_ids)).delete(synchronize_session=False)
 
     db.query(ProjectReference).filter(ProjectReference.project_id == project_id).delete()
+    db.query(ReviewMatrixMember).filter(ReviewMatrixMember.project_id == project_id).delete()
     db.query(ProjectMember).filter(ProjectMember.project_id == project_id).delete()
     db.delete(project)
     db.commit()
@@ -425,12 +458,13 @@ def list_project_members(
 ):
     _ensure_project_access(db, project_id, current_user)
     _get_project_or_404(db, project_id)
-    return (
+    items = (
         db.query(ProjectMember)
         .filter(ProjectMember.project_id == project_id)
         .order_by(ProjectMember.id.asc())
         .all()
     )
+    return [_project_member_read(item, db) for item in items]
 
 
 @router.post("/{project_id}/members", response_model=ProjectMemberRead, status_code=status.HTTP_201_CREATED)
@@ -463,6 +497,11 @@ def add_project_member(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="TDO lead can add only contractor users",
             )
+        if (target_user.company_code or "").upper() != (current_user.company_code or "").upper():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="TDO lead can add only contractor users with same company code",
+            )
         if payload.member_role not in {
             ProjectMemberRole.contractor_member,
             ProjectMemberRole.contractor_tdo_lead,
@@ -470,6 +509,29 @@ def add_project_member(
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="TDO lead can assign only contractor roles",
+            )
+        can_manage = payload.member_role == ProjectMemberRole.contractor_tdo_lead
+    elif has_permission(current_user, "can_manage_users"):
+        _ensure_project_access(db, project_id, current_user)
+        if target_user.company_type != CompanyType.contractor:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Can add only contractor users",
+            )
+        if current_user.company_type == CompanyType.contractor and (
+            (target_user.company_code or "").upper() != (current_user.company_code or "").upper()
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Can add only contractor users with same company code",
+            )
+        if payload.member_role not in {
+            ProjectMemberRole.contractor_member,
+            ProjectMemberRole.contractor_tdo_lead,
+        }:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Can assign only contractor roles",
             )
         can_manage = payload.member_role == ProjectMemberRole.contractor_tdo_lead
     else:
@@ -484,7 +546,7 @@ def add_project_member(
     db.add(member)
     db.commit()
     db.refresh(member)
-    return member
+    return _project_member_read(member, db)
 
 
 @router.delete("/{project_id}/members/{member_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -513,6 +575,18 @@ def delete_project_member(
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="TDO lead can remove only contractor users",
+            )
+        if (target_user.company_code or "").upper() != (current_user.company_code or "").upper():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="TDO lead can remove only contractor users with same company code",
+            )
+    elif has_permission(current_user, "can_manage_users"):
+        _ensure_project_access(db, project_id, current_user)
+        if target_user.company_type != CompanyType.contractor:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Can remove only contractor users",
             )
     else:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No rights to remove project members")
@@ -548,8 +622,8 @@ def create_project_reference(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not is_main_admin(current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Main admin required")
+    if not has_permission(current_user, "can_edit_project_references"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Reference edit permission required")
 
     _get_project_or_404(db, project_id)
 
@@ -579,8 +653,8 @@ def update_project_reference(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not is_main_admin(current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Main admin required")
+    if not has_permission(current_user, "can_edit_project_references"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Reference edit permission required")
 
     item = db.query(ProjectReference).filter(ProjectReference.id == reference_id).first()
     if item is None:
@@ -603,7 +677,7 @@ def list_review_matrix(
 ):
     _ensure_project_access(db, project_id, current_user)
     _get_project_or_404(db, project_id)
-    return (
+    items = (
         db.query(ReviewMatrixMember)
         .filter(ReviewMatrixMember.project_id == project_id)
         .order_by(
@@ -614,6 +688,7 @@ def list_review_matrix(
         )
         .all()
     )
+    return [_review_matrix_read(item, db) for item in items]
 
 
 @router.post("/{project_id}/review-matrix", response_model=ReviewMatrixMemberRead, status_code=status.HTTP_201_CREATED)
@@ -623,6 +698,8 @@ def create_review_matrix_item(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if not has_permission(current_user, "can_manage_review_matrix"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Review matrix permission required")
     if not _can_manage_project_matrix(db, project_id, current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No rights to manage review matrix")
     _get_project_or_404(db, project_id)
@@ -649,7 +726,7 @@ def create_review_matrix_item(
     db.add(item)
     db.commit()
     db.refresh(item)
-    return item
+    return _review_matrix_read(item, db)
 
 
 @router.put("/review-matrix/{item_id}", response_model=ReviewMatrixMemberRead)
@@ -662,6 +739,8 @@ def update_review_matrix_item(
     item = db.query(ReviewMatrixMember).filter(ReviewMatrixMember.id == item_id).first()
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Matrix row not found")
+    if not has_permission(current_user, "can_manage_review_matrix"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Review matrix permission required")
     if not _can_manage_project_matrix(db, item.project_id, current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No rights to manage review matrix")
 
@@ -671,7 +750,7 @@ def update_review_matrix_item(
     db.add(item)
     db.commit()
     db.refresh(item)
-    return item
+    return _review_matrix_read(item, db)
 
 
 @router.delete("/review-matrix/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -683,6 +762,8 @@ def delete_review_matrix_item(
     item = db.query(ReviewMatrixMember).filter(ReviewMatrixMember.id == item_id).first()
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Matrix row not found")
+    if not has_permission(current_user, "can_manage_review_matrix"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Review matrix permission required")
     if not _can_manage_project_matrix(db, item.project_id, current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No rights to manage review matrix")
 

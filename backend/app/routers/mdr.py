@@ -1,11 +1,13 @@
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.deps import get_current_user, require_roles
-from app.models import MDRRecord, Project, User, UserRole
+from app.deps import get_current_user, require_permissions
+from app.models import MDRRecord, Project, User
 from app.schemas import MDRCreate, MDRRead, MDRUpdate
 
 router = APIRouter()
@@ -125,7 +127,7 @@ def check_cipher(
 def create_mdr(
     payload: MDRCreate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_roles(UserRole.admin, UserRole.contractor_manager)),
+    _: User = Depends(require_permissions("can_create_mdr")),
 ):
     project = db.query(Project).filter(Project.code == payload.project_code).first()
     if project is None:
@@ -162,7 +164,7 @@ def update_mdr(
     mdr_id: int,
     payload: MDRUpdate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_roles(UserRole.admin, UserRole.contractor_manager)),
+    _: User = Depends(require_permissions("can_create_mdr")),
 ):
     mdr = db.query(MDRRecord).filter(MDRRecord.id == mdr_id).first()
     if not mdr:

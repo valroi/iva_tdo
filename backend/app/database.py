@@ -1,6 +1,6 @@
 from collections.abc import Generator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app.config import get_settings
@@ -26,3 +26,77 @@ def get_db() -> Generator:
 
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
+    _ensure_users_permissions_column()
+    _ensure_users_company_code_column()
+    _ensure_notifications_context_columns()
+    _ensure_revisions_author_column()
+    _ensure_comments_workflow_columns()
+
+
+def _ensure_users_permissions_column() -> None:
+    inspector = inspect(engine)
+    columns = {column["name"] for column in inspector.get_columns("users")}
+    if "permissions" in columns:
+        return
+
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE users ADD COLUMN permissions JSON DEFAULT '{}'"))
+
+
+def _ensure_users_company_code_column() -> None:
+    inspector = inspect(engine)
+    columns = {column["name"] for column in inspector.get_columns("users")}
+    if "company_code" in columns:
+        return
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE users ADD COLUMN company_code VARCHAR(10)"))
+
+
+def _ensure_notifications_context_columns() -> None:
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if "notifications" not in tables:
+        return
+    columns = {column["name"] for column in inspector.get_columns("notifications")}
+    statements: list[str] = []
+    if "project_code" not in columns:
+        statements.append("ALTER TABLE notifications ADD COLUMN project_code VARCHAR(50)")
+    if "document_num" not in columns:
+        statements.append("ALTER TABLE notifications ADD COLUMN document_num VARCHAR(120)")
+    if "revision_id" not in columns:
+        statements.append("ALTER TABLE notifications ADD COLUMN revision_id INTEGER")
+    if not statements:
+        return
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))
+
+
+def _ensure_revisions_author_column() -> None:
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if "revisions" not in tables:
+        return
+    columns = {column["name"] for column in inspector.get_columns("revisions")}
+    if "author_id" in columns:
+        return
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE revisions ADD COLUMN author_id INTEGER"))
+
+
+def _ensure_comments_workflow_columns() -> None:
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if "comments" not in tables:
+        return
+    columns = {column["name"] for column in inspector.get_columns("comments")}
+    statements: list[str] = []
+    if "is_published_to_contractor" not in columns:
+        statements.append("ALTER TABLE comments ADD COLUMN is_published_to_contractor BOOLEAN DEFAULT 0")
+    if "backlog_status" not in columns:
+        statements.append("ALTER TABLE comments ADD COLUMN backlog_status VARCHAR(30)")
+    if not statements:
+        return
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))

@@ -9,15 +9,24 @@ import type {
   ProjectMemberRole,
   ProjectReference,
   ReviewMatrixMember,
+  TdoQueueItem,
   QuickDemoSetupResult,
   RegistrationRequest,
+  RevisionCard,
+  RevisionOverviewItem,
   Revision,
   User,
+  UserSession,
+  UserPermissions,
   UserRole,
   WorkflowStatus,
 } from "./types";
 
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+const API_URL =
+  import.meta.env.VITE_API_URL ??
+  (typeof window !== "undefined"
+    ? `${window.location.protocol}//${window.location.hostname}:8000`
+    : "http://localhost:8000");
 const PREFIX = `${API_URL}/api/v1`;
 
 interface Tokens {
@@ -26,18 +35,41 @@ interface Tokens {
   token_type: string;
 }
 
+function getProfileId(): string {
+  if (typeof window === "undefined") {
+    return "default";
+  }
+  const raw = new URLSearchParams(window.location.search).get("profile") ?? "default";
+  const normalized = raw.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "");
+  return normalized || "default";
+}
+
+function tokenStorageKey(type: "access" | "refresh"): string {
+  const profile = getProfileId();
+  return `tdo_${type}_token_${profile}`;
+}
+
+export function getActiveProfileId(): string {
+  return getProfileId();
+}
+
 function getAccessToken(): string | null {
-  return localStorage.getItem("tdo_access_token");
+  return localStorage.getItem(tokenStorageKey("access"));
+}
+
+export function getAuthHeaders(): Record<string, string> {
+  const token = getAccessToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 export function saveTokens(tokens: Tokens): void {
-  localStorage.setItem("tdo_access_token", tokens.access_token);
-  localStorage.setItem("tdo_refresh_token", tokens.refresh_token);
+  localStorage.setItem(tokenStorageKey("access"), tokens.access_token);
+  localStorage.setItem(tokenStorageKey("refresh"), tokens.refresh_token);
 }
 
 export function clearTokens(): void {
-  localStorage.removeItem("tdo_access_token");
-  localStorage.removeItem("tdo_refresh_token");
+  localStorage.removeItem(tokenStorageKey("access"));
+  localStorage.removeItem(tokenStorageKey("refresh"));
 }
 
 export function hasAccessToken(): boolean {
@@ -62,8 +94,17 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(errorText || "API request failed");
+    const rawText = await response.text();
+    let errorMessage = rawText || "API request failed";
+    try {
+      const parsed = JSON.parse(rawText) as { detail?: string };
+      if (parsed?.detail) {
+        errorMessage = parsed.detail;
+      }
+    } catch {
+      // keep raw text fallback for non-JSON responses
+    }
+    throw new Error(errorMessage);
   }
 
   if (response.status === 204) {
@@ -77,6 +118,13 @@ export async function login(email: string, password: string): Promise<void> {
   const tokens = await request<Tokens>("/auth/login", {
     method: "POST",
     body: JSON.stringify({ email, password }),
+  });
+  saveTokens(tokens);
+}
+
+export async function impersonateLogin(userId: number): Promise<void> {
+  const tokens = await request<Tokens>(`/auth/impersonate/${userId}`, {
+    method: "POST",
   });
   saveTokens(tokens);
 }
@@ -139,6 +187,28 @@ export function createRevision(payload: Record<string, unknown>): Promise<Revisi
   });
 }
 
+export function processRevisionTdoDecision(
+  revisionId: number,
+  payload: { action: "SEND_TO_OWNER" | "CANCELLED"; note?: string },
+): Promise<Revision> {
+  return request<Revision>(`/revisions/${revisionId}/tdo-decision`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function listTdoQueue(): Promise<TdoQueueItem[]> {
+  return request<TdoQueueItem[]>("/revisions/tdo-queue");
+}
+
+export function listOwnerReviewQueue(): Promise<TdoQueueItem[]> {
+  return request<TdoQueueItem[]>("/revisions/owner-review-queue");
+}
+
+export function listRevisionsOverview(): Promise<RevisionOverviewItem[]> {
+  return request<RevisionOverviewItem[]>("/revisions/overview");
+}
+
 export function listComments(revisionId: number): Promise<CommentItem[]> {
   return request<CommentItem[]>(`/revisions/${revisionId}/comments`);
 }
@@ -157,6 +227,25 @@ export function respondToComment(
   return request<CommentItem>(`/comments/${commentId}/response`, {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export function publishComment(commentId: number): Promise<CommentItem> {
+  return request<CommentItem>(`/comments/${commentId}/publish`, {
+    method: "POST",
+  });
+}
+
+export function ownerCommentDecision(commentId: number, payload: { action: "PUBLISH" | "REJECT"; note?: string }): Promise<CommentItem> {
+  return request<CommentItem>(`/comments/${commentId}/owner-decision`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function publishAllCommentsForRevision(revisionId: number): Promise<{ revision_id: number; published_count: number }> {
+  return request<{ revision_id: number; published_count: number }>(`/revisions/${revisionId}/comments/publish-all`, {
+    method: "POST",
   });
 }
 
@@ -182,6 +271,7 @@ export function createUser(payload: {
   email: string;
   password: string;
   full_name: string;
+  company_code?: string;
   company_type: CompanyType;
   role: UserRole;
 }): Promise<User> {
@@ -202,6 +292,50 @@ export function setUserActive(userId: number, isActive: boolean): Promise<User> 
   return request<User>(`/users/${userId}/active`, {
     method: "PUT",
     body: JSON.stringify({ is_active: isActive }),
+  });
+}
+
+export function updateUserPermissions(userId: number, permissions: UserPermissions): Promise<User> {
+  return request<User>(`/users/${userId}/permissions`, {
+    method: "PUT",
+    body: JSON.stringify({ permissions }),
+  });
+}
+
+export function updateUserPassword(userId: number, newPassword: string): Promise<void> {
+  return request<void>(`/users/${userId}/password`, {
+    method: "PUT",
+    body: JSON.stringify({ new_password: newPassword }),
+  });
+}
+
+export function updateUser(
+  userId: number,
+  payload: { email?: string; full_name?: string; company_code?: string; company_type?: CompanyType; is_active?: boolean },
+): Promise<User> {
+  return request<User>(`/users/${userId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function listUserSessions(userId: number): Promise<UserSession[]> {
+  return request<UserSession[]>(`/users/${userId}/sessions`);
+}
+
+export function revokeUserSession(userId: number, sessionId: number): Promise<void> {
+  return request<void>(`/users/${userId}/sessions/${sessionId}`, {
+    method: "DELETE",
+  });
+}
+
+export function listMySessions(): Promise<UserSession[]> {
+  return request<UserSession[]>(`/auth/sessions`);
+}
+
+export function deleteMySession(sessionId: number): Promise<void> {
+  return request<void>(`/auth/sessions/${sessionId}`, {
+    method: "DELETE",
   });
 }
 
@@ -243,6 +377,20 @@ export function createQuickDemoSetup(payload: {
   });
 }
 
+export function getAdminReviewSlaSettings(): Promise<{ initial_days: number; next_days: number }> {
+  return request<{ initial_days: number; next_days: number }>("/users/admin-settings/review-sla");
+}
+
+export function updateAdminReviewSlaSettings(payload: {
+  initial_days: number;
+  next_days: number;
+}): Promise<{ initial_days: number; next_days: number }> {
+  return request<{ initial_days: number; next_days: number }>("/users/admin-settings/review-sla", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function uploadRevisionPdf(revisionId: number, file: File): Promise<{
   file_name: string;
   file_path: string;
@@ -258,6 +406,14 @@ export function uploadRevisionPdf(revisionId: number, file: File): Promise<{
   });
 }
 
+export function getRevisionPdfUrl(revisionId: number): string {
+  return `${PREFIX}/revisions/${revisionId}/file`;
+}
+
+export function getRevisionCard(revisionId: number): Promise<RevisionCard> {
+  return request<RevisionCard>(`/revisions/${revisionId}/card`);
+}
+
 export function listProjects(): Promise<ProjectItem[]> {
   return request<ProjectItem[]>("/projects");
 }
@@ -266,7 +422,6 @@ export function createProject(payload: {
   code: string;
   name: string;
   description?: string;
-  contractor_tdo_manager_user_id?: number;
 }): Promise<ProjectItem> {
   return request<ProjectItem>("/projects", {
     method: "POST",
@@ -274,8 +429,16 @@ export function createProject(payload: {
   });
 }
 
-export function deleteProject(projectId: number): Promise<void> {
-  return request<void>(`/projects/${projectId}`, {
+export function deleteProject(projectId: number, options?: { purge?: boolean; confirmCode?: string }): Promise<void> {
+  const search = new URLSearchParams();
+  if (options?.purge) {
+    search.set("purge", "true");
+  }
+  if (options?.confirmCode) {
+    search.set("confirm_code", options.confirmCode);
+  }
+  const suffix = search.toString() ? `?${search.toString()}` : "";
+  return request<void>(`/projects/${projectId}${suffix}`, {
     method: "DELETE",
   });
 }

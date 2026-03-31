@@ -1,7 +1,5 @@
 import {
   BellOutlined,
-  DatabaseOutlined,
-  FileOutlined,
   HomeOutlined,
   LogoutOutlined,
   ProjectOutlined,
@@ -13,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   clearTokens,
+  getActiveProfileId,
   hasAccessToken,
   listDocuments,
   listMdr,
@@ -23,19 +22,23 @@ import {
 } from "./api";
 import LoginForm from "./components/LoginForm";
 import DashboardPage from "./pages/DashboardPage";
-import DocumentsPage from "./pages/DocumentsPage";
 import HelpPage from "./pages/HelpPage";
-import MdrPage from "./pages/MdrPage";
 import NotificationsPage from "./pages/NotificationsPage";
 import AdminPage from "./pages/AdminPage";
 import ProjectsPage from "./pages/ProjectsPage";
+import SessionsPage from "./pages/SessionsPage";
+import TdoQueuePage from "./pages/TdoQueuePage";
+import RevisionsPage from "./pages/RevisionsPage";
+import TrmPage from "./pages/TrmPage";
+import RevisionCardPage from "./pages/RevisionCardPage";
 import type { DocumentItem, MDRRecord, NotificationItem, ProjectItem, User, WorkflowStatus } from "./types";
 
 const { Header, Sider, Content } = Layout;
 
-type Section = "dashboard" | "projects" | "mdr" | "documents" | "notifications" | "admin" | "help";
+type Section = "dashboard" | "projects" | "revisions" | "trm" | "revision_card" | "notifications" | "tdo_queue" | "sessions" | "admin" | "help";
 
 export default function App(): JSX.Element {
+  const profileId = useMemo(() => getActiveProfileId(), []);
   const [authenticated, setAuthenticated] = useState(hasAccessToken());
   const [loading, setLoading] = useState(false);
   const [activeSection, setActiveSection] = useState<Section>("dashboard");
@@ -46,6 +49,12 @@ export default function App(): JSX.Element {
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [workflowStatuses, setWorkflowStatuses] = useState<WorkflowStatus[]>([]);
+  const [notificationTarget, setNotificationTarget] = useState<{
+    project_code?: string | null;
+    document_num?: string | null;
+    revision_id?: number | null;
+  } | null>(null);
+  const [openedRevisionId, setOpenedRevisionId] = useState<number | null>(null);
 
   const loadInitialData = useCallback(async () => {
     setLoading(true);
@@ -80,29 +89,41 @@ export default function App(): JSX.Element {
     }
   }, [authenticated, loadInitialData]);
 
+  const unreadNotificationsCount = useMemo(
+    () => notifications.filter((item) => !item.is_read).length,
+    [notifications],
+  );
+
   const menuItems = useMemo(() => {
     const items = [
       { key: "dashboard", icon: <HomeOutlined />, label: "Обзор" },
       { key: "projects", icon: <ProjectOutlined />, label: "Проекты" },
-      { key: "mdr", icon: <DatabaseOutlined />, label: "Реестр MDR" },
-      { key: "documents", icon: <FileOutlined />, label: "Документы" },
-      { key: "notifications", icon: <BellOutlined />, label: "Уведомления" },
+      { key: "revisions", icon: <ReadOutlined />, label: "Ревизии" },
+      { key: "trm", icon: <ReadOutlined />, label: "TRM" },
+      { key: "notifications", icon: <BellOutlined />, label: `Уведомления${unreadNotificationsCount ? ` (${unreadNotificationsCount})` : ""}` },
+      { key: "sessions", icon: <LogoutOutlined />, label: "Сессии" },
       { key: "help", icon: <ReadOutlined />, label: "Инструкция" },
     ];
 
-    if (user?.role === "admin") {
+    if (user?.permissions.can_manage_users) {
       items.push({ key: "admin", icon: <TeamOutlined />, label: "Администрирование" });
+    }
+    if (user?.permissions.can_process_tdo_queue) {
+      items.push({ key: "tdo_queue", icon: <ReadOutlined />, label: "Очередь ТРМ" });
     }
 
     return items;
-  }, [user?.role]);
+  }, [unreadNotificationsCount, user?.permissions.can_manage_users, user?.permissions.can_process_tdo_queue]);
 
   const sectionTitleMap: Record<Section, string> = {
     dashboard: "Обзор",
     projects: "Проекты",
-    mdr: "Реестр MDR",
-    documents: "Документы",
+    revisions: "Ревизии",
+    trm: "TRM",
+    revision_card: "Карточка документа",
     notifications: "Уведомления",
+    tdo_queue: "Очередь ТРМ",
+    sessions: "Сессии",
     admin: "Администрирование",
     help: "Инструкция",
   };
@@ -112,7 +133,7 @@ export default function App(): JSX.Element {
   }
 
   return (
-    <Layout style={{ minHeight: "100vh" }}>
+    <Layout style={{ minHeight: "100vh" }} className="hrp-shell">
       <Sider width={260} className="app-sider" theme="light">
         <div className="app-logo">IvaMaris TDO</div>
         <Menu
@@ -128,11 +149,12 @@ export default function App(): JSX.Element {
           <div className="sider-user-info">
             <div className="name">{user?.full_name}</div>
             <div className="email">{user?.email}</div>
+            <div className="email">profile: {profileId}</div>
           </div>
         </div>
       </Sider>
 
-      <Layout>
+      <Layout className="app-main-layout">
         <Header className="app-header">
           <Space style={{ justifyContent: "space-between", width: "100%" }}>
             <div>
@@ -162,7 +184,7 @@ export default function App(): JSX.Element {
           {loading ? (
             <Spin />
           ) : (
-            <>
+            <div className="page-surface">
               {activeSection === "dashboard" && (
                 <DashboardPage
                   mdr={mdr}
@@ -172,18 +194,74 @@ export default function App(): JSX.Element {
                 />
               )}
               {activeSection === "projects" && user && (
-                <ProjectsPage currentUser={user} projects={projects} onReload={loadInitialData} />
+                <ProjectsPage
+                  currentUser={user}
+                  projects={projects}
+                  mdr={mdr}
+                  documents={documents}
+                  notificationTarget={notificationTarget}
+                  onNotificationTargetHandled={() => setNotificationTarget(null)}
+                  onReload={loadInitialData}
+                />
               )}
-              {activeSection === "mdr" && <MdrPage mdr={mdr} projects={projects} onCreated={loadInitialData} />}
-              {activeSection === "documents" && (
-                <DocumentsPage documents={documents} mdr={mdr} onReloadDocuments={loadInitialData} />
+              {activeSection === "revisions" && (
+                <RevisionsPage
+                  onOpenRevision={(target) => {
+                    setOpenedRevisionId(target.revision_id);
+                    setActiveSection("revision_card");
+                  }}
+                />
+              )}
+              {activeSection === "trm" && user && (
+                <TrmPage
+                  currentUser={user}
+                  onOpenRevision={(target) => {
+                    setOpenedRevisionId(target.revision_id);
+                    setActiveSection("revision_card");
+                  }}
+                />
+              )}
+              {activeSection === "revision_card" && openedRevisionId && (
+                <RevisionCardPage
+                  revisionId={openedRevisionId}
+                  onBack={() => setActiveSection("revisions")}
+                />
               )}
               {activeSection === "notifications" && (
-                <NotificationsPage notifications={notifications} onReload={loadInitialData} />
+                <NotificationsPage
+                  notifications={notifications}
+                  onReload={loadInitialData}
+                  onOpenTarget={(item) => {
+                    setNotificationTarget({
+                      project_code: item.project_code,
+                      document_num: item.document_num,
+                      revision_id: item.revision_id,
+                    });
+                    if (item.event_type === "REVISION_UPLOADED_FOR_TDO" || item.event_type === "NEW_REVISION_FOR_TDO") {
+                      setActiveSection("tdo_queue");
+                    } else if (item.event_type === "TDO_SENT_TO_OWNER") {
+                      setActiveSection("trm");
+                    } else {
+                      setOpenedRevisionId(item.revision_id ?? null);
+                      setActiveSection(item.revision_id ? "revision_card" : "projects");
+                    }
+                  }}
+                />
               )}
-              {activeSection === "admin" && user?.role === "admin" && <AdminPage currentUser={user} />}
+              {activeSection === "tdo_queue" && user && (
+                <TdoQueuePage
+                  currentUser={user}
+                  onReload={loadInitialData}
+                  onOpenRevision={(target) => {
+                    setOpenedRevisionId(target.revision_id);
+                    setActiveSection("revision_card");
+                  }}
+                />
+              )}
+              {activeSection === "sessions" && user && <SessionsPage />}
+              {activeSection === "admin" && user?.permissions.can_manage_users && <AdminPage currentUser={user} />}
               {activeSection === "help" && <HelpPage />}
-            </>
+            </div>
           )}
         </Content>
       </Layout>

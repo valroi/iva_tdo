@@ -4,125 +4,64 @@ import type { ColumnsType } from "antd/es/table";
 interface MatrixRow {
   key: string;
   process: string;
-  main_admin: boolean;
   admin: boolean;
-  contractor_tdo_lead: boolean;
-  contractor_author: boolean;
-  owner_manager: boolean;
-  owner_reviewer: boolean;
-  viewer: boolean;
+  user: boolean;
 }
 
 const matrixRows: MatrixRow[] = [
   {
     key: "p1",
     process: "Создание карточки проекта",
-    main_admin: true,
-    admin: false,
-    contractor_tdo_lead: false,
-    contractor_author: false,
-    owner_manager: false,
-    owner_reviewer: false,
-    viewer: false,
+    admin: true,
+    user: false,
   },
   {
     key: "p2",
     process: "Удаление карточки проекта (если нет MDR)",
-    main_admin: true,
-    admin: false,
-    contractor_tdo_lead: false,
-    contractor_author: false,
-    owner_manager: false,
-    owner_reviewer: false,
-    viewer: false,
+    admin: true,
+    user: false,
   },
   {
     key: "p3",
-    process: "Назначение руководителя ТДО подрядчика",
-    main_admin: true,
-    admin: false,
-    contractor_tdo_lead: false,
-    contractor_author: false,
-    owner_manager: false,
-    owner_reviewer: false,
-    viewer: false,
+    process: "Создание/редактирование пользователей",
+    admin: true,
+    user: false,
   },
   {
     key: "p4",
-    process: "Приглашение участников подрядчика в проект",
-    main_admin: true,
-    admin: false,
-    contractor_tdo_lead: true,
-    contractor_author: false,
-    owner_manager: false,
-    owner_reviewer: false,
-    viewer: false,
+    process: "Редактирование справочников проекта",
+    admin: true,
+    user: false,
   },
   {
     key: "p5",
-    process: "Удаление участников подрядчика из проекта",
-    main_admin: true,
-    admin: false,
-    contractor_tdo_lead: true,
-    contractor_author: false,
-    owner_manager: false,
-    owner_reviewer: false,
-    viewer: false,
+    process: "Создание MDR/документов/ревизий",
+    admin: true,
+    user: true,
   },
   {
     key: "p6",
-    process: "Редактирование справочников проекта",
-    main_admin: true,
-    admin: false,
-    contractor_tdo_lead: false,
-    contractor_author: false,
-    owner_manager: false,
-    owner_reviewer: false,
-    viewer: false,
+    process: "Загрузка PDF в ревизию",
+    admin: true,
+    user: true,
   },
   {
     key: "p7",
-    process: "Создание MDR",
-    main_admin: true,
+    process: "Создание комментария",
     admin: true,
-    contractor_tdo_lead: true,
-    contractor_author: true,
-    owner_manager: false,
-    owner_reviewer: false,
-    viewer: false,
+    user: true,
   },
   {
     key: "p8",
-    process: "Загрузка PDF в ревизию",
-    main_admin: true,
+    process: "Ответ на комментарий",
     admin: true,
-    contractor_tdo_lead: true,
-    contractor_author: true,
-    owner_manager: false,
-    owner_reviewer: false,
-    viewer: false,
+    user: true,
   },
   {
     key: "p9",
-    process: "Создание комментария",
-    main_admin: true,
+    process: "Просмотр уведомлений и истории",
     admin: true,
-    contractor_tdo_lead: true,
-    contractor_author: true,
-    owner_manager: true,
-    owner_reviewer: true,
-    viewer: false,
-  },
-  {
-    key: "p10",
-    process: "Ответ на комментарий",
-    main_admin: true,
-    admin: true,
-    contractor_tdo_lead: true,
-    contractor_author: true,
-    owner_manager: false,
-    owner_reviewer: false,
-    viewer: false,
+    user: true,
   },
 ];
 
@@ -131,18 +70,8 @@ const yesNo = (value: boolean): JSX.Element =>
 
 const columns: ColumnsType<MatrixRow> = [
   { title: "Процесс", dataIndex: "process", key: "process", width: 320, fixed: "left" },
-  { title: "Главный админ", dataIndex: "main_admin", key: "main_admin", render: yesNo },
   { title: "Админ", dataIndex: "admin", key: "admin", render: yesNo },
-  {
-    title: "Рук. ТДО подрядчика",
-    dataIndex: "contractor_tdo_lead",
-    key: "contractor_tdo_lead",
-    render: yesNo,
-  },
-  { title: "Автор подрядчика", dataIndex: "contractor_author", key: "contractor_author", render: yesNo },
-  { title: "Owner manager", dataIndex: "owner_manager", key: "owner_manager", render: yesNo },
-  { title: "Owner reviewer", dataIndex: "owner_reviewer", key: "owner_reviewer", render: yesNo },
-  { title: "Viewer", dataIndex: "viewer", key: "viewer", render: yesNo },
+  { title: "Пользователь", dataIndex: "user", key: "user", render: yesNo },
 ];
 
 export default function HelpPage(): JSX.Element {
@@ -151,13 +80,11 @@ export default function HelpPage(): JSX.Element {
       <Card title="Инструкция для пользователей (как работать в системе)">
         <ol style={{ marginBottom: 0 }}>
           <li>Главный админ создает карточку проекта в разделе «Проекты».</li>
-          <li>Главный админ назначает руководителя ТДО от подрядчика.</li>
-          <li>Руководитель ТДО подрядчика добавляет участников подрядчика в проект.</li>
-          <li>Главный админ настраивает справочники проекта (дисциплины, типы и классы документов).</li>
-          <li>Команда подрядчика формирует MDR и создает документы/ревизии.</li>
-          <li>Подрядчик загружает PDF в ревизию кнопкой «PDF».</li>
-          <li>Заказчик проверяет и оставляет комментарии.</li>
-          <li>Подрядчик отвечает на замечания, процесс согласования продолжается до AP/AN.</li>
+          <li>Админ назначает роли (`admin`/`user`) и активирует учетные записи.</li>
+          <li>Админ настраивает справочники проекта (дисциплины, типы и классы документов).</li>
+          <li>Пользователь формирует MDR и создает документы/ревизии.</li>
+          <li>Пользователь загружает PDF в ревизию кнопкой «PDF».</li>
+          <li>Пользователи обмениваются комментариями по ревизиям до AP/AN.</li>
         </ol>
       </Card>
 
@@ -170,13 +97,13 @@ export default function HelpPage(): JSX.Element {
         </Button>
       </Card>
 
-      <Card title="Матрица разделения процессов (все роли)">
+      <Card title="Матрица разделения процессов (admin/user)">
         <Table
           columns={columns}
           dataSource={matrixRows}
           pagination={false}
           rowKey="key"
-          scroll={{ x: 1400 }}
+          scroll={{ x: 900 }}
         />
       </Card>
 

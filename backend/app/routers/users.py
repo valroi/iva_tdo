@@ -7,7 +7,13 @@ from sqlalchemy.orm import Session
 from app.auth import get_password_hash
 from app.config import get_settings
 from app.database import get_db
-from app.deps import is_main_admin, require_main_admin, require_user_manager
+from app.deps import (
+    default_permissions_for_role,
+    get_effective_permissions,
+    is_main_admin,
+    require_main_admin,
+    require_user_manager,
+)
 from app.models import (
     Comment,
     CommentStatus,
@@ -19,7 +25,9 @@ from app.models import (
     RegistrationRequest,
     RegistrationRequestStatus,
     Revision,
+    SystemSetting,
     User,
+    UserSession,
     UserRole,
 )
 from app.schemas import (
@@ -28,14 +36,31 @@ from app.schemas import (
     RegistrationApprovePayload,
     RegistrationRejectPayload,
     RegistrationRequestRead,
+    AdminReviewSlaSettingsRead,
+    AdminReviewSlaSettingsUpdate,
     UserActivationUpdate,
     UserCreate,
+    UserPermissionsUpdate,
+    UserPasswordUpdate,
     UserRead,
     UserRoleUpdate,
+    UserSessionRead,
+    UserUpdate,
 )
 
 router = APIRouter()
 settings = get_settings()
+
+SLA_INITIAL_KEY = "review_sla_default_initial_days"
+SLA_NEXT_KEY = "review_sla_default_next_days"
+
+
+def _default_company_code(company_type: CompanyType) -> str:
+    if company_type == CompanyType.contractor:
+        return "CTR"
+    if company_type == CompanyType.owner:
+        return "OWN"
+    return "ADM"
 
 
 def _validate_admin_constraints(actor: User, role: UserRole, company_type: CompanyType) -> None:
@@ -72,7 +97,48 @@ def list_users(
     db: Session = Depends(get_db),
     _: User = Depends(require_user_manager),
 ):
-    return db.query(User).order_by(User.id.asc()).all()
+    users = db.query(User).order_by(User.id.asc()).all()
+    return [
+        UserRead.model_validate(user, from_attributes=True).model_copy(
+            update={"permissions": get_effective_permissions(user)}
+        )
+        for user in users
+    ]
+
+
+@router.get("/admin-settings/review-sla", response_model=AdminReviewSlaSettingsRead)
+def get_admin_review_sla_settings(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_main_admin),
+):
+    initial = db.query(SystemSetting).filter(SystemSetting.key == SLA_INITIAL_KEY).first()
+    next_item = db.query(SystemSetting).filter(SystemSetting.key == SLA_NEXT_KEY).first()
+    return AdminReviewSlaSettingsRead(
+        initial_days=int(initial.value) if initial else 14,
+        next_days=int(next_item.value) if next_item else 7,
+    )
+
+
+@router.put("/admin-settings/review-sla", response_model=AdminReviewSlaSettingsRead)
+def update_admin_review_sla_settings(
+    payload: AdminReviewSlaSettingsUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_main_admin),
+):
+    initial = db.query(SystemSetting).filter(SystemSetting.key == SLA_INITIAL_KEY).first()
+    if initial is None:
+        initial = SystemSetting(key=SLA_INITIAL_KEY, value=str(payload.initial_days))
+    else:
+        initial.value = str(payload.initial_days)
+    next_item = db.query(SystemSetting).filter(SystemSetting.key == SLA_NEXT_KEY).first()
+    if next_item is None:
+        next_item = SystemSetting(key=SLA_NEXT_KEY, value=str(payload.next_days))
+    else:
+        next_item.value = str(payload.next_days)
+    db.add(initial)
+    db.add(next_item)
+    db.commit()
+    return AdminReviewSlaSettingsRead(initial_days=payload.initial_days, next_days=payload.next_days)
 
 
 @router.post("", response_model=UserRead, status_code=status.HTTP_201_CREATED)
@@ -92,14 +158,18 @@ def create_user(
         email=email,
         hashed_password=get_password_hash(payload.password),
         full_name=payload.full_name,
+        company_code=(payload.company_code or _default_company_code(payload.company_type)).upper()[:3],
         company_type=payload.company_type,
         role=payload.role,
+        permissions=(payload.permissions or default_permissions_for_role(payload.role)),
         is_active=True,
     )
     db.add(user)
     db.commit()
     db.refresh(user)
-    return user
+    return UserRead.model_validate(user, from_attributes=True).model_copy(
+        update={"permissions": get_effective_permissions(user)}
+    )
 
 
 @router.post("/quick-demo-setup", response_model=QuickDemoSetupResponse, status_code=status.HTTP_201_CREATED)
@@ -118,16 +188,18 @@ def quick_demo_setup(
         email=contractor_email,
         hashed_password=get_password_hash(payload.password),
         full_name="Demo Contractor",
+        company_code="CTR",
         company_type=CompanyType.contractor,
-        role=UserRole.contractor_manager,
+        role=UserRole.user,
         is_active=True,
     )
     owner = User(
         email=owner_email,
         hashed_password=get_password_hash(payload.password),
         full_name="Demo Owner",
+        company_code="OWN",
         company_type=CompanyType.owner,
-        role=UserRole.owner_reviewer,
+        role=UserRole.user,
         is_active=True,
     )
     db.add(contractor)
@@ -248,7 +320,7 @@ def approve_registration_request(
     if existing_user is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
-    target_role = payload.role or request_item.requested_role or UserRole.viewer
+    target_role = payload.role or request_item.requested_role or UserRole.user
     target_company_type = payload.company_type or request_item.company_type
 
     _validate_admin_constraints(current_user, target_role, target_company_type)
@@ -257,8 +329,10 @@ def approve_registration_request(
         email=request_item.email,
         hashed_password=request_item.hashed_password,
         full_name=request_item.full_name,
+        company_code=_default_company_code(target_company_type),
         company_type=target_company_type,
         role=target_role,
+        permissions=default_permissions_for_role(target_role),
         is_active=payload.is_active,
     )
 
@@ -280,7 +354,9 @@ def approve_registration_request(
 
     db.commit()
     db.refresh(user)
-    return user
+    return UserRead.model_validate(user, from_attributes=True).model_copy(
+        update={"permissions": get_effective_permissions(user)}
+    )
 
 
 @router.post("/registration-requests/{request_id}/reject", response_model=RegistrationRequestRead)
@@ -329,10 +405,13 @@ def update_user_role(
         user.company_type = CompanyType.admin
 
     user.role = payload.role
+    user.permissions = default_permissions_for_role(payload.role)
     db.add(user)
     db.commit()
     db.refresh(user)
-    return user
+    return UserRead.model_validate(user, from_attributes=True).model_copy(
+        update={"permissions": get_effective_permissions(user)}
+    )
 
 
 @router.put("/{user_id}/active", response_model=UserRead)
@@ -356,7 +435,114 @@ def set_user_active(
     db.add(user)
     db.commit()
     db.refresh(user)
-    return user
+    return UserRead.model_validate(user, from_attributes=True).model_copy(
+        update={"permissions": get_effective_permissions(user)}
+    )
+
+
+@router.put("/{user_id}/permissions", response_model=UserRead)
+def update_user_permissions(
+    user_id: int,
+    payload: UserPermissionsUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_main_admin),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    user.permissions = payload.permissions
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return UserRead.model_validate(user, from_attributes=True).model_copy(
+        update={"permissions": get_effective_permissions(user)}
+    )
+
+
+@router.put("/{user_id}", response_model=UserRead)
+def update_user(
+    user_id: int,
+    payload: UserUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_main_admin),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    data = payload.model_dump(exclude_unset=True)
+    if "email" in data and data["email"]:
+        normalized_email = str(data["email"]).lower()
+        exists = db.query(User).filter(User.email == normalized_email, User.id != user_id).first()
+        if exists is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already exists")
+        user.email = normalized_email
+    if "full_name" in data and data["full_name"] is not None:
+        user.full_name = data["full_name"]
+    if "company_code" in data:
+        user.company_code = (data["company_code"] or "").upper()[:3] or None
+    if "company_type" in data and data["company_type"] is not None:
+        user.company_type = data["company_type"]
+    if "is_active" in data and data["is_active"] is not None:
+        user.is_active = bool(data["is_active"])
+
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return UserRead.model_validate(user, from_attributes=True).model_copy(
+        update={"permissions": get_effective_permissions(user)}
+    )
+
+
+@router.put("/{user_id}/password", status_code=status.HTTP_204_NO_CONTENT)
+def update_user_password(
+    user_id: int,
+    payload: UserPasswordUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_main_admin),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    user.hashed_password = get_password_hash(payload.new_password)
+    db.add(user)
+    db.commit()
+
+
+@router.get("/{user_id}/sessions", response_model=list[UserSessionRead])
+def list_user_sessions(
+    user_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_main_admin),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    items = db.query(UserSession).filter(UserSession.user_id == user_id).order_by(UserSession.created_at.desc()).all()
+    now = datetime.utcnow()
+    return [
+        UserSessionRead.model_validate(item, from_attributes=True).model_copy(
+            update={"is_active": item.revoked_at is None and item.expires_at > now}
+        )
+        for item in items
+    ]
+
+
+@router.delete("/{user_id}/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+def revoke_user_session(
+    user_id: int,
+    session_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_main_admin),
+):
+    session = db.query(UserSession).filter(UserSession.id == session_id, UserSession.user_id == user_id).first()
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    session.revoked_at = datetime.utcnow()
+    db.add(session)
+    db.commit()
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -377,6 +563,7 @@ def delete_user(
 
     db.query(ProjectMember).filter(ProjectMember.user_id == user.id).delete()
     db.query(Notification).filter(Notification.user_id == user.id).delete()
+    db.query(UserSession).filter(UserSession.user_id == user.id).delete()
     db.query(RegistrationRequest).filter(RegistrationRequest.reviewed_by_id == user.id).update(
         {RegistrationRequest.reviewed_by_id: None}
     )

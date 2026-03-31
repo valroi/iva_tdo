@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.deps import get_current_user, require_roles
-from app.models import User, UserRole, WorkflowStatus
+from app.deps import get_current_user, require_permissions
+from app.models import User, WorkflowStatus
 from app.schemas import WorkflowStatusCreate, WorkflowStatusRead, WorkflowStatusUpdate
 
 router = APIRouter()
@@ -18,7 +18,7 @@ def list_statuses(db: Session = Depends(get_db), _: User = Depends(get_current_u
 def create_status(
     payload: WorkflowStatusCreate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_roles(UserRole.admin)),
+    _: User = Depends(require_permissions("can_edit_workflow_statuses")),
 ):
     existing = db.query(WorkflowStatus).filter(WorkflowStatus.code == payload.code).first()
     if existing:
@@ -36,7 +36,7 @@ def update_status(
     status_id: int,
     payload: WorkflowStatusUpdate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_roles(UserRole.admin)),
+    _: User = Depends(require_permissions("can_edit_workflow_statuses")),
 ):
     status_item = db.query(WorkflowStatus).filter(WorkflowStatus.id == status_id).first()
     if not status_item:

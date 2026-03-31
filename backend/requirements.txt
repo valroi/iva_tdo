@@ -9,3 +9,4 @@ python-multipart
 email-validator
 pytest
 httpx
+eval_type_backport

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
@@ -38,17 +40,20 @@ class RegisterRequest(BaseModel):
 class UserBase(BaseModel):
     email: EmailStr
     full_name: str
+    company_code: str | None = None
     company_type: CompanyType
     role: UserRole
 
 
 class UserCreate(UserBase):
     password: str = Field(min_length=6)
+    permissions: dict[str, bool] | None = None
 
 
 class UserRead(UserBase):
     id: int
     is_active: bool
+    permissions: dict[str, bool]
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -58,7 +63,6 @@ class ProjectCreate(BaseModel):
     code: str
     name: str
     description: str | None = None
-    contractor_tdo_manager_user_id: int | None = None
 
 
 class ProjectUpdate(BaseModel):
@@ -89,6 +93,8 @@ class ProjectMemberRead(BaseModel):
     user_id: int
     member_role: ProjectMemberRole
     can_manage_contractor_users: bool
+    user_email: str | None = None
+    user_full_name: str | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -140,6 +146,8 @@ class ReviewMatrixMemberRead(BaseModel):
     doc_type: str
     level: int
     state: str
+    user_email: str | None = None
+    user_full_name: str | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -216,6 +224,9 @@ class DocumentRead(BaseModel):
     discipline: str
     weight: float
     created_by_id: int
+    latest_revision_code: str | None = None
+    latest_revision_status: str | None = None
+    latest_review_code: ReviewCode | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -225,6 +236,7 @@ class RevisionCreate(BaseModel):
     document_id: int
     revision_code: str
     issue_purpose: str
+    author_id: int | None = None
     status: str = "SUBMITTED"
     trm_number: str | None = None
     file_path: str | None = None
@@ -236,6 +248,7 @@ class RevisionRead(BaseModel):
     document_id: int
     revision_code: str
     issue_purpose: str
+    author_id: int | None
     status: str
     trm_number: str | None
     file_path: str | None
@@ -244,6 +257,11 @@ class RevisionRead(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class RevisionTdoDecision(BaseModel):
+    action: str = Field(pattern="^(SEND_TO_OWNER|CANCELLED)$")
+    note: str | None = None
 
 
 class CommentCreate(BaseModel):
@@ -260,6 +278,12 @@ class CommentCreate(BaseModel):
 class CommentResponse(BaseModel):
     text: str
     status: CommentStatus = CommentStatus.IN_PROGRESS
+    backlog_status: str | None = Field(default=None, pattern="^(IN_NEXT_REVISION|REJECTED)$")
+
+
+class CommentOwnerDecision(BaseModel):
+    action: str = Field(pattern="^(PUBLISH|REJECT)$")
+    note: str | None = None
 
 
 class CommentRead(BaseModel):
@@ -269,6 +293,8 @@ class CommentRead(BaseModel):
     author_id: int
     text: str
     status: CommentStatus
+    is_published_to_contractor: bool = False
+    backlog_status: str | None = None
     page: int | None
     area_x: float | None
     area_y: float | None
@@ -315,6 +341,9 @@ class NotificationRead(BaseModel):
     user_id: int
     event_type: str
     message: str
+    project_code: str | None = None
+    document_num: str | None = None
+    revision_id: int | None = None
     is_read: bool
     created_at: datetime
 
@@ -327,6 +356,37 @@ class UserRoleUpdate(BaseModel):
 
 class UserActivationUpdate(BaseModel):
     is_active: bool
+
+
+class UserPermissionsUpdate(BaseModel):
+    permissions: dict[str, bool]
+
+
+class UserPasswordUpdate(BaseModel):
+    new_password: str = Field(min_length=6)
+
+
+class UserUpdate(BaseModel):
+    email: EmailStr | None = None
+    full_name: str | None = None
+    company_code: str | None = None
+    company_type: CompanyType | None = None
+    is_active: bool | None = None
+
+
+class UserSessionRead(BaseModel):
+    id: int
+    user_id: int
+    ip_address: str | None
+    country: str | None
+    user_agent: str | None
+    created_at: datetime
+    last_seen_at: datetime
+    expires_at: datetime
+    revoked_at: datetime | None
+    is_active: bool = False
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class RegistrationRequestRead(BaseModel):
@@ -345,7 +405,7 @@ class RegistrationRequestRead(BaseModel):
 
 
 class RegistrationApprovePayload(BaseModel):
-    role: UserRole = UserRole.viewer
+    role: UserRole = UserRole.user
     company_type: CompanyType | None = None
     is_active: bool = True
 
@@ -368,6 +428,75 @@ class QuickDemoSetupResponse(BaseModel):
     document_id: int
     revision_id: int
     comment_id: int
+
+
+class TdoQueueItem(BaseModel):
+    revision_id: int
+    project_code: str
+    document_num: str
+    document_title: str
+    revision_code: str
+    issue_purpose: str
+    status: str
+    review_deadline: date | None
+    file_path: str | None
+    author_id: int | None = None
+    author_name: str | None = None
+    author_email: str | None = None
+
+
+class RevisionOverviewRead(BaseModel):
+    revision_id: int
+    project_code: str
+    document_num: str
+    document_title: str
+    revision_code: str
+    issue_purpose: str
+    status: str
+    trm_number: str | None
+    review_deadline: date | None
+    file_path: str | None
+    author_id: int | None = None
+    author_name: str | None = None
+    author_email: str | None = None
+    created_at: datetime
+
+
+class PublishCommentsResult(BaseModel):
+    revision_id: int
+    published_count: int
+
+
+class RevisionCommentThreadRead(BaseModel):
+    revision_id: int
+    revision_code: str
+    status: str
+    created_at: datetime
+    comments: list[CommentRead]
+
+
+class RevisionCardRead(BaseModel):
+    revision_id: int
+    project_code: str
+    document_num: str
+    document_title: str
+    discipline_code: str
+    doc_type: str
+    category: str
+    current_revision_code: str
+    current_status: str
+    revisions: list[RevisionRead]
+    history: list[RevisionCommentThreadRead]
+
+
+class AdminReviewSlaSettingsRead(BaseModel):
+    initial_days: int
+    next_days: int
+
+
+class AdminReviewSlaSettingsUpdate(BaseModel):
+    initial_days: int = Field(ge=1, le=365)
+    next_days: int = Field(ge=1, le=365)
 
 
 class FileUploadResponse(BaseModel):

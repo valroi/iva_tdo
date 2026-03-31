@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import enum
 from datetime import date, datetime
+from typing import Optional
 
 from sqlalchemy import (
     JSON,
@@ -27,11 +30,7 @@ class CompanyType(str, enum.Enum):
 
 class UserRole(str, enum.Enum):
     admin = "admin"
-    owner_manager = "owner_manager"
-    owner_reviewer = "owner_reviewer"
-    contractor_manager = "contractor_manager"
-    contractor_author = "contractor_author"
-    viewer = "viewer"
+    user = "user"
 
 
 class ReviewCode(str, enum.Enum):
@@ -69,10 +68,27 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    company_code: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     company_type: Mapped[CompanyType] = mapped_column(Enum(CompanyType), nullable=False)
     role: Mapped[UserRole] = mapped_column(Enum(UserRole), nullable=False)
+    permissions: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    refresh_token_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    ip_address: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    country: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    user_agent: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
 class RegistrationRequest(Base):
@@ -83,16 +99,16 @@ class RegistrationRequest(Base):
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
     company_type: Mapped[CompanyType] = mapped_column(Enum(CompanyType), nullable=False)
-    requested_role: Mapped[UserRole | None] = mapped_column(Enum(UserRole), nullable=True)
+    requested_role: Mapped[Optional[UserRole]] = mapped_column(Enum(UserRole), nullable=True)
     status: Mapped[RegistrationRequestStatus] = mapped_column(
         Enum(RegistrationRequestStatus),
         default=RegistrationRequestStatus.PENDING,
         nullable=False,
     )
-    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    reviewed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    review_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    reviewed_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
 class Project(Base):
@@ -101,7 +117,7 @@ class Project(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     code: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
@@ -183,20 +199,20 @@ class MDRRecord(Base):
     doc_name: Mapped[str] = mapped_column(String(255), nullable=False)
     progress_percent: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     doc_weight: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
-    issue_purpose: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    revision: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    revision_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    issue_purpose: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    revision: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    revision_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
 
     dates: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
 
-    trm_number: Mapped[str | None] = mapped_column(String(60), nullable=True)
-    review_code: Mapped[ReviewCode | None] = mapped_column(Enum(ReviewCode), nullable=True)
+    trm_number: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
+    review_code: Mapped[Optional[ReviewCode]] = mapped_column(Enum(ReviewCode), nullable=True)
     status: Mapped[str] = mapped_column(String(60), default="DRAFT", nullable=False)
 
-    contractor_responsible_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
-    owner_responsible_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    contractor_responsible_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    owner_responsible_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
 
-    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_confidential: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
@@ -233,13 +249,14 @@ class Revision(Base):
     document_id: Mapped[int] = mapped_column(ForeignKey("documents.id"), nullable=False)
     revision_code: Mapped[str] = mapped_column(String(20), nullable=False)
     issue_purpose: Mapped[str] = mapped_column(String(120), nullable=False)
+    author_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     status: Mapped[str] = mapped_column(String(60), default="SUBMITTED", nullable=False)
-    trm_number: Mapped[str | None] = mapped_column(String(60), nullable=True)
-    file_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    review_code: Mapped[ReviewCode | None] = mapped_column(Enum(ReviewCode), nullable=True)
-    review_deadline: Mapped[date | None] = mapped_column(Date, nullable=True)
+    trm_number: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
+    file_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    review_code: Mapped[Optional[ReviewCode]] = mapped_column(Enum(ReviewCode), nullable=True)
+    review_deadline: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     document: Mapped["Document"] = relationship("Document", back_populates="revisions")
     comments: Mapped[list["Comment"]] = relationship("Comment", back_populates="revision")
@@ -250,17 +267,19 @@ class Comment(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     revision_id: Mapped[int] = mapped_column(ForeignKey("revisions.id"), nullable=False)
-    parent_id: Mapped[int | None] = mapped_column(ForeignKey("comments.id"), nullable=True)
+    parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("comments.id"), nullable=True)
     author_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[CommentStatus] = mapped_column(Enum(CommentStatus), default=CommentStatus.OPEN, nullable=False)
-    page: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    area_x: Mapped[float | None] = mapped_column(Float, nullable=True)
-    area_y: Mapped[float | None] = mapped_column(Float, nullable=True)
-    area_w: Mapped[float | None] = mapped_column(Float, nullable=True)
-    area_h: Mapped[float | None] = mapped_column(Float, nullable=True)
+    is_published_to_contractor: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    backlog_status: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    page: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    area_x: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    area_y: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    area_w: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    area_h: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     revision: Mapped["Revision"] = relationship("Revision", back_populates="comments")
 
@@ -272,7 +291,7 @@ class WorkflowStatus(Base):
     code: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     color: Mapped[str] = mapped_column(String(20), default="#1677ff", nullable=False)
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_final: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     editable: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
@@ -285,6 +304,9 @@ class Notification(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     event_type: Mapped[str] = mapped_column(String(60), nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
+    project_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    document_num: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    revision_id: Mapped[Optional[int]] = mapped_column(ForeignKey("revisions.id"), nullable=True)
     is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -293,9 +315,23 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    actor_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     action: Mapped[str] = mapped_column(String(100), nullable=False)
     entity_type: Mapped[str] = mapped_column(String(80), nullable=False)
     entity_id: Mapped[str] = mapped_column(String(80), nullable=False)
     details: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class SystemSetting(Base):
+    __tablename__ = "system_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    key: Mapped[str] = mapped_column(String(80), unique=True, nullable=False, index=True)
+    value: Mapped[str] = mapped_column(String(255), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )

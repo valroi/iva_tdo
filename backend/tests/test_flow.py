@@ -78,7 +78,7 @@ def test_main_flow_and_user_governance():
                 "password": "password1",
                 "full_name": "Contractor User",
                 "company_type": "contractor",
-                "role": "contractor_manager",
+                "role": "user",
             },
             headers=_auth_header(secondary_access),
         )
@@ -106,7 +106,7 @@ def test_main_flow_and_user_governance():
                 "password": "password1",
                 "full_name": "Owner User",
                 "company_type": "owner",
-                "role": "owner_reviewer",
+                "role": "user",
             },
             headers=_auth_header(main_admin_access),
         )
@@ -119,7 +119,6 @@ def test_main_flow_and_user_governance():
                 "code": "IVA",
                 "name": "Проект IVA",
                 "description": "Тестовый проект",
-                "contractor_tdo_manager_user_id": contractor_id,
             },
             headers=_auth_header(main_admin_access),
         )
@@ -263,7 +262,7 @@ def test_main_flow_and_user_governance():
                 "password": "password1",
                 "full_name": "New User",
                 "company_type": "owner",
-                "requested_role": "owner_reviewer",
+                "requested_role": "user",
             },
         )
         assert registration_request.status_code == 201, registration_request.text
@@ -278,7 +277,7 @@ def test_main_flow_and_user_governance():
 
         approved = client.post(
             f"/api/v1/users/registration-requests/{request_id}/approve",
-            json={"role": "owner_reviewer", "company_type": "owner", "is_active": True},
+            json={"role": "user", "company_type": "owner", "is_active": True},
             headers=_auth_header(main_admin_access),
         )
         assert approved.status_code == 201, approved.text

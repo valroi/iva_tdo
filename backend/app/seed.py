@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_password_hash
 from app.config import get_settings
+from app.deps import default_permissions_for_role
 from app.models import CompanyType, User, UserRole, WorkflowStatus
 
 
@@ -16,14 +17,21 @@ def seed_default_data(db: Session) -> None:
             full_name=settings.first_admin_full_name,
             company_type=CompanyType.admin,
             role=UserRole.admin,
+            permissions=default_permissions_for_role(UserRole.admin),
             is_active=True,
         )
         db.add(admin)
     else:
         admin.role = UserRole.admin
+        admin.permissions = default_permissions_for_role(UserRole.admin)
         admin.company_type = CompanyType.admin
         admin.is_active = True
         db.add(admin)
+
+    # Migrate legacy non-admin roles to the simplified "user" role.
+    db.query(User).filter(User.role != UserRole.admin).update(
+        {User.role: UserRole.user, User.permissions: default_permissions_for_role(UserRole.user)}
+    )
 
     if settings.main_admin_email != settings.first_admin_email:
         main_admin = db.query(User).filter(User.email == settings.main_admin_email).first()
@@ -35,11 +43,13 @@ def seed_default_data(db: Session) -> None:
                     full_name="Main Administrator",
                     company_type=CompanyType.admin,
                     role=UserRole.admin,
+                    permissions=default_permissions_for_role(UserRole.admin),
                     is_active=True,
                 )
             )
         else:
             main_admin.role = UserRole.admin
+            main_admin.permissions = default_permissions_for_role(UserRole.admin)
             main_admin.company_type = CompanyType.admin
             main_admin.is_active = True
             db.add(main_admin)
