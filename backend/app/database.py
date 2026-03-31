@@ -92,7 +92,7 @@ def _ensure_comments_workflow_columns() -> None:
     columns = {column["name"] for column in inspector.get_columns("comments")}
     statements: list[str] = []
     if "is_published_to_contractor" not in columns:
-        statements.append("ALTER TABLE comments ADD COLUMN is_published_to_contractor BOOLEAN DEFAULT 0")
+        statements.append("ALTER TABLE comments ADD COLUMN is_published_to_contractor BOOLEAN DEFAULT FALSE")
     if "backlog_status" not in columns:
         statements.append("ALTER TABLE comments ADD COLUMN backlog_status VARCHAR(30)")
     if not statements:
