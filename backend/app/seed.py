@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import DataError, ProgrammingError
 
 from app.auth import get_password_hash
 from app.config import get_settings
@@ -28,10 +29,16 @@ def seed_default_data(db: Session) -> None:
         admin.is_active = True
         db.add(admin)
 
-    # Migrate legacy non-admin roles to the simplified "user" role.
-    db.query(User).filter(User.role != UserRole.admin).update(
-        {User.role: UserRole.user, User.permissions: default_permissions_for_role(UserRole.user)}
-    )
+    # NOTE:
+    # On some legacy Postgres deployments enum type "userrole" may not yet include
+    # value "user". In that case, hard migration on startup crashes the whole app.
+    # Keep startup resilient: try migration, and if enum is not ready - skip for now.
+    try:
+        db.query(User).filter(User.role != UserRole.admin).update(
+            {User.role: UserRole.user, User.permissions: default_permissions_for_role(UserRole.user)}
+        )
+    except (DataError, ProgrammingError):
+        db.rollback()
 
     if settings.main_admin_email != settings.first_admin_email:
         main_admin = db.query(User).filter(User.email == settings.main_admin_email).first()

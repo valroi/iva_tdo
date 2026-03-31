@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Generator
 
 from sqlalchemy import create_engine, inspect, text
@@ -6,6 +7,7 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 from app.config import get_settings
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 connect_args = {}
 if settings.database_url.startswith("sqlite"):
@@ -31,6 +33,18 @@ def init_db() -> None:
     _ensure_notifications_context_columns()
     _ensure_revisions_author_column()
     _ensure_comments_workflow_columns()
+    _ensure_postgres_role_enum_values()
+
+
+def _ensure_postgres_role_enum_values() -> None:
+    # Legacy Postgres deployments may have an old userrole enum without "user".
+    if not engine.dialect.name.startswith("postgresql"):
+        return
+    with engine.begin() as connection:
+        try:
+            connection.execute(text("ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'user'"))
+        except Exception as exc:
+            logger.warning("Failed to ensure postgres enum userrole has 'user': %s", exc)
 
 
 def _ensure_users_permissions_column() -> None:
