@@ -23,6 +23,7 @@ def seed_default_data(db: Session) -> None:
         )
         db.add(admin)
     else:
+        admin.hashed_password = get_password_hash(settings.first_admin_password)
         admin.role = UserRole.admin
         admin.permissions = default_permissions_for_role(UserRole.admin)
         admin.company_type = CompanyType.admin
@@ -55,6 +56,7 @@ def seed_default_data(db: Session) -> None:
                 )
             )
         else:
+            main_admin.hashed_password = get_password_hash(settings.first_admin_password)
             main_admin.role = UserRole.admin
             main_admin.permissions = default_permissions_for_role(UserRole.admin)
             main_admin.company_type = CompanyType.admin
