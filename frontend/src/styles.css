@@ -1,0 +1,107 @@
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --border: #e6e8ef;
+  --text: #101828;
+  --muted: #667085;
+  --shadow-soft: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.1);
+}
+
+body {
+  margin: 0;
+  font-family: Inter, "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.app-sider {
+  border-right: 1px solid var(--border);
+  background: var(--surface) !important;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-logo {
+  font-weight: 700;
+  font-size: 16px;
+  padding: 14px 14px;
+  letter-spacing: 0.2px;
+}
+
+.sider-user-card {
+  margin-top: auto;
+  border-top: 1px solid var(--border);
+  padding: 10px 12px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  background: #fcfcfd;
+}
+
+.sider-user-info .name {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.sider-user-info .email {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.app-header {
+  background: var(--surface) !important;
+  border-bottom: 1px solid var(--border);
+  padding-inline: 14px !important;
+  height: auto !important;
+  line-height: normal !important;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.app-content {
+  margin: 12px;
+  background: transparent;
+}
+
+.ant-card {
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-soft);
+}
+
+.ant-btn {
+  border-radius: 8px;
+}
+
+.ant-input,
+.ant-input-affix-wrapper,
+.ant-select-selector,
+.ant-picker,
+.ant-input-number {
+  border-radius: 8px !important;
+}
+
+.ant-table-wrapper .ant-table {
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.ant-menu-light .ant-menu-item-selected {
+  background: #eef4ff !important;
+  color: #1d4ed8 !important;
+}
+
+.ant-menu-light .ant-menu-item,
+.ant-menu-light .ant-menu-submenu-title {
+  border-radius: 8px;
+}
+
+.viewer-frame {
+  width: 100%;
+  height: 72vh;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+}
