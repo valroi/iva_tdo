@@ -414,6 +414,27 @@ export function updateAdminReviewSlaSettings(payload: {
   });
 }
 
+export function clearProjectData(): Promise<{
+  message: string;
+  deleted_files: number;
+  deleted_revisions: number;
+  deleted_documents: number;
+  deleted_mdr: number;
+}> {
+  return request("/users/admin-tools/project-data", {
+    method: "DELETE",
+  });
+}
+
+export function clearAllNotifications(): Promise<{
+  message: string;
+  deleted_notifications: number;
+}> {
+  return request("/users/admin-tools/notifications", {
+    method: "DELETE",
+  });
+}
+
 export function uploadRevisionPdf(revisionId: number, file: File): Promise<{
   file_name: string;
   file_path: string;

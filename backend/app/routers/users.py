@@ -1,4 +1,5 @@
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
@@ -22,8 +23,10 @@ from app.models import (
     MDRRecord,
     Notification,
     ProjectMember,
+    ProjectReference,
     RegistrationRequest,
     RegistrationRequestStatus,
+    ReviewMatrixMember,
     Revision,
     SystemSetting,
     User,
@@ -50,6 +53,7 @@ from app.schemas import (
 
 router = APIRouter()
 settings = get_settings()
+UPLOAD_ROOT = Path("/tmp/tdo_uploads")
 
 SLA_INITIAL_KEY = "review_sla_default_initial_days"
 SLA_NEXT_KEY = "review_sla_default_next_days"
@@ -177,6 +181,77 @@ def update_admin_review_sla_settings(
         db.add(item)
     db.commit()
     return AdminReviewSlaSettingsRead(**payload.model_dump())
+
+
+@router.delete("/admin-tools/project-data", status_code=status.HTTP_200_OK)
+def clear_project_data(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_main_admin),
+):
+    revisions = db.query(Revision).all()
+    revision_ids = [item.id for item in revisions]
+    file_paths = [item.file_path for item in revisions if item.file_path]
+
+    documents = db.query(Document).all()
+    document_nums = [item.document_num for item in documents]
+
+    mdr_items = db.query(MDRRecord).all()
+    project_codes = [item.project_code for item in mdr_items]
+
+    deleted_files = 0
+    for raw_path in file_paths:
+        try:
+            path = Path(raw_path).resolve()
+            root = UPLOAD_ROOT.resolve()
+            if root in path.parents and path.exists():
+                path.unlink()
+                deleted_files += 1
+        except OSError:
+            continue
+
+    if revision_ids:
+        db.query(Notification).filter(Notification.revision_id.in_(revision_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(Comment).filter(Comment.revision_id.in_(revision_ids)).delete(
+            synchronize_session=False
+        )
+        db.query(Revision).filter(Revision.id.in_(revision_ids)).delete(synchronize_session=False)
+
+    if document_nums:
+        db.query(Notification).filter(Notification.document_num.in_(document_nums)).delete(
+            synchronize_session=False
+        )
+    if project_codes:
+        db.query(Notification).filter(Notification.project_code.in_(project_codes)).delete(
+            synchronize_session=False
+        )
+
+    db.query(Document).delete(synchronize_session=False)
+    db.query(MDRRecord).delete(synchronize_session=False)
+    db.query(ProjectReference).delete(synchronize_session=False)
+    db.query(ReviewMatrixMember).delete(synchronize_session=False)
+    db.query(ProjectMember).delete(synchronize_session=False)
+    db.query(Project).delete(synchronize_session=False)
+
+    db.commit()
+    return {
+        "message": "Project data and files cleared",
+        "deleted_files": deleted_files,
+        "deleted_revisions": len(revision_ids),
+        "deleted_documents": len(documents),
+        "deleted_mdr": len(mdr_items),
+    }
+
+
+@router.delete("/admin-tools/notifications", status_code=status.HTTP_200_OK)
+def clear_all_notifications(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_main_admin),
+):
+    deleted = db.query(Notification).delete(synchronize_session=False)
+    db.commit()
+    return {"message": "All notifications cleared", "deleted_notifications": deleted}
 
 
 @router.post("", response_model=UserRead, status_code=status.HTTP_201_CREATED)

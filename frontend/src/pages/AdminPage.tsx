@@ -35,6 +35,8 @@ import {
   revokeUserSession,
   getAdminReviewSlaSettings,
   updateAdminReviewSlaSettings,
+  clearProjectData,
+  clearAllNotifications,
 } from "../api";
 import type { CompanyType, QuickDemoSetupResult, RegistrationRequest, User, UserPermissions, UserRole, UserSession } from "../types";
 
@@ -404,6 +406,37 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
           Администрирование: пользователи и права
         </Typography.Title>
         <Space>
+          <Popconfirm
+            title="Удалить все проектные данные?"
+            description="Будут удалены проекты, MDR, документы, ревизии, комментарии и PDF файлы. Пользователи останутся."
+            okText="Да, удалить"
+            cancelText="Отмена"
+            disabled={!isMainAdmin}
+            onConfirm={async () => {
+              const result = await clearProjectData();
+              message.success(
+                `Очищено: MDR ${result.deleted_mdr}, документов ${result.deleted_documents}, ревизий ${result.deleted_revisions}, файлов ${result.deleted_files}`,
+              );
+              await loadData();
+            }}
+          >
+            <Button danger disabled={!isMainAdmin}>
+              Очистить базу проектов и файлы
+            </Button>
+          </Popconfirm>
+          <Popconfirm
+            title="Удалить все уведомления?"
+            description="Будут удалены уведомления у всех пользователей."
+            okText="Да, удалить"
+            cancelText="Отмена"
+            disabled={!isMainAdmin}
+            onConfirm={async () => {
+              const result = await clearAllNotifications();
+              message.success(`Удалено уведомлений: ${result.deleted_notifications}`);
+            }}
+          >
+            <Button disabled={!isMainAdmin}>Удалить все уведомления</Button>
+          </Popconfirm>
           <Button
             onClick={() => {
               setQuickResult(null);
