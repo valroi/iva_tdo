@@ -4,7 +4,6 @@ import {
   Form,
   Input,
   Modal,
-  Popconfirm,
   Select,
   Space,
   Switch,
@@ -161,6 +160,7 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
   const [sessions, setSessions] = useState<UserSession[]>([]);
   const [editOpen, setEditOpen] = useState(false);
   const [editForm] = Form.useForm<{ email: string; full_name: string; company_code?: string; company_type: CompanyType; is_active: boolean }>();
+  const [adminActionLoading, setAdminActionLoading] = useState(false);
   const [slaForm] = Form.useForm<{
     initial_days: number;
     next_days: number;
@@ -342,6 +342,51 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
     },
   ];
 
+  const confirmClearProjectData = () => {
+    Modal.confirm({
+      title: "Удалить все проектные данные?",
+      content: "Будут удалены проекты, MDR, документы, ревизии, комментарии и PDF файлы. Пользователи останутся.",
+      okText: "Да, удалить",
+      cancelText: "Отмена",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          setAdminActionLoading(true);
+          const result = await clearProjectData();
+          message.success(
+            `Очищено: MDR ${result.deleted_mdr}, документов ${result.deleted_documents}, ревизий ${result.deleted_revisions}, файлов ${result.deleted_files}`,
+          );
+          await loadData();
+        } catch (error) {
+          message.error(error instanceof Error ? error.message : "Не удалось очистить проектные данные");
+        } finally {
+          setAdminActionLoading(false);
+        }
+      },
+    });
+  };
+
+  const confirmClearAllNotifications = () => {
+    Modal.confirm({
+      title: "Удалить все уведомления?",
+      content: "Будут удалены уведомления у всех пользователей.",
+      okText: "Да, удалить",
+      cancelText: "Отмена",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          setAdminActionLoading(true);
+          const result = await clearAllNotifications();
+          message.success(`Удалено уведомлений: ${result.deleted_notifications}`);
+        } catch (error) {
+          message.error(error instanceof Error ? error.message : "Не удалось удалить уведомления");
+        } finally {
+          setAdminActionLoading(false);
+        }
+      },
+    });
+  };
+
   const requestColumns: ColumnsType<RegistrationRequest> = [
     { title: "ID", dataIndex: "id", key: "id", width: 80 },
     { title: "Email", dataIndex: "email", key: "email" },
@@ -406,37 +451,21 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
           Администрирование: пользователи и права
         </Typography.Title>
         <Space>
-          <Popconfirm
-            title="Удалить все проектные данные?"
-            description="Будут удалены проекты, MDR, документы, ревизии, комментарии и PDF файлы. Пользователи останутся."
-            okText="Да, удалить"
-            cancelText="Отмена"
+          <Button
+            danger
             disabled={!isMainAdmin}
-            onConfirm={async () => {
-              const result = await clearProjectData();
-              message.success(
-                `Очищено: MDR ${result.deleted_mdr}, документов ${result.deleted_documents}, ревизий ${result.deleted_revisions}, файлов ${result.deleted_files}`,
-              );
-              await loadData();
-            }}
+            loading={adminActionLoading}
+            onClick={confirmClearProjectData}
           >
-            <Button danger disabled={!isMainAdmin}>
-              Очистить базу проектов и файлы
-            </Button>
-          </Popconfirm>
-          <Popconfirm
-            title="Удалить все уведомления?"
-            description="Будут удалены уведомления у всех пользователей."
-            okText="Да, удалить"
-            cancelText="Отмена"
+            Очистить базу проектов и файлы
+          </Button>
+          <Button
             disabled={!isMainAdmin}
-            onConfirm={async () => {
-              const result = await clearAllNotifications();
-              message.success(`Удалено уведомлений: ${result.deleted_notifications}`);
-            }}
+            loading={adminActionLoading}
+            onClick={confirmClearAllNotifications}
           >
-            <Button disabled={!isMainAdmin}>Удалить все уведомления</Button>
-          </Popconfirm>
+            Удалить все уведомления
+          </Button>
           <Button
             onClick={() => {
               setQuickResult(null);
