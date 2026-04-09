@@ -5,6 +5,7 @@ from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.models import (
+    ContractorCommentStatus,
     CommentStatus,
     CompanyType,
     ProjectMemberRole,
@@ -62,11 +63,13 @@ class UserRead(UserBase):
 class ProjectCreate(BaseModel):
     code: str
     name: str
+    document_category: str
     description: str | None = None
 
 
 class ProjectUpdate(BaseModel):
     name: str | None = None
+    document_category: str | None = None
     description: str | None = None
 
 
@@ -74,6 +77,7 @@ class ProjectRead(BaseModel):
     id: int
     code: str
     name: str
+    document_category: str | None
     description: str | None
     created_by_id: int
     created_at: datetime
@@ -95,6 +99,7 @@ class ProjectMemberRead(BaseModel):
     can_manage_contractor_users: bool
     user_email: str | None = None
     user_full_name: str | None = None
+    user_company_type: CompanyType | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -125,6 +130,37 @@ class ProjectReferenceRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class CipherTemplateFieldBase(BaseModel):
+    order_index: int = 0
+    field_key: str
+    label: str
+    source_type: str = Field(pattern="^(REFERENCE|CUSTOM_TEXT|AUTO_SERIAL|STATIC)$")
+    source_ref_type: str | None = None
+    static_value: str | None = None
+    length: int | None = Field(default=None, ge=1, le=40)
+    required: bool = True
+    uppercase: bool = True
+    separator: str = "-"
+
+
+class CipherTemplateFieldRead(CipherTemplateFieldBase):
+    id: int
+
+
+class CipherTemplateRead(BaseModel):
+    id: int
+    project_id: int
+    project_code: str
+    category: str
+    fields: list[CipherTemplateFieldRead]
+    created_at: datetime
+    updated_at: datetime
+
+
+class CipherTemplateUpsert(BaseModel):
+    fields: list[CipherTemplateFieldBase]
+
+
 class ReviewMatrixMemberCreate(BaseModel):
     user_id: int
     discipline_code: str
@@ -134,6 +170,8 @@ class ReviewMatrixMemberCreate(BaseModel):
 
 
 class ReviewMatrixMemberUpdate(BaseModel):
+    discipline_code: str | None = None
+    doc_type: str | None = None
     level: int | None = Field(default=None, ge=1, le=2)
     state: str | None = Field(default=None, pattern="^(LR|R)$")
 
@@ -164,6 +202,7 @@ class MDRBase(BaseModel):
     serial_number: str
     doc_number: str
     doc_name: str
+    planned_dev_start: date | None = None
     progress_percent: float = 0
     doc_weight: float = 0
     issue_purpose: str | None = None
@@ -185,6 +224,7 @@ class MDRCreate(MDRBase):
 
 class MDRUpdate(BaseModel):
     doc_name: str | None = None
+    planned_dev_start: date | None = None
     progress_percent: float | None = None
     doc_weight: float | None = None
     issue_purpose: str | None = None
@@ -255,6 +295,20 @@ class RevisionRead(BaseModel):
     review_code: ReviewCode | None
     review_deadline: date | None
     created_at: datetime
+    reviewed_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DocumentAttachmentRead(BaseModel):
+    id: int
+    document_id: int
+    revision_id: int | None = None
+    uploaded_by_id: int
+    uploaded_by_name: str | None = None
+    uploaded_by_email: str | None = None
+    file_name: str
+    created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -264,10 +318,39 @@ class RevisionTdoDecision(BaseModel):
     note: str | None = None
 
 
+class RevisionTdoBulkDecision(BaseModel):
+    revision_ids: list[int]
+    action: str = Field(pattern="^(SEND_TO_OWNER|CANCELLED)$")
+    note: str | None = None
+
+
+class RevisionReviewCodeUpdate(BaseModel):
+    review_code: ReviewCode = ReviewCode.AP
+
+
+class CarryDecisionUpdate(BaseModel):
+    source_comment_id: int
+    status: str = Field(pattern="^(OPEN|CLOSED)$")
+
+
+class CarryDecisionRead(BaseModel):
+    id: int
+    target_revision_id: int
+    source_comment_id: int
+    status: str
+    decided_by_id: int
+    decided_by_name: str | None = None
+    decided_by_email: str | None = None
+    decided_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class CommentCreate(BaseModel):
     revision_id: int
     text: str
     status: CommentStatus = CommentStatus.OPEN
+    review_code: ReviewCode | None = None
     page: int | None = None
     area_x: float | None = None
     area_y: float | None = None
@@ -279,11 +362,14 @@ class CommentResponse(BaseModel):
     text: str
     status: CommentStatus = CommentStatus.IN_PROGRESS
     backlog_status: str | None = Field(default=None, pattern="^(IN_NEXT_REVISION|REJECTED)$")
+    contractor_status: ContractorCommentStatus | None = None
 
 
 class CommentOwnerDecision(BaseModel):
-    action: str = Field(pattern="^(PUBLISH|REJECT)$")
+    action: str = Field(pattern="^(PUBLISH|REJECT|WITHDRAW|UPDATE)$")
+    review_code: ReviewCode | None = None
     note: str | None = None
+    text: str | None = None
 
 
 class CommentRead(BaseModel):
@@ -291,10 +377,20 @@ class CommentRead(BaseModel):
     revision_id: int
     parent_id: int | None
     author_id: int
+    author_name: str | None = None
+    author_email: str | None = None
     text: str
     status: CommentStatus
+    review_code: ReviewCode | None = None
     is_published_to_contractor: bool = False
     backlog_status: str | None = None
+    contractor_status: ContractorCommentStatus | None = None
+    contractor_response_text: str | None = None
+    contractor_response_at: datetime | None = None
+    in_crs: bool = False
+    crs_sent_at: datetime | None = None
+    crs_number: str | None = None
+    carry_finalized: bool = False
     page: int | None
     area_x: float | None
     area_y: float | None
@@ -304,6 +400,54 @@ class CommentRead(BaseModel):
     resolved_at: datetime | None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class RevisionRegistryCommentRead(BaseModel):
+    id: int
+    text: str
+    status: CommentStatus
+    review_code: ReviewCode | None = None
+    contractor_status: ContractorCommentStatus | None = None
+    author_id: int
+    created_at: datetime
+    carry_finalized: bool = False
+
+
+class RevisionRegistryRead(BaseModel):
+    id: int
+    revision_code: str
+    issue_purpose: str
+    status: str
+    review_code: ReviewCode | None = None
+    trm_number: str | None = None
+    trm_flag: bool = False
+    author_id: int | None = None
+    author_name: str | None = None
+    created_at: datetime
+    comments_count: int = 0
+    open_comments_count: int = 0
+    comments: list[RevisionRegistryCommentRead] = Field(default_factory=list)
+
+
+class DocumentRegistryRead(BaseModel):
+    document_id: int
+    project_code: str
+    category: str
+    discipline_code: str
+    document_num: str
+    document_title: str
+    latest_revision_code: str | None = None
+    latest_revision_status: str | None = None
+    latest_issue_purpose: str | None = None
+    latest_review_code: ReviewCode | None = None
+    latest_author_name: str | None = None
+    planned_dev_start: date | None = None
+    development_date: datetime | None = None
+    first_upload_date: datetime | None = None
+    is_overdue: bool = False
+    total_comments_count: int = 0
+    open_comments_count: int = 0
+    revisions: list[RevisionRegistryRead] = Field(default_factory=list)
 
 
 class WorkflowStatusCreate(BaseModel):
@@ -441,10 +585,30 @@ class TdoQueueItem(BaseModel):
     status: str
     created_at: datetime
     review_deadline: date | None
+    trm_number: str | None = None
     file_path: str | None
+    can_publish_to_contractor: bool = False
     author_id: int | None = None
     author_name: str | None = None
     author_email: str | None = None
+
+
+class CsrQueueItem(BaseModel):
+    comment_id: int
+    trm_number: str | None = None
+    crs_number: str | None = None
+    document_num: str
+    revision_id: int
+    revision_code: str
+    comment_text: str
+    review_code: ReviewCode | None = None
+    comment_status: CommentStatus
+    in_crs: bool
+    crs_sent_at: datetime | None = None
+
+
+class CsrSendPayload(BaseModel):
+    comment_ids: list[int] = Field(default_factory=list)
 
 
 class RevisionOverviewRead(BaseModel):
@@ -487,6 +651,13 @@ class RevisionCardRead(BaseModel):
     category: str
     current_revision_code: str
     current_status: str
+    planned_dev_start: date | None = None
+    planned_issue_date: date | None = None
+    actual_first_upload_date: datetime | None = None
+    actual_latest_issue_date: datetime | None = None
+    actual_progress_percent: float = 0
+    can_current_user_raise_comments: bool = True
+    current_user_matrix_role: str | None = None
     revisions: list[RevisionRead]
     history: list[RevisionCommentThreadRead]
 

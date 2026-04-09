@@ -47,6 +47,11 @@ class CommentStatus(str, enum.Enum):
     REJECTED = "REJECTED"
 
 
+class ContractorCommentStatus(str, enum.Enum):
+    I = "I"
+    A = "A"
+
+
 class RegistrationRequestStatus(str, enum.Enum):
     PENDING = "PENDING"
     APPROVED = "APPROVED"
@@ -117,8 +122,50 @@ class Project(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     code: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    document_category: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+
+class CipherTemplate(Base):
+    __tablename__ = "cipher_templates"
+    __table_args__ = (UniqueConstraint("project_id", "category", name="uq_cipher_template_project_category"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    category: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+
+class CipherTemplateField(Base):
+    __tablename__ = "cipher_template_fields"
+    __table_args__ = (UniqueConstraint("template_id", "field_key", name="uq_cipher_template_field_key"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    template_id: Mapped[int] = mapped_column(ForeignKey("cipher_templates.id"), nullable=False, index=True)
+    order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    field_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    label: Mapped[str] = mapped_column(String(120), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(30), nullable=False)  # REFERENCE | CUSTOM_TEXT | AUTO_SERIAL | STATIC
+    source_ref_type: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
+    static_value: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    length: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    uppercase: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    separator: Mapped[str] = mapped_column(String(5), default="-", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
@@ -197,6 +244,7 @@ class MDRRecord(Base):
     doc_number: Mapped[str] = mapped_column(String(120), unique=True, nullable=False, index=True)
 
     doc_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    planned_dev_start: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     progress_percent: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     doc_weight: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     issue_purpose: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
@@ -240,6 +288,7 @@ class Document(Base):
 
     mdr: Mapped["MDRRecord"] = relationship("MDRRecord", back_populates="documents")
     revisions: Mapped[list["Revision"]] = relationship("Revision", back_populates="document")
+    attachments: Mapped[list["DocumentAttachment"]] = relationship("DocumentAttachment", back_populates="document")
 
 
 class Revision(Base):
@@ -262,6 +311,20 @@ class Revision(Base):
     comments: Mapped[list["Comment"]] = relationship("Comment", back_populates="revision")
 
 
+class DocumentAttachment(Base):
+    __tablename__ = "document_attachments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    document_id: Mapped[int] = mapped_column(ForeignKey("documents.id"), nullable=False, index=True)
+    revision_id: Mapped[Optional[int]] = mapped_column(ForeignKey("revisions.id"), nullable=True, index=True)
+    uploaded_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    document: Mapped["Document"] = relationship("Document", back_populates="attachments")
+
+
 class Comment(Base):
     __tablename__ = "comments"
 
@@ -271,8 +334,17 @@ class Comment(Base):
     author_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[CommentStatus] = mapped_column(Enum(CommentStatus), default=CommentStatus.OPEN, nullable=False)
+    review_code: Mapped[Optional[ReviewCode]] = mapped_column(Enum(ReviewCode), nullable=True)
     is_published_to_contractor: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     backlog_status: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    contractor_status: Mapped[Optional[ContractorCommentStatus]] = mapped_column(
+        Enum(ContractorCommentStatus),
+        nullable=True,
+    )
+    in_crs: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    crs_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    crs_number: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
+    carry_finalized: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     page: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     area_x: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     area_y: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
@@ -282,6 +354,17 @@ class Comment(Base):
     resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     revision: Mapped["Revision"] = relationship("Revision", back_populates="comments")
+
+
+class CarryOverDecision(Base):
+    __tablename__ = "carry_over_decisions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    target_revision_id: Mapped[int] = mapped_column(ForeignKey("revisions.id"), nullable=False, index=True)
+    source_comment_id: Mapped[int] = mapped_column(ForeignKey("comments.id"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(10), nullable=False, default="OPEN")
+    decided_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    decided_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class WorkflowStatus(Base):

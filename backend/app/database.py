@@ -28,12 +28,27 @@ def get_db() -> Generator:
 
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
+    _ensure_projects_document_category_column()
     _ensure_users_permissions_column()
     _ensure_users_company_code_column()
     _ensure_notifications_context_columns()
     _ensure_revisions_author_column()
     _ensure_comments_workflow_columns()
+    _ensure_mdr_planned_start_column()
+    _ensure_document_attachments_revision_column()
     _ensure_postgres_role_enum_values()
+
+
+def _ensure_projects_document_category_column() -> None:
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if "projects" not in tables:
+        return
+    columns = {column["name"] for column in inspector.get_columns("projects")}
+    if "document_category" in columns:
+        return
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE projects ADD COLUMN document_category VARCHAR(20)"))
 
 
 def _ensure_postgres_role_enum_values() -> None:
@@ -109,8 +124,44 @@ def _ensure_comments_workflow_columns() -> None:
         statements.append("ALTER TABLE comments ADD COLUMN is_published_to_contractor BOOLEAN DEFAULT FALSE")
     if "backlog_status" not in columns:
         statements.append("ALTER TABLE comments ADD COLUMN backlog_status VARCHAR(30)")
+    if "review_code" not in columns:
+        statements.append("ALTER TABLE comments ADD COLUMN review_code VARCHAR(2)")
+    if "contractor_status" not in columns:
+        statements.append("ALTER TABLE comments ADD COLUMN contractor_status VARCHAR(1)")
+    if "in_crs" not in columns:
+        statements.append("ALTER TABLE comments ADD COLUMN in_crs BOOLEAN DEFAULT FALSE")
+    if "crs_sent_at" not in columns:
+        statements.append("ALTER TABLE comments ADD COLUMN crs_sent_at DATETIME")
+    if "crs_number" not in columns:
+        statements.append("ALTER TABLE comments ADD COLUMN crs_number VARCHAR(60)")
+    if "carry_finalized" not in columns:
+        statements.append("ALTER TABLE comments ADD COLUMN carry_finalized BOOLEAN DEFAULT FALSE")
     if not statements:
         return
     with engine.begin() as connection:
         for statement in statements:
             connection.execute(text(statement))
+
+
+def _ensure_mdr_planned_start_column() -> None:
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if "mdr_records" not in tables:
+        return
+    columns = {column["name"] for column in inspector.get_columns("mdr_records")}
+    if "planned_dev_start" in columns:
+        return
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE mdr_records ADD COLUMN planned_dev_start DATE"))
+
+
+def _ensure_document_attachments_revision_column() -> None:
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if "document_attachments" not in tables:
+        return
+    columns = {column["name"] for column in inspector.get_columns("document_attachments")}
+    if "revision_id" in columns:
+        return
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE document_attachments ADD COLUMN revision_id INTEGER"))
