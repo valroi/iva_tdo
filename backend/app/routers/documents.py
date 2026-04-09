@@ -1468,13 +1468,6 @@ def upsert_carry_decision(
         existing.decided_by_id = current_user.id
         existing.decided_at = datetime.utcnow()
 
-    if matrix_role == "LR":
-        if payload.status == "CLOSED":
-            source.carry_finalized = True
-        elif payload.status == "OPEN":
-            source.carry_finalized = False
-        db.add(source)
-    db.add(existing)
     matrix_role = _owner_matrix_role_for_document(
         db,
         current_user=current_user,
@@ -1482,6 +1475,13 @@ def upsert_carry_decision(
         discipline_code=mdr.discipline_code,
         doc_type=mdr.doc_type,
     )
+    if matrix_role == "LR":
+        if payload.status == "CLOSED":
+            source.carry_finalized = True
+        elif payload.status == "OPEN":
+            source.carry_finalized = False
+        db.add(source)
+    db.add(existing)
     if payload.status == "CLOSED" and matrix_role == "R":
         lr_members = (
             db.query(ReviewMatrixMember)
