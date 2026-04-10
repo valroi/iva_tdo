@@ -26,17 +26,13 @@
       </div>
 
       <div class="card">
-        <h2>Основной процесс работы</h2>
-        <ol>
-          <li>Главный админ создает карточку проекта: код, название, описание.</li>
-          <li>Главный админ назначает руководителя ТДО подрядчика.</li>
-          <li>Руководитель ТДО подрядчика добавляет участников подрядчика в проект.</li>
-          <li>Базовые справочники накатываются автоматически, главный админ при необходимости их редактирует.</li>
-          <li>Подрядчик формирует MDR и создает документы/ревизии.</li>
-          <li>Подрядчик загружает PDF в ревизию кнопкой «PDF».</li>
-          <li>Заказчик проверяет ревизию и оставляет комментарии.</li>
-          <li>Подрядчик отвечает на комментарии до согласования.</li>
-        </ol>
+        <h2>Навигация по ролям</h2>
+        <ul>
+          <li><a href="#tdo">ТДО подрядчика</a></li>
+          <li><a href="#dev">Разработчик подрядчика</a></li>
+          <li><a href="#owner_r">R заказчика</a></li>
+          <li><a href="#owner_lr">LR заказчика</a></li>
+        </ul>
       </div>
 
       <div class="card">
@@ -45,28 +41,57 @@
           <thead>
             <tr>
               <th>Процесс</th>
-              <th>Главный админ</th>
-              <th>Админ</th>
-              <th>Рук. ТДО подрядчика</th>
-              <th>Автор подрядчика</th>
-              <th>Owner manager</th>
-              <th>Owner reviewer</th>
-              <th>Viewer</th>
+              <th>ТДО подрядчика</th>
+              <th>Разработчик</th>
+              <th>LR заказчика</th>
+              <th>R заказчика</th>
             </tr>
           </thead>
           <tbody>
-            <tr><td>Создание карточки проекта</td><td class="yes">Да</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td></tr>
-            <tr><td>Удаление карточки проекта (без MDR)</td><td class="yes">Да</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td></tr>
-            <tr><td>Назначение руководителя ТДО</td><td class="yes">Да</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td></tr>
-            <tr><td>Добавление подрядчиков в проект</td><td class="yes">Да</td><td class="no">Нет</td><td class="yes">Да</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td></tr>
-            <tr><td>Удаление участников подрядчика из проекта</td><td class="yes">Да</td><td class="no">Нет</td><td class="yes">Да</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td></tr>
-            <tr><td>Редактирование справочников проекта</td><td class="yes">Да</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td></tr>
-            <tr><td>Создание MDR</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td></tr>
-            <tr><td>Загрузка PDF в ревизию</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td></tr>
-            <tr><td>Комментарий к ревизии</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="no">Нет</td></tr>
-            <tr><td>Ответ на комментарий</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="yes">Да</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td></tr>
+            <tr><td>Создание MDR / документа</td><td class="yes">Да</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td></tr>
+            <tr><td>Создание ревизии и загрузка PDF</td><td class="yes">Да</td><td class="yes">Да</td><td class="no">Нет</td><td class="no">Нет</td></tr>
+            <tr><td>Передача в TRM</td><td class="yes">Да</td><td class="no">Нет</td><td class="no">Нет</td><td class="no">Нет</td></tr>
+            <tr><td>Создание замечаний</td><td class="no">Нет</td><td class="no">Нет</td><td class="yes">Да</td><td class="yes">Да</td></tr>
+            <tr><td>Добавление в CRS / отправка</td><td class="no">Нет</td><td class="no">Нет</td><td class="yes">Да</td><td class="no">Нет</td></tr>
+            <tr><td>Ответ подрядчика I/A + текст</td><td class="yes">Да</td><td class="yes">Да</td><td class="no">Нет</td><td class="no">Нет</td></tr>
           </tbody>
         </table>
+      </div>
+
+      <div class="card" id="tdo">
+        <h2>Роль: ТДО подрядчика</h2>
+        <ol>
+          <li>Создать MDR и документ в проекте.</li>
+          <li>Создать ревизию, загрузить PDF, отправить в TRM.</li>
+          <li>После CRS от заказчика проконтролировать ответы подрядчика по замечаниям.</li>
+          <li>Если статус <b>CONTRACTOR_REPLY_I</b> — закрыть обсуждения до новой ревизии.</li>
+        </ol>
+      </div>
+
+      <div class="card" id="dev">
+        <h2>Роль: Разработчик подрядчика</h2>
+        <ol>
+          <li>Открыть задачу из уведомления, перейти в карточку ревизии.</li>
+          <li>В PDF дать ответ по замечанию: <b>I</b> (с обязательным текстом) или <b>A</b>.</li>
+          <li>Проверить в таблице: статус подрядчика, текст ответа, дата ответа.</li>
+        </ol>
+      </div>
+
+      <div class="card" id="owner_r">
+        <h2>Роль: R заказчика</h2>
+        <ol>
+          <li>Открыть TRM, перейти в ревизию, создать замечания в PDF.</li>
+          <li>Проверить корректность кодов RJ/CO/AN и областей на листе PDF.</li>
+        </ol>
+      </div>
+
+      <div class="card" id="owner_lr">
+        <h2>Роль: LR заказчика</h2>
+        <ol>
+          <li>Проверить замечания, отклонить лишние, добавить релевантные в CRS.</li>
+          <li>Отправить CRS подрядчику и убедиться, что уведомления по документу ушли в архив.</li>
+          <li>Отслеживать ответы I/A и доводить цикл до AP и финального 100% статуса.</li>
+        </ol>
       </div>
     </div>
   </body>

@@ -267,6 +267,7 @@ class DocumentRead(BaseModel):
     latest_revision_code: str | None = None
     latest_revision_status: str | None = None
     latest_review_code: ReviewCode | None = None
+    latest_issue_purpose: str | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

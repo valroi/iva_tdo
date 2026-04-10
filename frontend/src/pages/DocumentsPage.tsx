@@ -53,7 +53,7 @@ import {
   RevisionStatusCell,
   contractorNeedsPdfReupload,
 } from "../utils/revisionHints";
-import { getRemarksSummaryLabel } from "../utils/revisionProcess";
+import { getDisplayRevisionCode, getRemarksSummaryLabel } from "../utils/revisionProcess";
 import {
   PROCESS_STEPS,
   getProcessCurrentStep,
@@ -111,7 +111,9 @@ export default function DocumentsPage({
   const [preferredRevisionId, setPreferredRevisionId] = useState<number | null>(null);
   const [progressModalOpen, setProgressModalOpen] = useState(false);
   const [pdfFocusCommentId, setPdfFocusCommentId] = useState<number | null>(null);
-  const [allNotifications, setAllNotifications] = useState<{ event_type: string; revision_id?: number | null; created_at: string }[]>([]);
+  const [allNotifications, setAllNotifications] = useState<
+    { event_type: string; revision_id?: number | null; created_at: string; message?: string | null }[]
+  >([]);
   const [slaDays, setSlaDays] = useState<{ initial_days: number; owner_specialist_review_days: number } | null>(null);
 
   const openCommentContext = (row: CommentItem): void => {
@@ -144,6 +146,10 @@ export default function DocumentsPage({
   const responsePdfOptions = useMemo(() => ({ httpHeaders: getAuthHeaders() }), [responseModalOpen]);
 
   const documentRows = useMemo(() => documents.map((d) => ({ ...d, key: d.id })), [documents]);
+  const isDocumentCompleted = (document: DocumentItem): boolean =>
+    (document.latest_issue_purpose ?? "").toUpperCase() === "AFD" && document.latest_review_code === "AP";
+  const activeDocumentRows = useMemo(() => documentRows.filter((row) => !isDocumentCompleted(row)), [documentRows]);
+  const completedDocumentRows = useMemo(() => documentRows.filter((row) => isDocumentCompleted(row)), [documentRows]);
   const selectedDocument = useMemo(
     () => documents.find((item) => item.id === selectedDocumentId) ?? null,
     [documents, selectedDocumentId],
@@ -177,6 +183,7 @@ export default function DocumentsPage({
     selectedRevision?.status === "CONTRACTOR_REPLY_A";
   const contractorCanRespondNow =
     selectedRevision?.status === "OWNER_COMMENTS_SENT" || selectedRevision?.status === "CONTRACTOR_REPLY_I";
+  const selectedDocumentCompleted = selectedDocument !== null && isDocumentCompleted(selectedDocument);
   const formatDateRu = (value: string | null | undefined): string => {
     if (!value) return "—";
     const dt = new Date(value);
@@ -268,6 +275,14 @@ export default function DocumentsPage({
       const tdoEvent = allNotifications.find((n) => n.event_type === "TDO_SENT_TO_OWNER" && n.revision_id === rev.id);
       return tdoEvent ? formatDateTimeRu(tdoEvent.created_at) : "—";
     };
+    const autoCrsByRevision = (rev: Revision | null): string | null => {
+      if (!rev) return null;
+      const notif = allNotifications.find(
+        (n) => n.event_type === "OWNER_COMMENTS_PUBLISHED" && n.revision_id === rev.id && (n.message ?? "").includes("CRS:"),
+      );
+      const match = notif?.message?.match(/CRS:\s*([A-Z0-9-]+)/);
+      return match?.[1] ?? null;
+    };
     const fact70 = (() => {
       if (!revA) return "—";
       return factBySentToOwner(revA);
@@ -292,11 +307,47 @@ export default function DocumentsPage({
     })();
     return [
       { key: "70", step: "Выпуск ревизии A (IFR)", progress: "70%", plan: formatDateRu(plan70), forecast: formatDateRu(plan70), trm: revA?.trm_number ?? "—", fact: fact70 },
-      { key: "75", step: "Рассмотрение заказчиком ревизии A", progress: "75%", plan: formatDateRu(plan75), forecast: formatDateRu(plan75), trm: ((commentsByRevision[revA?.id ?? -1] ?? []).map((c) => c.crs_number).filter(Boolean).join(", ") || revA?.trm_number) ?? "—", fact: fact75 },
+      {
+        key: "75",
+        step: "Рассмотрение заказчиком ревизии A",
+        progress: "75%",
+        plan: formatDateRu(plan75),
+        forecast: formatDateRu(plan75),
+        trm:
+          (Array.from(new Set((commentsByRevision[revA?.id ?? -1] ?? []).map((c) => c.crs_number).filter(Boolean))).join(", ") ||
+            revA?.trm_number) ??
+          "—",
+        fact: fact75,
+      },
       { key: "80", step: "Выпуск ревизии B (IFR)", progress: "80%", plan: formatDateRu(plan80), forecast: formatDateRu(plan80), trm: revB?.trm_number ?? "—", fact: factBySentToOwner(revB) },
-      { key: "85", step: "Рассмотрение заказчиком (циклы до AP)", progress: "85%", plan: formatDateRu(plan85), forecast: formatDateRu(plan85), trm: ((commentsByRevision[revB?.id ?? -1] ?? []).map((c) => c.crs_number).filter(Boolean).join(", ") || revB?.trm_number) ?? "—", fact: `${revB?.status === "OWNER_COMMENTS_SENT" || revB?.status === "CONTRACTOR_REPLY_A" || revB?.status === "SUBMITTED" ? formatDateTimeRu(revB.created_at) : "—"}${cycles85 > 0 ? ` · циклов: ${cycles85}` : ""}${latestReviewCode ? ` · код: ${latestReviewCode}` : ""}` },
+      {
+        key: "85",
+        step: "Рассмотрение заказчиком (циклы до AP)",
+        progress: "85%",
+        plan: formatDateRu(plan85),
+        forecast: formatDateRu(plan85),
+        trm:
+          (Array.from(new Set((commentsByRevision[revB?.id ?? -1] ?? []).map((c) => c.crs_number).filter(Boolean))).join(", ") ||
+            revB?.trm_number) ??
+          "—",
+        fact: `${revB?.status === "OWNER_COMMENTS_SENT" || revB?.status === "CONTRACTOR_REPLY_A" || revB?.status === "SUBMITTED" ? formatDateTimeRu(revB.created_at) : "—"}${cycles85 > 0 ? ` · циклов: ${cycles85}` : ""}${latestReviewCode ? ` · код: ${latestReviewCode}` : ""}`,
+      },
       { key: "90", step: "Выпуск ревизии 00 (IFD)", progress: "90%", plan: formatDateRu(plan90), forecast: formatDateRu(plan90), trm: rev00?.trm_number ?? "—", fact: factBySentToOwner(rev00) },
-      { key: "100", step: "Получение согласования от заказчика", progress: "100%", plan: formatDateRu(plan100), forecast: formatDateRu(forecast100), trm: rev00?.trm_number ?? "—", fact: revisions.some((r) => r.review_code === "AP" && (r.issue_purpose ?? "").toUpperCase() === "AFD") ? formatDateTimeRu(revisions.find((r) => r.review_code === "AP" && (r.issue_purpose ?? "").toUpperCase() === "AFD")?.reviewed_at ?? revisions.find((r) => r.review_code === "AP" && (r.issue_purpose ?? "").toUpperCase() === "AFD")?.created_at ?? null) : "—" },
+      {
+        key: "100",
+        step: "Получение согласования от заказчика",
+        progress: "100%",
+        plan: formatDateRu(plan100),
+        forecast: formatDateRu(forecast100),
+        trm: autoCrsByRevision(rev00) ?? rev00?.trm_number ?? "—",
+        fact: revisions.some((r) => r.review_code === "AP" && (r.issue_purpose ?? "").toUpperCase() === "AFD")
+          ? formatDateTimeRu(
+              revisions.find((r) => r.review_code === "AP" && (r.issue_purpose ?? "").toUpperCase() === "AFD")?.reviewed_at ??
+                revisions.find((r) => r.review_code === "AP" && (r.issue_purpose ?? "").toUpperCase() === "AFD")?.created_at ??
+                null,
+            )
+          : "—",
+      },
     ];
   }, [allNotifications, commentsByRevision, formatDateRu, latestRevision?.status, revisions, selectedMdr?.planned_dev_start, slaDays?.initial_days, slaDays?.owner_specialist_review_days]);
 
@@ -591,13 +642,20 @@ export default function DocumentsPage({
   ];
 
   const revisionColumns: ColumnsType<Revision> = [
-    { title: "Рев", dataIndex: "revision_code", key: "revision_code" },
+    {
+      title: "Рев",
+      key: "revision_code",
+      render: (_, row) => getDisplayRevisionCode(row, revisions),
+    },
     { title: "Цель", dataIndex: "issue_purpose", key: "issue_purpose" },
     {
       title: "Статус",
       dataIndex: "status",
       key: "status",
-      render: (value: string) => {
+      render: (value: string, row) => {
+        if ((row.issue_purpose ?? "").toUpperCase() === "AFD" && row.review_code === "AP") {
+          return <Tag color="success">Документ завершен (100%)</Tag>;
+        }
         if (
           currentUser.company_type === "contractor" &&
           (value === "REVISION_CREATED" || value === "UPLOADED_WAITING_TDO")
@@ -683,6 +741,7 @@ export default function DocumentsPage({
               size="small"
               icon={<UploadOutlined />}
               disabled={
+                selectedDocumentCompleted ||
                 currentUser.company_type === "contractor" &&
                 !["REVISION_CREATED", "UPLOADED_WAITING_TDO", "CANCELLED_BY_TDO"].includes(row.status)
               }
@@ -700,6 +759,7 @@ export default function DocumentsPage({
               <Button
                 size="small"
                 type="primary"
+                disabled={selectedDocumentCompleted}
                 onClick={async () => {
                   await processRevisionTdoDecision(row.id, { action: "SEND_TO_OWNER" });
                   message.success("Ревизия отправлена заказчику");
@@ -713,6 +773,7 @@ export default function DocumentsPage({
               <Button
                 size="small"
                 danger
+                disabled={selectedDocumentCompleted}
                 onClick={() => {
                   setTdoTargetRevision(row);
                   tdoCancelForm.resetFields();
@@ -871,7 +932,7 @@ export default function DocumentsPage({
           {currentUser.permissions.can_respond_comments && currentUser.company_type === "contractor" && (
             <Button
               size="small"
-              disabled={row.author_id === currentUser.id || row.contractor_status !== null || !contractorCanRespondNow}
+              disabled={selectedDocumentCompleted || row.author_id === currentUser.id || row.contractor_status !== null || !contractorCanRespondNow}
               onClick={() => openCommentContext(row)}
             >
               Ответить
@@ -879,6 +940,7 @@ export default function DocumentsPage({
           )}
           {currentUser.permissions.can_publish_comments &&
             isLatestSelected &&
+            !selectedDocumentCompleted &&
             row.parent_id === null &&
             (row.status === "OPEN" || row.status === "IN_PROGRESS") &&
             !row.is_published_to_contractor &&
@@ -902,6 +964,7 @@ export default function DocumentsPage({
           )}
           {currentUser.permissions.can_publish_comments &&
             isLatestSelected &&
+            !selectedDocumentCompleted &&
             row.parent_id === null &&
             (row.status === "OPEN" || row.status === "IN_PROGRESS") && (
             <Button
@@ -936,6 +999,10 @@ export default function DocumentsPage({
       message.error("Недостаточно прав для создания ревизии");
       return;
     }
+    if (selectedDocumentCompleted) {
+      message.warning("Документ завершен (AFD + AP). Создание новой ревизии заблокировано.");
+      return;
+    }
     try {
       const values = await revForm.validateFields();
       await createRevision({ ...values, document_id: selectedDocumentId });
@@ -966,6 +1033,10 @@ export default function DocumentsPage({
       message.error("Недостаточно прав для загрузки PDF");
       return;
     }
+    if (selectedDocumentCompleted) {
+      message.warning("Документ завершен (AFD + AP). Загрузка PDF заблокирована.");
+      return;
+    }
 
     const result = await uploadRevisionPdf(selectedRevisionId, uploadFile);
     message.success(`Файл загружен: ${result.file_name}`);
@@ -980,6 +1051,10 @@ export default function DocumentsPage({
   const submitAttachmentUpload = async () => {
     if (!selectedRevisionId || !attachmentFile) {
       message.warning("Выберите ревизию и файл");
+      return;
+    }
+    if (selectedDocumentCompleted) {
+      message.warning("Документ завершен (AFD + AP). Загрузка файлов заблокирована.");
       return;
     }
     setAttachmentUploadBusy(true);
@@ -1004,7 +1079,7 @@ export default function DocumentsPage({
         </Typography.Title>
         {currentUser.permissions.can_upload_files && (
           <Tooltip title="Создать новую ревизию для выбранного документа">
-            <Button onClick={() => setRevModalOpen(true)} disabled={!selectedDocumentId}>
+            <Button onClick={() => setRevModalOpen(true)} disabled={!selectedDocumentId || selectedDocumentCompleted}>
               + Ревизия
             </Button>
           </Tooltip>
@@ -1013,7 +1088,7 @@ export default function DocumentsPage({
           <Tooltip title="Открыть PDF и добавить замечание в текущую ревизию">
             <Button
               onClick={() => setPdfAnnotatorOpen(true)}
-              disabled={!selectedRevisionId || ownerCommentLocked || !selectedRevision?.file_path}
+              disabled={!selectedRevisionId || ownerCommentLocked || selectedDocumentCompleted || !selectedRevision?.file_path}
             >
               + Вопрос/замечание
             </Button>
@@ -1034,16 +1109,43 @@ export default function DocumentsPage({
       <Row gutter={16}>
         <Col span={10}>
           <Card title="Документы">
-            <Table
-              rowKey="id"
-              size="small"
-              className="documents-table"
-              columns={documentColumns}
-              dataSource={documentRows}
-              pagination={false}
-              tableLayout="fixed"
-              scroll={{ x: 1250 }}
-              locale={{ emptyText: "Документы не найдены. Выберите проект и добавьте документ." }}
+            <Tabs
+              items={[
+                {
+                  key: "docs_active",
+                  label: `В работе (${activeDocumentRows.length})`,
+                  children: (
+                    <Table
+                      rowKey="id"
+                      size="small"
+                      className="documents-table"
+                      columns={documentColumns}
+                      dataSource={activeDocumentRows}
+                      pagination={false}
+                      tableLayout="fixed"
+                      scroll={{ x: 1250 }}
+                      locale={{ emptyText: "Документы в работе не найдены." }}
+                    />
+                  ),
+                },
+                {
+                  key: "docs_done",
+                  label: `Завершенные документы (${completedDocumentRows.length})`,
+                  children: (
+                    <Table
+                      rowKey="id"
+                      size="small"
+                      className="documents-table"
+                      columns={documentColumns}
+                      dataSource={completedDocumentRows}
+                      pagination={false}
+                      tableLayout="fixed"
+                      scroll={{ x: 1250 }}
+                      locale={{ emptyText: "Завершенные документы пока отсутствуют." }}
+                    />
+                  ),
+                },
+              ]}
             />
           </Card>
         </Col>
@@ -1064,12 +1166,20 @@ export default function DocumentsPage({
                   <Descriptions.Item label="ID">{selectedMdr.document_key}</Descriptions.Item>
                 </Descriptions>
                 <Space direction="vertical" size={4}>
+                  {selectedDocumentCompleted && (
+                    <Alert
+                      type="success"
+                      showIcon
+                      message="Документ завершен (100%)"
+                      description="AFD + AP зафиксированы. Комментирование и загрузки по документу заблокированы."
+                    />
+                  )}
                   <Typography.Text type="secondary">
                     PDF прикрепляется к ревизии через кнопку <b>PDF</b> в таблице ревизий.
                   </Typography.Text>
                   <Space size={8} wrap>
                     <Tooltip title="Загрузка и просмотр доп. файлов только выбранной ревизии">
-                      <Button size="small" onClick={() => setAttachmentsModalOpen(true)} disabled={!selectedRevisionId}>
+                      <Button size="small" onClick={() => setAttachmentsModalOpen(true)} disabled={!selectedRevisionId || selectedDocumentCompleted}>
                         Файлы ревизии
                       </Button>
                     </Tooltip>
@@ -1098,9 +1208,9 @@ export default function DocumentsPage({
                       <Typography.Text type="secondary">Workflow ревизии:</Typography.Text>
                       <Typography.Text type="secondary">Последний статус по документу: {latestRevision?.status ?? "—"}</Typography.Text>
                       <Space size={6}>
-                        <Typography.Text type="secondary">Код замечаний (по последней ревизии):</Typography.Text>
+                        <Typography.Text type="secondary">Код замечаний (по выбранной ревизии):</Typography.Text>
                         {(() => {
-                          const code = getRemarksSummaryLabel(latestRevisionComments, latestRevision?.review_code ?? null);
+                          const code = getRemarksSummaryLabel(comments, selectedRevision?.review_code ?? null);
                           return <Tag color={code === "AP" ? "success" : "default"}>{code}</Tag>;
                         })()}
                       </Space>
@@ -1349,33 +1459,7 @@ export default function DocumentsPage({
                               {
                                 title: "Действие",
                                 width: 160,
-                                render: (_, row) => (
-                                  <Button
-                                    size="small"
-                                    onClick={() => {
-                                      if (!selectedRevisionId) return;
-                                      void setCarryDecision(selectedRevisionId, { source_comment_id: row.id, status: "OPEN" })
-                                        .then((decision) => {
-                                          const next = (carryClosedByRevision[selectedRevisionId] ?? []).filter((id) => id !== row.id);
-                                          setCarryClosedByRevision((prev) => ({ ...prev, [selectedRevisionId]: next }));
-                                          setCarryDecisionsByRevision((prev) => ({
-                                            ...prev,
-                                            [selectedRevisionId]: [
-                                              decision,
-                                              ...(prev[selectedRevisionId] ?? []).filter((x) => x.source_comment_id !== decision.source_comment_id),
-                                            ],
-                                          }));
-                                          message.success("Замечание возвращено в 'Должны были устранить'");
-                                        })
-                                        .catch((error: unknown) => {
-                                          const text = error instanceof Error ? error.message : "Не удалось сохранить OPEN";
-                                          message.error(text);
-                                        });
-                                    }}
-                                  >
-                                    Вернуть в OPEN
-                                  </Button>
-                                ),
+                                render: () => <Typography.Text type="secondary">Зафиксировано</Typography.Text>,
                               },
                             ]}
                             scroll={{ x: "max-content", y: 180 }}
@@ -1503,11 +1587,19 @@ export default function DocumentsPage({
             message="Сначала выберите ревизию в таблице ниже. После этого можно загружать доп. файлы."
           />
         )}
+        {selectedDocumentCompleted && (
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 10 }}
+            message="Документ завершен: загрузка файлов отключена"
+          />
+        )}
         <Space style={{ marginBottom: 10 }} wrap>
           {canUploadDocumentAttachments && (
             <Upload
               maxCount={1}
-              disabled={!selectedRevisionId}
+              disabled={!selectedRevisionId || selectedDocumentCompleted}
               beforeUpload={(file) => {
                 setAttachmentFile(file);
                 return false;
@@ -1526,7 +1618,7 @@ export default function DocumentsPage({
               <Button
                 type="primary"
                 loading={attachmentUploadBusy}
-                disabled={!selectedRevisionId || !attachmentFile}
+                disabled={!selectedRevisionId || !attachmentFile || selectedDocumentCompleted}
                 onClick={() => void submitAttachmentUpload()}
               >
                 Загрузить

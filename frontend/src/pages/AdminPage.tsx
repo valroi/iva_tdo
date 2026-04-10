@@ -1,20 +1,26 @@
 import {
+  InfoCircleOutlined,
+} from "@ant-design/icons";
+import {
   Button,
   Card,
   Form,
   Input,
   Modal,
+  Popconfirm,
   Select,
   Space,
   Switch,
   Table,
   Tabs,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
+import { formatDateTimeRu } from "../utils/datetime";
 
 import {
   approveRegistrationRequest,
@@ -34,13 +40,13 @@ import {
   revokeUserSession,
   getAdminReviewSlaSettings,
   updateAdminReviewSlaSettings,
-  clearProjectData,
   clearAllNotifications,
 } from "../api";
 import type { CompanyType, QuickDemoSetupResult, RegistrationRequest, User, UserPermissions, UserRole, UserSession } from "../types";
 
 interface Props {
   currentUser: User;
+  onGlobalReload?: () => Promise<void>;
 }
 
 const roleOptions: { value: UserRole; label: string }[] = [
@@ -54,22 +60,23 @@ const companyOptions: { value: CompanyType; label: string }[] = [
   { value: "contractor", label: "contractor" },
 ];
 
-const permissionFields: { key: keyof UserPermissions; label: string }[] = [
-  { key: "can_manage_users", label: "Управление пользователями" },
-  { key: "can_manage_projects", label: "Управление проектами" },
-  { key: "can_edit_project_references", label: "Редактирование справочников" },
-  { key: "can_manage_review_matrix", label: "Управление матрицей назначений" },
-  { key: "can_create_mdr", label: "Создание/редактирование MDR" },
-  { key: "can_upload_files", label: "Загрузка файлов" },
-  { key: "can_comment", label: "Комментарии и ответы" },
-  { key: "can_raise_comments", label: "Может задавать вопросы/замечания" },
-  { key: "can_respond_comments", label: "Может отвечать на замечания" },
-  { key: "can_publish_comments", label: "Подтверждает замечания в подряд" },
-  { key: "can_edit_workflow_statuses", label: "Редактирование workflow статусов" },
-  { key: "can_process_tdo_queue", label: "Обработка очереди ТДО (TRM/отклонение)" },
+const permissionFields: { key: keyof UserPermissions; label: string; hint: string }[] = [
+  { key: "can_manage_users", label: "Управление пользователями", hint: "Создание, редактирование, удаление пользователей и управление их правами." },
+  { key: "can_manage_projects", label: "Управление проектами", hint: "Создание/удаление проектов и изменение состава проекта." },
+  { key: "can_edit_project_references", label: "Редактирование справочников", hint: "Изменение дисциплин, типов документов, категорий и других проектных справочников." },
+  { key: "can_manage_review_matrix", label: "Управление матрицей назначений", hint: "Настройка кто из заказчика проверяет документы по дисциплине и типу." },
+  { key: "can_view_reporting", label: "Доступ к отчетности", hint: "Видит левый раздел Отчетность с план/факт и S-кривой." },
+  { key: "can_create_mdr", label: "Создание/редактирование MDR", hint: "Создание записей реестра и карточек документов." },
+  { key: "can_upload_files", label: "Загрузка файлов", hint: "Загрузка PDF-файлов для ревизий документов." },
+  { key: "can_comment", label: "Комментарии и ответы", hint: "Базовое право работы с ветками комментариев." },
+  { key: "can_raise_comments", label: "Может задавать вопросы/замечания", hint: "Создание новых замечаний/вопросов к ревизии." },
+  { key: "can_respond_comments", label: "Может отвечать на замечания", hint: "Ответ на замечания и ведение переписки в существующих комментариях." },
+  { key: "can_publish_comments", label: "Подтверждает замечания в подряд", hint: "Публикация/подтверждение замечаний для отправки подрядчику." },
+  { key: "can_edit_workflow_statuses", label: "Редактирование workflow статусов", hint: "Управление справочником статусов процесса (названия, цвета, логика финальности)." },
+  { key: "can_process_tdo_queue", label: "Обработка очереди ТДО (TRM/отклонение)", hint: "Группировка ревизий в TRM и отклонение/возврат на доработку." },
 ];
 
-type PermissionPresetId = "lr_owner" | "contractor_tdo_lead" | "contractor_developer" | "custom";
+type PermissionPresetId = "contractor_tdo_lead" | "contractor_developer" | "lr_owner" | "owner_reviewer" | "custom";
 
 const permissionPresets: Record<
   Exclude<PermissionPresetId, "custom">,
@@ -82,6 +89,7 @@ const permissionPresets: Record<
       can_manage_projects: false,
       can_edit_project_references: false,
       can_manage_review_matrix: false,
+      can_view_reporting: true,
       can_create_mdr: false,
       can_upload_files: false,
       can_comment: true,
@@ -98,7 +106,8 @@ const permissionPresets: Record<
       can_manage_users: false,
       can_manage_projects: false,
       can_edit_project_references: false,
-      can_manage_review_matrix: true,
+      can_manage_review_matrix: false,
+      can_view_reporting: false,
       can_create_mdr: true,
       can_upload_files: true,
       can_comment: true,
@@ -116,7 +125,8 @@ const permissionPresets: Record<
       can_manage_projects: false,
       can_edit_project_references: false,
       can_manage_review_matrix: false,
-      can_create_mdr: true,
+      can_view_reporting: false,
+      can_create_mdr: false,
       can_upload_files: true,
       can_comment: true,
       can_raise_comments: false,
@@ -126,9 +136,27 @@ const permissionPresets: Record<
       can_process_tdo_queue: false,
     },
   },
+  owner_reviewer: {
+    label: "R заказчика (проверка и замечания)",
+    permissions: {
+      can_manage_users: false,
+      can_manage_projects: false,
+      can_edit_project_references: false,
+      can_manage_review_matrix: false,
+      can_view_reporting: true,
+      can_create_mdr: false,
+      can_upload_files: false,
+      can_comment: true,
+      can_raise_comments: true,
+      can_respond_comments: false,
+      can_publish_comments: false,
+      can_edit_workflow_statuses: false,
+      can_process_tdo_queue: false,
+    },
+  },
 };
 
-export default function AdminPage({ currentUser }: Props): JSX.Element {
+export default function AdminPage({ currentUser, onGlobalReload }: Props): JSX.Element {
   const [users, setUsers] = useState<User[]>([]);
   const [requests, setRequests] = useState<RegistrationRequest[]>([]);
   const [isMainAdmin, setIsMainAdmin] = useState(false);
@@ -342,49 +370,20 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
     },
   ];
 
-  const confirmClearProjectData = () => {
-    Modal.confirm({
-      title: "Удалить все проектные данные?",
-      content: "Будут удалены проекты, MDR, документы, ревизии, комментарии и PDF файлы. Пользователи останутся.",
-      okText: "Да, удалить",
-      cancelText: "Отмена",
-      okButtonProps: { danger: true },
-      onOk: async () => {
-        try {
-          setAdminActionLoading(true);
-          const result = await clearProjectData();
-          message.success(
-            `Очищено: MDR ${result.deleted_mdr}, документов ${result.deleted_documents}, ревизий ${result.deleted_revisions}, файлов ${result.deleted_files}`,
-          );
-          await loadData();
-        } catch (error) {
-          message.error(error instanceof Error ? error.message : "Не удалось очистить проектные данные");
-        } finally {
-          setAdminActionLoading(false);
-        }
-      },
-    });
-  };
-
-  const confirmClearAllNotifications = () => {
-    Modal.confirm({
-      title: "Удалить все уведомления?",
-      content: "Будут удалены уведомления у всех пользователей.",
-      okText: "Да, удалить",
-      cancelText: "Отмена",
-      okButtonProps: { danger: true },
-      onOk: async () => {
-        try {
-          setAdminActionLoading(true);
-          const result = await clearAllNotifications();
-          message.success(`Удалено уведомлений: ${result.deleted_notifications}`);
-        } catch (error) {
-          message.error(error instanceof Error ? error.message : "Не удалось удалить уведомления");
-        } finally {
-          setAdminActionLoading(false);
-        }
-      },
-    });
+  const clearNotificationsNow = async () => {
+    try {
+      setAdminActionLoading(true);
+      const result = await clearAllNotifications();
+      message.success(`Удалено уведомлений: ${result.deleted_notifications}`);
+      await loadData();
+      if (onGlobalReload) {
+        await onGlobalReload();
+      }
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "Не удалось удалить уведомления");
+    } finally {
+      setAdminActionLoading(false);
+    }
   };
 
   const requestColumns: ColumnsType<RegistrationRequest> = [
@@ -446,23 +445,30 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
 
   return (
     <div className="admin-module">
-      <Space style={{ marginBottom: 12, width: "100%", justifyContent: "space-between" }}>
-        <Typography.Title level={4} style={{ margin: 0 }}>
+      <div
+        style={{
+          marginBottom: 12,
+          width: "100%",
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+        }}
+      >
+        <Typography.Title
+          level={4}
+          style={{ margin: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: "1 1 320px" }}
+        >
           Администрирование: пользователи и права
         </Typography.Title>
-        <Space>
-          <Button
-            danger
-            disabled={!isMainAdmin}
-            loading={adminActionLoading}
-            onClick={confirmClearProjectData}
-          >
-            Очистить базу проектов и файлы
-          </Button>
+        <Space wrap>
           <Button
             disabled={!isMainAdmin}
             loading={adminActionLoading}
-            onClick={confirmClearAllNotifications}
+            onClick={() => {
+              void clearNotificationsNow();
+            }}
           >
             Удалить все уведомления
           </Button>
@@ -484,7 +490,7 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
             + Создать пользователя
           </Button>
         </Space>
-      </Space>
+      </div>
 
       {!isMainAdmin && (
         <Typography.Paragraph type="warning">
@@ -630,6 +636,10 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
           message.success("Права обновлены");
           setPermissionsOpen(false);
           await loadData();
+          if (onGlobalReload) {
+            await onGlobalReload();
+          }
+          window.location.reload();
         }}
       >
         <Space style={{ marginBottom: 12, width: "100%", justifyContent: "space-between" }}>
@@ -653,16 +663,30 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
               permissionsForm.setFieldsValue(next);
             }}
             options={[
-              { value: "lr_owner", label: permissionPresets.lr_owner.label },
               { value: "contractor_tdo_lead", label: permissionPresets.contractor_tdo_lead.label },
               { value: "contractor_developer", label: permissionPresets.contractor_developer.label },
+              { value: "lr_owner", label: permissionPresets.lr_owner.label },
+              { value: "owner_reviewer", label: permissionPresets.owner_reviewer.label },
               { value: "custom", label: "Свои настройки" },
             ]}
           />
         </Space>
         <Form form={permissionsForm} layout="vertical">
           {permissionFields.map((item) => (
-            <Form.Item key={item.key} name={item.key} label={item.label} valuePropName="checked">
+            <Form.Item
+              key={item.key}
+              name={item.key}
+              label={
+                <Space size={6}>
+                  <span>{item.label}</span>
+                  <Tooltip title={item.hint}>
+                    <InfoCircleOutlined style={{ color: "#64748b" }} />
+                  </Tooltip>
+                </Space>
+              }
+              valuePropName="checked"
+              style={{ marginBottom: 8 }}
+            >
               <Switch onChange={() => setPermissionsPresetId("custom")} />
             </Form.Item>
           ))}
@@ -767,8 +791,8 @@ export default function AdminPage({ currentUser }: Props): JSX.Element {
               key: "user_agent",
               render: (value: string | null) => value ?? "—",
             },
-            { title: "Создана", dataIndex: "created_at", key: "created_at" },
-            { title: "Последняя активность", dataIndex: "last_seen_at", key: "last_seen_at" },
+            { title: "Создана", dataIndex: "created_at", key: "created_at", render: (v) => formatDateTimeRu(v) },
+            { title: "Последняя активность", dataIndex: "last_seen_at", key: "last_seen_at", render: (v) => formatDateTimeRu(v) },
             {
               title: "Статус",
               key: "status",

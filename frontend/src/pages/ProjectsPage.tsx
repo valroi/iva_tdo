@@ -5,9 +5,11 @@ import {
   Form,
   Input,
   Modal,
+  Spin,
   Popconfirm,
   Select,
   Space,
+  Switch,
   Table,
   Tabs,
   Tag,
@@ -17,25 +19,34 @@ import {
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
+import { formatDateTimeRu } from "../utils/datetime";
 
 import {
   addProjectMember,
   createReviewMatrixItem,
   createProject,
   createProjectReference,
+  downloadProjectReferencesTemplate,
   deleteReviewMatrixItem,
   deleteProject,
   deleteProjectMember,
+  exportProjectReferences,
+  importProjectReferences,
   listProjectMembers,
   listProjectReferences,
   listReviewMatrix,
   listUsers,
+  getCipherTemplate,
+  composeMdrCipher,
+  upsertCipherTemplate,
+  updateProject,
   updateProjectReference,
   updateReviewMatrixItem,
 } from "../api";
 import DocumentsPage from "./DocumentsPage";
 import MdrPage from "./MdrPage";
 import type {
+  CipherTemplateField,
   DocumentItem,
   MDRRecord,
   ProjectItem,
@@ -67,7 +78,10 @@ const projectMemberRoleOptions: { value: ProjectMemberRole; label: string }[] = 
 const referenceTabs: { key: string; label: string }[] = [
   { key: "document_category", label: "Категории документов" },
   { key: "title_object", label: "Титульные объекты" },
+  { key: "pd_section", label: "Раздел ПД" },
   { key: "discipline", label: "Дисциплины" },
+  { key: "mark", label: "Марки" },
+  { key: "mark_discipline", label: "Связь марка-дисциплина" },
   { key: "document_type", label: "Типы документов" },
   { key: "identifier_pattern", label: "Шаблоны шифрования" },
   { key: "numbering_attribute", label: "Атрибуты нумерации" },
@@ -76,6 +90,16 @@ const referenceTabs: { key: string; label: string }[] = [
   { key: "equipment_type", label: "Типы оборудования" },
   { key: "review_sla_days", label: "SLA обсуждения ревизий" },
   { key: "other", label: "Прочее" },
+];
+
+const documentCategoryOptions: { value: string; label: string }[] = [
+  { value: "PF", label: "PF - Pre-FEED, предпроектные исследования" },
+  { value: "BEP", label: "BEP - Базовый проект / Basic Engineering Package" },
+  { value: "SE", label: "SE - Инженерные изыскания / Engineering Survey" },
+  { value: "FD", label: "FD - FEED / Front End Engineering Design" },
+  { value: "PD", label: "PD - Проектная документация / Design Documentation" },
+  { value: "DD", label: "DD - Рабочая документация / Detailed Design Documentation" },
+  { value: "PM", label: "PM - Документы управления проектом / Project Management Documents" },
 ];
 
 export default function ProjectsPage({
@@ -95,12 +119,16 @@ export default function ProjectsPage({
 
   const [projectOpen, setProjectOpen] = useState(false);
   const [projectForm] = Form.useForm();
+  const [projectEditOpen, setProjectEditOpen] = useState(false);
+  const [projectEditForm] = Form.useForm();
+  const [selectedProjectForEdit, setSelectedProjectForEdit] = useState<ProjectItem | null>(null);
 
   const [memberOpen, setMemberOpen] = useState(false);
   const [memberForm] = Form.useForm();
 
   const [referenceOpen, setReferenceOpen] = useState(false);
   const [referenceForm] = Form.useForm();
+  const [refImporting, setRefImporting] = useState(false);
 
   const [referenceEditOpen, setReferenceEditOpen] = useState(false);
   const [referenceEditForm] = Form.useForm();
@@ -111,6 +139,13 @@ export default function ProjectsPage({
   const [matrixForm] = Form.useForm();
   const [matrixEditForm] = Form.useForm();
   const [selectedMatrixItem, setSelectedMatrixItem] = useState<ReviewMatrixMember | null>(null);
+  const [cipherOpen, setCipherOpen] = useState(false);
+  const [cipherLoading, setCipherLoading] = useState(false);
+  const [cipherFields, setCipherFields] = useState<CipherTemplateField[]>([]);
+  const [cipherPreviewValues, setCipherPreviewValues] = useState<Record<string, string>>({});
+  const [cipherPreviewResult, setCipherPreviewResult] = useState<string>("");
+  const [activeTabKey, setActiveTabKey] = useState<string>("members");
+  const [localNotificationTarget, setLocalNotificationTarget] = useState<{ project_code?: string | null; document_num?: string | null; revision_id?: number | null } | null>(null);
   const isAdmin = currentUser.role === "admin";
   const canManageMatrix = isAdmin || currentUser.permissions.can_manage_review_matrix;
   const canEditReferences = isAdmin || currentUser.permissions.can_edit_project_references;
@@ -196,17 +231,35 @@ export default function ProjectsPage({
   }, [members, users]);
 
   const projectColumns: ColumnsType<ProjectItem> = [
-    { title: "Код", dataIndex: "code", key: "code" },
-    { title: "Название", dataIndex: "name", key: "name" },
-    { title: "Создан", dataIndex: "created_at", key: "created_at" },
-    { title: "Обновлен", dataIndex: "updated_at", key: "updated_at" },
+    { title: "Код", dataIndex: "code", key: "code", width: 110, fixed: "left" },
+    { title: "Название", dataIndex: "name", key: "name", width: 220 },
+    { title: "Категория", dataIndex: "document_category", key: "document_category", width: 180 },
+    { title: "Создан", dataIndex: "created_at", key: "created_at", width: 190, render: (v) => formatDateTimeRu(v) },
+    { title: "Обновлен", dataIndex: "updated_at", key: "updated_at", width: 190, render: (v) => formatDateTimeRu(v) },
     {
       title: "Действие",
       key: "action",
+      width: 230,
+      fixed: "right",
       render: (_, row) => (
         <Space>
           <Button size="small" onClick={() => setSelectedProjectId(row.id)}>
             Открыть
+          </Button>
+          <Button
+            size="small"
+            disabled={!isAdmin}
+            onClick={() => {
+              setSelectedProjectForEdit(row);
+              projectEditForm.setFieldsValue({
+                name: row.name,
+                document_category: row.document_category ?? undefined,
+                description: row.description ?? undefined,
+              });
+              setProjectEditOpen(true);
+            }}
+          >
+            Редактировать
           </Button>
           <Popconfirm
             title="Удалить проект?"
@@ -318,8 +371,7 @@ export default function ProjectsPage({
   ];
 
   const matrixColumns: ColumnsType<ReviewMatrixMember> = [
-    { title: "Дисциплина", dataIndex: "discipline_code", key: "discipline_code" },
-    { title: "Тип документа", dataIndex: "doc_type", key: "doc_type" },
+    { title: "Раздел ПД", dataIndex: "discipline_code", key: "discipline_code" },
     {
       title: "Пользователь",
       key: "user_id",
@@ -362,6 +414,53 @@ export default function ProjectsPage({
   ];
 
   const selectedProject = projects.find((p) => p.id === selectedProjectId) ?? null;
+  const referenceTypeOptions = useMemo(
+    () =>
+      Array.from(new Set(references.map((ref) => ref.ref_type)))
+        .sort()
+        .map((value) => ({ value, label: value })),
+    [references],
+  );
+  const referenceOptionsByType = useMemo(() => {
+    const map = new Map<string, { value: string; label: string }[]>();
+    references.forEach((ref) => {
+      if (!ref.is_active) return;
+      const list = map.get(ref.ref_type) ?? [];
+      list.push({ value: ref.code, label: `${ref.code} - ${ref.value}` });
+      map.set(ref.ref_type, list);
+    });
+    return map;
+  }, [references]);
+  const openCipherEditor = async () => {
+    setCipherOpen(true);
+    if (!selectedProject || !selectedProject.document_category) {
+      setCipherFields([]);
+      setCipherPreviewValues({});
+      setCipherPreviewResult("");
+      return;
+    }
+    setCipherLoading(true);
+    try {
+      const template = await getCipherTemplate(selectedProject.code, selectedProject.document_category);
+      setCipherFields(
+        template?.fields ?? [
+          { order_index: 1, field_key: "project_code", label: "Код проекта", source_type: "STATIC", static_value: selectedProject.code, required: true, uppercase: true, separator: "-" },
+          { order_index: 2, field_key: "originator_code", label: "Код разработчика", source_type: "CUSTOM_TEXT", required: true, uppercase: true, length: 3, separator: "-" },
+          { order_index: 3, field_key: "category", label: "Категория", source_type: "STATIC", static_value: selectedProject.document_category, required: true, uppercase: true, separator: "-" },
+          { order_index: 4, field_key: "title_object", label: "Титул", source_type: "REFERENCE", source_ref_type: "title_object", required: true, uppercase: true, separator: "-" },
+          { order_index: 5, field_key: "discipline_code", label: "Дисциплина", source_type: "REFERENCE", source_ref_type: "discipline", required: true, uppercase: true, separator: "-" },
+          { order_index: 6, field_key: "doc_type", label: "Тип документа", source_type: "REFERENCE", source_ref_type: "document_type", required: true, uppercase: true, separator: "-" },
+          { order_index: 7, field_key: "serial_number", label: "Серийный номер", source_type: "AUTO_SERIAL", required: true, uppercase: false, length: 4, separator: "" },
+        ],
+      );
+      setCipherPreviewValues({});
+      setCipherPreviewResult("");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "Не удалось загрузить шаблон шифра");
+    } finally {
+      setCipherLoading(false);
+    }
+  };
   const projectMdr = useMemo(
     () => (selectedProject ? mdr.filter((row) => row.project_code === selectedProject.code) : []),
     [mdr, selectedProject],
@@ -371,48 +470,48 @@ export default function ProjectsPage({
   const disciplineOptions = useMemo(
     () =>
       references
-        .filter((ref) => ref.ref_type === "discipline" && ref.is_active)
-        .map((ref) => ({ value: ref.code, label: `${ref.code} - ${ref.value}` })),
-    [references],
-  );
-  const documentTypeOptions = useMemo(
-    () =>
-      references
-        .filter((ref) => ref.ref_type === "document_type" && ref.is_active)
+        .filter((ref) => ref.ref_type === "pd_section" && ref.is_active)
         .map((ref) => ({ value: ref.code, label: `${ref.code} - ${ref.value}` })),
     [references],
   );
   const hierarchyTree = useMemo(
-    () => [
-      {
-        key: `project-${selectedProject?.id ?? "none"}`,
-        title: selectedProject ? `${selectedProject.code} - ${selectedProject.name}` : "Проект не выбран",
-        children: [
-          {
-            key: "mdr-root",
-            title: `Реестр документов (${projectMdr.length})`,
-            children: Object.entries(
-              projectMdr.reduce<Record<string, typeof projectMdr>>((acc, item) => {
-                const key = item.category || "UNSPECIFIED";
-                acc[key] = acc[key] ?? [];
-                acc[key].push(item);
-                return acc;
-              }, {}),
-            ).map(([category, items]) => {
-              const usedWeight = items.reduce((sum, item) => sum + Number(item.doc_weight || 0), 0);
-              return {
-                key: `category-${category}`,
-                title: `${category} (вес: ${usedWeight.toFixed(1)} / 1000)`,
-                children: items.map((item) => ({
-                  key: `mdr-${item.id}`,
-                  title: `${item.doc_number} - ${item.doc_name}`,
-                })),
-              };
-            }),
-          },
-        ],
-      },
-    ],
+    () => {
+      const treeTitle = (value: string, maxWidth = 560) => (
+        <Typography.Text ellipsis={{ tooltip: value }} style={{ display: "inline-block", maxWidth, whiteSpace: "nowrap" }}>
+          {value}
+        </Typography.Text>
+      );
+      return [
+        {
+          key: `project-${selectedProject?.id ?? "none"}`,
+          title: treeTitle(selectedProject ? `${selectedProject.code} - ${selectedProject.name}` : "Проект не выбран", 420),
+          children: [
+            {
+              key: "mdr-root",
+              title: treeTitle(`Реестр документов (${projectMdr.length})`, 320),
+              children: Object.entries(
+                projectMdr.reduce<Record<string, typeof projectMdr>>((acc, item) => {
+                  const key = item.category || "UNSPECIFIED";
+                  acc[key] = acc[key] ?? [];
+                  acc[key].push(item);
+                  return acc;
+                }, {}),
+              ).map(([category, items]) => {
+                const usedWeight = items.reduce((sum, item) => sum + Number(item.doc_weight || 0), 0);
+                return {
+                  key: `category-${category}`,
+                  title: treeTitle(`${category} (вес: ${usedWeight.toFixed(1)} / 1000)`, 300),
+                  children: items.map((item) => ({
+                    key: `mdr-${item.id}`,
+                    title: treeTitle(`${item.doc_number} - ${item.doc_name}`),
+                  })),
+                };
+              }),
+            },
+          ],
+        },
+      ];
+    },
     [projectMdr, selectedProject],
   );
 
@@ -422,22 +521,37 @@ export default function ProjectsPage({
         <Typography.Title level={4} style={{ margin: 0 }}>
           Проекты
         </Typography.Title>
-        <Button type="primary" onClick={() => setProjectOpen(true)} disabled={!isAdmin && !currentUser.permissions.can_manage_projects}>
-          + Создать проект
-        </Button>
+        <Space>
+          {canEditReferences && (
+            <Button onClick={() => void openCipherEditor()} disabled={!selectedProject} loading={cipherLoading}>
+              Матрица шифрования
+            </Button>
+          )}
+          <Button type="primary" onClick={() => setProjectOpen(true)} disabled={!isAdmin}>
+            + Создать проект
+          </Button>
+        </Space>
       </Space>
 
-      <Card style={{ marginBottom: 16 }} className="hrp-card">
-        <Table rowKey="id" columns={projectColumns} dataSource={projects} pagination={false} />
-      </Card>
-
       <Card title={`Карточка проекта: ${selectedProjectId ?? "—"}`} className="hrp-card">
-        <Typography.Text type="secondary">
-          Иерархия проекта: проект -&gt; реестр документов -&gt; ревизии и комментарии.
-        </Typography.Text>
-        <Divider style={{ margin: "12px 0" }} />
+        <Space style={{ marginBottom: 12 }}>
+          <Typography.Text strong>Текущий проект:</Typography.Text>
+          <Select
+            style={{ minWidth: 320 }}
+            value={selectedProjectId ?? undefined}
+            onChange={(value) => setSelectedProjectId(value)}
+            options={projects.map((item) => ({
+              value: item.id,
+              label: `${item.code} - ${item.name}`,
+            }))}
+            placeholder="Выберите проект"
+          />
+        </Space>
+        <Divider style={{ margin: "0 0 12px 0" }} />
         <Tree defaultExpandAll treeData={hierarchyTree} style={{ marginBottom: 16 }} />
         <Tabs
+          activeKey={activeTabKey}
+          onChange={setActiveTabKey}
           items={[
             {
               key: "members",
@@ -487,6 +601,14 @@ export default function ProjectsPage({
                   currentUser={currentUser}
                   projectReferences={references}
                   onCreated={onReload}
+                  onOpenDocument={(documentNum) => {
+                    setLocalNotificationTarget({
+                      project_code: selectedProject?.code ?? null,
+                      document_num: documentNum,
+                      revision_id: null,
+                    });
+                    setActiveTabKey("documents");
+                  }}
                 />
               ),
             },
@@ -499,8 +621,11 @@ export default function ProjectsPage({
                   mdr={projectMdr}
                   currentUser={currentUser}
                   projectMembers={members}
-                  notificationTarget={notificationTarget}
-                  onNotificationTargetHandled={onNotificationTargetHandled}
+                  notificationTarget={localNotificationTarget ?? notificationTarget}
+                  onNotificationTargetHandled={() => {
+                    setLocalNotificationTarget(null);
+                    onNotificationTargetHandled?.();
+                  }}
                 />
               ),
             },
@@ -516,6 +641,49 @@ export default function ProjectsPage({
                       disabled={!selectedProjectId || !canEditReferences}
                     >
                       + Добавить значение
+                    </Button>
+                    <Button
+                      disabled={!selectedProjectId || !canEditReferences}
+                      onClick={async () => {
+                        if (!selectedProjectId) return;
+                        await downloadProjectReferencesTemplate(selectedProjectId, activeReferenceType);
+                      }}
+                    >
+                      Шаблон Excel
+                    </Button>
+                    <Button
+                      disabled={!selectedProjectId}
+                      onClick={async () => {
+                        if (!selectedProjectId) return;
+                        await exportProjectReferences(selectedProjectId, activeReferenceType);
+                      }}
+                    >
+                      Экспорт Excel
+                    </Button>
+                    <Button loading={refImporting} disabled={!selectedProjectId || !canEditReferences}>
+                      <label style={{ cursor: "pointer" }}>
+                        Импорт Excel
+                        <input
+                          type="file"
+                          accept=".xlsx"
+                          style={{ display: "none" }}
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (!file || !selectedProjectId) return;
+                            try {
+                              setRefImporting(true);
+                              const result = await importProjectReferences(selectedProjectId, activeReferenceType, file);
+                              message.success(`Импорт завершен: добавлено ${result.imported}, обновлено ${result.updated}`);
+                              await reloadProjectData();
+                            } catch (error) {
+                              message.error(error instanceof Error ? error.message : "Ошибка импорта справочника");
+                            } finally {
+                              setRefImporting(false);
+                              e.currentTarget.value = "";
+                            }
+                          }}
+                        />
+                      </label>
                     </Button>
                   </Space>
                   <Tabs
@@ -551,29 +719,348 @@ export default function ProjectsPage({
       </Card>
 
       <Modal
+        open={cipherOpen}
+        title={`Матрица шифрования: ${selectedProject?.code ?? "—"} / ${selectedProject?.document_category ?? "—"}`}
+        width={900}
+        onCancel={() => setCipherOpen(false)}
+        onOk={async () => {
+          if (!selectedProject?.document_category) return;
+          await upsertCipherTemplate(selectedProject.code, selectedProject.document_category, cipherFields);
+          message.success("Шаблон шифра сохранен");
+          setCipherOpen(false);
+        }}
+      >
+        {cipherLoading ? (
+          <div style={{ padding: "24px 0", textAlign: "center" }}>
+            <Spin />
+          </div>
+        ) : (
+          <>
+        {!selectedProject?.document_category ? (
+          <Typography.Paragraph type="warning">
+            Для настройки матрицы сначала откройте проект и укажите категорию документа в карточке проекта.
+          </Typography.Paragraph>
+        ) : null}
+        <Space style={{ marginBottom: 12 }}>
+          <Button
+            onClick={() =>
+              setCipherFields((prev) => [
+                ...prev,
+                {
+                  order_index: prev.length + 1,
+                  field_key: `field_${prev.length + 1}`,
+                  label: `Поле ${prev.length + 1}`,
+                  source_type: "CUSTOM_TEXT",
+                  required: true,
+                  uppercase: true,
+                  separator: "-",
+                },
+              ])
+            }
+          >
+            + Поле
+          </Button>
+        </Space>
+        <Table
+          rowKey={(_, idx) => `cipher-field-${idx}`}
+          pagination={false}
+          dataSource={cipherFields}
+          columns={[
+            {
+              title: "Порядок",
+              width: 120,
+              render: (_, __, idx) => (
+                <Space>
+                  <Button
+                    size="small"
+                    disabled={idx === 0}
+                    onClick={() =>
+                      setCipherFields((prev) => {
+                        const next = [...prev];
+                        [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
+                        return next.map((item, i) => ({ ...item, order_index: i + 1 }));
+                      })
+                    }
+                  >
+                    ↑
+                  </Button>
+                  <Button
+                    size="small"
+                    disabled={idx === cipherFields.length - 1}
+                    onClick={() =>
+                      setCipherFields((prev) => {
+                        const next = [...prev];
+                        [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
+                        return next.map((item, i) => ({ ...item, order_index: i + 1 }));
+                      })
+                    }
+                  >
+                    ↓
+                  </Button>
+                </Space>
+              ),
+            },
+            {
+              title: "Ключ",
+              width: 120,
+              render: (_, __, idx) => (
+                <Input
+                  value={cipherFields[idx].field_key}
+                  onChange={(e) =>
+                    setCipherFields((prev) => prev.map((item, i) => (i === idx ? { ...item, field_key: e.target.value } : item)))
+                  }
+                />
+              ),
+            },
+            {
+              title: "Название",
+              width: 150,
+              render: (_, __, idx) => (
+                <Input
+                  value={cipherFields[idx].label}
+                  onChange={(e) =>
+                    setCipherFields((prev) => prev.map((item, i) => (i === idx ? { ...item, label: e.target.value } : item)))
+                  }
+                />
+              ),
+            },
+            {
+              title: "Источник",
+              width: 160,
+              render: (_, __, idx) => (
+                <Select
+                  value={cipherFields[idx].source_type}
+                  options={[
+                    { value: "REFERENCE", label: "Справочник" },
+                    { value: "CUSTOM_TEXT", label: "Пользовательский ввод" },
+                    { value: "AUTO_SERIAL", label: "Авто-нумерация" },
+                    { value: "STATIC", label: "Фикс. значение" },
+                  ]}
+                  onChange={(value) =>
+                    setCipherFields((prev) => prev.map((item, i) => (i === idx ? { ...item, source_type: value } : item)))
+                  }
+                />
+              ),
+            },
+            {
+              title: "Ref type / static",
+              width: 220,
+              render: (_, __, idx) => (
+                cipherFields[idx].source_type === "STATIC" ? (
+                  <Input
+                    value={cipherFields[idx].static_value ?? ""}
+                    onChange={(e) =>
+                      setCipherFields((prev) =>
+                        prev.map((item, i) => (i === idx ? { ...item, static_value: e.target.value } : item)),
+                      )
+                    }
+                  />
+                ) : (
+                  <Select
+                    allowClear
+                    showSearch
+                    optionFilterProp="label"
+                    placeholder="Выберите справочник"
+                    value={cipherFields[idx].source_ref_type ?? undefined}
+                    options={referenceTypeOptions}
+                    onChange={(value) =>
+                      setCipherFields((prev) =>
+                        prev.map((item, i) => (i === idx ? { ...item, source_ref_type: value ?? null } : item)),
+                      )
+                    }
+                  />
+                )
+              ),
+            },
+            {
+              title: "Длина",
+              width: 90,
+              render: (_, __, idx) => (
+                <Input
+                  value={cipherFields[idx].length ? String(cipherFields[idx].length) : ""}
+                  onChange={(e) =>
+                    setCipherFields((prev) =>
+                      prev.map((item, i) => (i === idx ? { ...item, length: e.target.value ? Number(e.target.value) : null } : item)),
+                    )
+                  }
+                />
+              ),
+            },
+            {
+              title: "Разделитель",
+              width: 100,
+              render: (_, __, idx) => (
+                <Input
+                  value={cipherFields[idx].separator}
+                  onChange={(e) =>
+                    setCipherFields((prev) => prev.map((item, i) => (i === idx ? { ...item, separator: e.target.value } : item)))
+                  }
+                />
+              ),
+            },
+            {
+              title: "Обяз.",
+              width: 80,
+              render: (_, __, idx) => (
+                <Switch
+                  size="small"
+                  checked={cipherFields[idx].required}
+                  onChange={(checked) =>
+                    setCipherFields((prev) => prev.map((item, i) => (i === idx ? { ...item, required: checked } : item)))
+                  }
+                />
+              ),
+            },
+            {
+              title: "UPPER",
+              width: 80,
+              render: (_, __, idx) => (
+                <Switch
+                  size="small"
+                  checked={cipherFields[idx].uppercase}
+                  onChange={(checked) =>
+                    setCipherFields((prev) => prev.map((item, i) => (i === idx ? { ...item, uppercase: checked } : item)))
+                  }
+                />
+              ),
+            },
+            {
+              title: "",
+              width: 70,
+              render: (_, __, idx) => (
+                <Button danger size="small" onClick={() => setCipherFields((prev) => prev.filter((_, i) => i !== idx))}>
+                  Удал.
+                </Button>
+              ),
+            },
+          ]}
+          scroll={{ x: 1340 }}
+        />
+        <Divider style={{ margin: "12px 0" }} />
+        <Typography.Text strong>Предпросмотр шифра</Typography.Text>
+        <Space wrap style={{ marginTop: 8, marginBottom: 8 }}>
+          {cipherFields
+            .filter((field) => field.source_type === "CUSTOM_TEXT" || field.source_type === "REFERENCE")
+            .map((field) =>
+              field.source_type === "REFERENCE" ? (
+                <Select
+                  key={`preview-${field.field_key}`}
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder={field.label}
+                  style={{ width: 220 }}
+                  options={referenceOptionsByType.get(field.source_ref_type ?? "") ?? []}
+                  value={cipherPreviewValues[field.field_key]}
+                  onChange={(value) => setCipherPreviewValues((prev) => ({ ...prev, [field.field_key]: value ?? "" }))}
+                />
+              ) : (
+                <Input
+                  key={`preview-${field.field_key}`}
+                  placeholder={field.label}
+                  style={{ width: 220 }}
+                  value={cipherPreviewValues[field.field_key] ?? ""}
+                  onChange={(e) => setCipherPreviewValues((prev) => ({ ...prev, [field.field_key]: e.target.value }))}
+                />
+              ),
+            )}
+          <Button
+            disabled={!selectedProject?.document_category}
+            onClick={async () => {
+              if (!selectedProject?.document_category) return;
+              try {
+                const result = await composeMdrCipher({
+                  project_code: selectedProject.code,
+                  category: selectedProject.document_category,
+                  values: cipherPreviewValues,
+                });
+                setCipherPreviewResult(result.cipher);
+              } catch (error) {
+                message.error(error instanceof Error ? error.message : "Не удалось построить предпросмотр");
+              }
+            }}
+          >
+            Построить
+          </Button>
+        </Space>
+        {cipherPreviewResult ? (
+          <Typography.Paragraph copyable style={{ marginBottom: 0 }}>
+            {cipherPreviewResult}
+          </Typography.Paragraph>
+        ) : null}
+          </>
+        )}
+      </Modal>
+
+      <Modal
         open={projectOpen}
         title="Создать карточку проекта"
-        onCancel={() => setProjectOpen(false)}
+        onCancel={() => {
+          setProjectOpen(false);
+          projectForm.setFieldsValue({ code: "IMP", document_category: "PD" });
+        }}
         onOk={async () => {
           const values = await projectForm.validateFields();
-          await createProject(values);
+          await createProject({ ...values, code: "IMP", document_category: "PD" });
           message.success("Проект создан");
           setProjectOpen(false);
           projectForm.resetFields();
           await onReload();
         }}
       >
-        <Form form={projectForm} layout="vertical">
+        <Form form={projectForm} layout="vertical" initialValues={{ code: "IMP", document_category: "PD" }}>
           <Form.Item
             name="code"
             label="Код проекта"
             normalize={(value: string) => (value ?? "").toUpperCase().slice(0, 3)}
             rules={[{ required: true }, { len: 3, message: "Ровно 3 символа" }, { pattern: /^[A-Z]{3}$/, message: "Только A-Z" }]}
           >
-            <Input placeholder="IVA" maxLength={3} />
+            <Input placeholder="IMP" maxLength={3} disabled />
           </Form.Item>
           <Form.Item name="name" label="Название" rules={[{ required: true }]}>
             <Input placeholder="Город столиц" />
+          </Form.Item>
+          <Form.Item name="document_category" label="Категория документа проекта" rules={[{ required: true }]}>
+            <Select
+              showSearch
+              optionFilterProp="label"
+              placeholder="Выберите одну категорию для проекта"
+              options={documentCategoryOptions}
+              disabled
+            />
+          </Form.Item>
+          <Form.Item name="description" label="Описание">
+            <Input.TextArea rows={3} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        open={projectEditOpen}
+        title={`Редактировать проект: ${selectedProjectForEdit?.code ?? ""}`}
+        onCancel={() => {
+          setProjectEditOpen(false);
+          setSelectedProjectForEdit(null);
+        }}
+        onOk={async () => {
+          if (!selectedProjectForEdit) return;
+          const values = await projectEditForm.validateFields();
+          await updateProject(selectedProjectForEdit.id, { ...values, document_category: "PD" });
+          message.success("Проект обновлен");
+          setProjectEditOpen(false);
+          setSelectedProjectForEdit(null);
+          projectEditForm.resetFields();
+          await onReload();
+        }}
+      >
+        <Form form={projectEditForm} layout="vertical">
+          <Form.Item label="Код проекта">
+            <Input value={selectedProjectForEdit?.code ?? ""} disabled />
+          </Form.Item>
+          <Form.Item name="name" label="Название" rules={[{ required: true }]}>
+            <Input placeholder="Название проекта" />
+          </Form.Item>
+          <Form.Item name="document_category" label="Категория документа проекта" rules={[{ required: true }]}>
+            <Select showSearch optionFilterProp="label" options={documentCategoryOptions} disabled />
           </Form.Item>
           <Form.Item name="description" label="Описание">
             <Input.TextArea rows={3} />
@@ -690,7 +1177,11 @@ export default function ProjectsPage({
           try {
             if (!selectedProjectId) return;
             const values = await matrixForm.validateFields();
-            await createReviewMatrixItem(selectedProjectId, { ...values, level: 1 });
+            await createReviewMatrixItem(selectedProjectId, {
+              ...values,
+              doc_type: values.discipline_code,
+              level: 1,
+            });
             message.success("Строка матрицы добавлена");
             setMatrixOpen(false);
             matrixForm.resetFields();
@@ -702,20 +1193,12 @@ export default function ProjectsPage({
         }}
       >
         <Form form={matrixForm} layout="vertical" initialValues={{ level: 1, state: "R" }}>
-          <Form.Item name="discipline_code" label="Дисциплина" rules={[{ required: true }]}>
+          <Form.Item name="discipline_code" label="Раздел ПД" rules={[{ required: true }]}>
             <Select
               showSearch
               optionFilterProp="label"
               options={disciplineOptions}
-              placeholder="Выберите из справочника дисциплин"
-            />
-          </Form.Item>
-          <Form.Item name="doc_type" label="Тип документа" rules={[{ required: true }]}>
-            <Select
-              showSearch
-              optionFilterProp="label"
-              options={documentTypeOptions}
-              placeholder="Выберите из справочника типов документов"
+              placeholder="Выберите раздел ПД"
             />
           </Form.Item>
           <Form.Item name="user_id" label="Сотрудник" rules={[{ required: true }]}>

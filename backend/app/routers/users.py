@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_password_hash
 from app.config import get_settings
 from app.database import get_db
+from app.seed import seed_default_data
 from app.deps import (
     default_permissions_for_role,
     get_effective_permissions,
@@ -22,6 +23,7 @@ from app.models import (
     Document,
     MDRRecord,
     Notification,
+    Project,
     ProjectMember,
     ProjectReference,
     RegistrationRequest,
@@ -234,7 +236,8 @@ def clear_project_data(
     db.query(ProjectMember).delete(synchronize_session=False)
     db.query(Project).delete(synchronize_session=False)
 
-    db.commit()
+    db.flush()
+    seed_default_data(db)
     return {
         "message": "Project data and files cleared",
         "deleted_files": deleted_files,

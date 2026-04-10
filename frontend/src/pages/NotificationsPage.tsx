@@ -1,8 +1,10 @@
-import { Button, Space, Table, Tag, Typography } from "antd";
+import { Button, Space, Table, Tabs, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
+import { useMemo } from "react";
 
 import { markNotificationRead } from "../api";
 import type { NotificationItem } from "../types";
+import { formatDateTimeRu } from "../utils/datetime";
 
 interface Props {
   notifications: NotificationItem[];
@@ -11,6 +13,15 @@ interface Props {
 }
 
 export default function NotificationsPage({ notifications, onReload, onOpenTarget }: Props): JSX.Element {
+  const activeNotifications = useMemo(
+    () => notifications.filter((item) => !item.is_read),
+    [notifications],
+  );
+  const archivedNotifications = useMemo(
+    () => notifications.filter((item) => item.is_read),
+    [notifications],
+  );
+
   const eventTag = (eventType: string): { color: string; label: string } => {
     if (eventType.includes("TDO")) return { color: "blue", label: "TDO" };
     if (eventType.includes("OWNER") || eventType.includes("COMMENT")) return { color: "purple", label: "COMMENTS" };
@@ -29,8 +40,20 @@ export default function NotificationsPage({ notifications, onReload, onOpenTarge
       },
     },
     { title: "Сообщение", dataIndex: "message", key: "message" },
-    { title: "Дата задачи", dataIndex: "created_at", key: "created_at", width: 180 },
-    { title: "Срок", dataIndex: "task_deadline", key: "task_deadline", width: 130, render: (v: string | null | undefined) => v ?? "—" },
+    {
+      title: "Дата задачи",
+      dataIndex: "created_at",
+      key: "created_at",
+      width: 150,
+      render: (v: string) => formatDateTimeRu(v),
+    },
+    {
+      title: "Срок",
+      dataIndex: "task_deadline",
+      key: "task_deadline",
+      width: 130,
+      render: (v: string | null | undefined) => formatDateTimeRu(v),
+    },
     {
       title: "Прочитано",
       dataIndex: "is_read",
@@ -71,7 +94,20 @@ export default function NotificationsPage({ notifications, onReload, onOpenTarge
           Уведомления
         </Typography.Title>
       </Space>
-      <Table rowKey="id" columns={columns} dataSource={notifications} size="small" />
+      <Tabs
+        items={[
+          {
+            key: "active",
+            label: `Активные (${activeNotifications.length})`,
+            children: <Table rowKey="id" columns={columns} dataSource={activeNotifications} size="small" />,
+          },
+          {
+            key: "archive",
+            label: `Архив (${archivedNotifications.length})`,
+            children: <Table rowKey="id" columns={columns} dataSource={archivedNotifications} size="small" />,
+          },
+        ]}
+      />
     </div>
   );
 }

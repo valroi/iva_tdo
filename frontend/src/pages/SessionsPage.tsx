@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { deleteMySession, listMySessions } from "../api";
 import type { UserSession } from "../types";
+import { formatDateTimeRu } from "../utils/datetime";
 
 export default function SessionsPage(): JSX.Element {
   const [loading, setLoading] = useState(false);
@@ -36,8 +37,8 @@ export default function SessionsPage(): JSX.Element {
       key: "user_agent",
       render: (v) => (v ? v.slice(0, 40) + (v.length > 40 ? "…" : "") : "—"),
     },
-    { title: "Создана", dataIndex: "created_at", key: "created_at" },
-    { title: "Последняя активность", dataIndex: "last_seen_at", key: "last_seen_at" },
+    { title: "Создана", dataIndex: "created_at", key: "created_at", render: (v) => formatDateTimeRu(v) },
+    { title: "Последняя активность", dataIndex: "last_seen_at", key: "last_seen_at", render: (v) => formatDateTimeRu(v) },
     {
       title: "Статус",
       key: "status",

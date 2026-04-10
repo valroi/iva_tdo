@@ -8,7 +8,7 @@ import RevisionPdfAnnotator from "../components/RevisionPdfAnnotator";
 import type { CarryDecisionItem, CommentItem, RevisionCard, User } from "../types";
 import { formatDateTimeRu } from "../utils/datetime";
 import { ContractorReuploadPdfTag, RevisionStatusCell, contractorNeedsPdfReupload } from "../utils/revisionHints";
-import { getRemarksSummaryLabel } from "../utils/revisionProcess";
+import { getDisplayRevisionCode, getRemarksSummaryLabel } from "../utils/revisionProcess";
 import { PROCESS_STEPS, getProcessCurrentStep } from "../utils/workflowProgress";
 
 interface Props {
@@ -63,7 +63,16 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
     () => (card?.revisions.length ? card.revisions[card.revisions.length - 1] : null),
     [card?.revisions],
   );
+  const latestByCreated = useMemo(
+    () =>
+      card?.revisions.length
+        ? [...card.revisions].sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : b.id - a.id))[0]
+        : null,
+    [card?.revisions],
+  );
   const latestRevisionId = lastRevision?.id ?? null;
+  const documentCompleted =
+    (latestByCreated?.issue_purpose ?? "").toUpperCase() === "AFD" && latestByCreated?.review_code === "AP";
 
   const filteredHistory = useMemo(() => {
     if (!card?.history) return [];
@@ -79,7 +88,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
         ? filteredHistory
             .slice(0, selectedHistoryIndex)
             .flatMap((h) => h.comments)
-            .filter((comment) => comment.parent_id === null && comment.status === "RESOLVED")
+            .filter((comment) => comment.parent_id === null && comment.status === "RESOLVED" && !comment.carry_finalized)
         : [],
     [filteredHistory, selectedHistoryIndex],
   );
@@ -111,6 +120,10 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
     }
     if (!currentUser.permissions.can_upload_files) {
       message.error("Недостаточно прав для загрузки PDF");
+      return;
+    }
+    if (documentCompleted) {
+      message.warning("Документ завершен (AFD + AP). Загрузка PDF заблокирована.");
       return;
     }
     setUploading(true);
@@ -160,6 +173,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
             }}
             disabled={
               !selectedRevision?.file_path ||
+              documentCompleted ||
               (!currentUser.permissions.can_raise_comments && currentUser.company_type !== "contractor") ||
               !canOwnerCreateRemarks ||
               (currentUser.company_type === "owner" && !canCommentOnSelectedRevision)
@@ -172,6 +186,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
           <Tooltip title="Загрузить или заменить основной PDF выбранной ревизии">
             <Button
               icon={<UploadOutlined />}
+              disabled={documentCompleted}
               onClick={() => {
                 setUploadFile(null);
                 setUploadModalOpen(true);
@@ -274,7 +289,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
           pagination={false}
           size="small"
           columns={[
-            { title: "Рев", dataIndex: "revision_code", width: 90 },
+            { title: "Рев", width: 90, render: (_, row) => getDisplayRevisionCode(row, card?.revisions ?? []) },
             { title: "Цель", dataIndex: "issue_purpose", width: 120 },
             {
               title: "Статус",
@@ -359,7 +374,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
           locale={{ emptyText: "По этой ревизии пока нет комментариев." }}
           expandable={{
             expandedRowRender: (row) => {
-              const canManageFromCard = currentUser.permissions.can_publish_comments;
+              const canManageFromCard = currentUser.permissions.can_publish_comments && !documentCompleted;
               const isLatestRow = latestRevisionId !== null && row.revision_id === latestRevisionId;
               const rowComments =
                 showOnlyUnsentCrs && currentUser.permissions.can_publish_comments && row.revision_id === selectedRevisionId
@@ -707,34 +722,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                               {
                                 title: "Действие",
                                 width: 180,
-                                render: (_, item) => (
-                                  <Button
-                                    size="small"
-                                    onClick={() => {
-                                      void setCarryDecision(row.revision_id, { source_comment_id: item.id, status: "OPEN" })
-                                        .then((decision) => {
-                                          setCarryClosedByRevision((prev) => {
-                                            const next = (prev[row.revision_id] ?? []).filter((id) => id !== item.id);
-                                            return { ...prev, [row.revision_id]: next };
-                                          });
-                                          setCarryDecisionsByRevision((prev) => ({
-                                            ...prev,
-                                            [row.revision_id]: [
-                                              decision,
-                                              ...(prev[row.revision_id] ?? []).filter((x) => x.source_comment_id !== decision.source_comment_id),
-                                            ],
-                                          }));
-                                          message.success("Замечание возвращено в 'Должны были устранить'");
-                                        })
-                                        .catch((error: unknown) => {
-                                          const text = error instanceof Error ? error.message : "Не удалось сохранить OPEN";
-                                          message.error(text);
-                                        });
-                                    }}
-                                  >
-                                    Вернуть в OPEN
-                                  </Button>
-                                ),
+                                render: () => <Typography.Text type="secondary">Зафиксировано</Typography.Text>,
                               },
                             ]}
                             scroll={{ x: 900, y: 220 }}
@@ -752,7 +740,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
             },
           }}
           columns={[
-            { title: "Ревизия", dataIndex: "revision_code", width: 100 },
+            { title: "Ревизия", width: 100, render: (_, row) => getDisplayRevisionCode(row, card?.revisions ?? []) },
             {
               title: "Статус ревизии",
               dataIndex: "status",
@@ -761,7 +749,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                 <Space direction="vertical" size={2}>
                   <RevisionStatusCell currentUser={currentUser} status={v} />
                   <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    Код замечаний: {getRemarksSummaryLabel(row.comments)}
+                    Код замечаний: {getRemarksSummaryLabel(row.comments, (card?.revisions.find((rev) => rev.id === row.revision_id)?.review_code as string | null | undefined) ?? null)}
                   </Typography.Text>
                 </Space>
               ),
@@ -843,8 +831,8 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
           });
           await loadCard();
         } : undefined}
-        canCreateRemarks={card?.can_current_user_raise_comments ?? true}
-        canCreateOwnerRemarks={canOwnerCreateRemarks}
+        canCreateRemarks={(card?.can_current_user_raise_comments ?? true) && !documentCompleted}
+        canCreateOwnerRemarks={canOwnerCreateRemarks && !documentCompleted}
         canManageOwnerRemarks={currentUser.permissions.can_publish_comments}
         noAccessHint="Вы не назначены рассматривающим (LR/R) по этому документу. Доступен только просмотр PDF и замечаний."
         focusCommentId={pdfFocusCommentId}

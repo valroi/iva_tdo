@@ -87,6 +87,7 @@ export interface DocumentItem {
   latest_revision_code?: string | null;
   latest_revision_status?: string | null;
   latest_review_code?: "AP" | "AN" | "CO" | "RJ" | null;
+  latest_issue_purpose?: string | null;
   created_by_id: number;
   created_at: string;
 }

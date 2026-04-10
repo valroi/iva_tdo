@@ -263,3 +263,10 @@ body {
 .ant-table-wrapper .ant-table-thead > tr > th {
   background: #f8fafc;
 }
+
+.documents-table .ant-table-thead > tr > th,
+.documents-table .ant-table-tbody > tr > td {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

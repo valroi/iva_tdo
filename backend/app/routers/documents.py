@@ -81,6 +81,18 @@ def _owner_can_access_revision(current_user: User, revision: Revision) -> bool:
     return revision.status in OWNER_VISIBLE_REVISION_STATUSES
 
 
+def _is_completed_document(db: Session, document_id: int) -> bool:
+    latest = (
+        db.query(Revision)
+        .filter(Revision.document_id == document_id)
+        .order_by(Revision.created_at.desc(), Revision.id.desc())
+        .first()
+    )
+    if latest is None:
+        return False
+    return (latest.issue_purpose or "").upper() == "AFD" and latest.review_code == ReviewCode.AP
+
+
 def _can_manage_owner_remark(
     db: Session,
     *,
@@ -717,6 +729,7 @@ def list_documents(db: Session = Depends(get_db), current_user: User = Depends(g
                     "latest_revision_code": latest.revision_code if latest else None,
                     "latest_revision_status": latest.status if latest else None,
                     "latest_review_code": latest.review_code if latest else None,
+                    "latest_issue_purpose": latest.issue_purpose if latest else None,
                 }
             )
         )
@@ -913,6 +926,7 @@ def get_document(document_id: int, db: Session = Depends(get_db), current_user: 
             "latest_revision_code": latest.revision_code if latest else None,
             "latest_revision_status": latest.status if latest else None,
             "latest_review_code": latest.review_code if latest else None,
+            "latest_issue_purpose": latest.issue_purpose if latest else None,
         }
     )
 
@@ -939,6 +953,7 @@ def create_document(
             "latest_revision_code": None,
             "latest_revision_status": None,
             "latest_review_code": None,
+            "latest_issue_purpose": None,
         }
     )
 
@@ -955,6 +970,8 @@ def upload_document_file(
         revision = db.query(Revision).filter(Revision.id == revision_id).first()
         if revision is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
+        if _is_completed_document(db, revision.document_id):
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Document is completed (AFD+AP); uploads are locked")
 
     original_name = file.filename or "document.pdf"
     extension = Path(original_name).suffix.lower()
@@ -1135,6 +1152,8 @@ def upload_revision_attachment(
     document = db.query(Document).filter(Document.id == revision.document_id).first()
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    if _is_completed_document(db, document.id):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Document is completed (AFD+AP); uploads are locked")
     mdr = db.query(MDRRecord).filter(MDRRecord.id == document.mdr_id).first()
     project = db.query(Project).filter(Project.code == mdr.project_code).first() if mdr else None
     if project is None:
@@ -1348,13 +1367,29 @@ def set_revision_review_code(
         )
 
     revision.review_code = ReviewCode.AP
+    revision.reviewed_at = datetime.utcnow()
     if revision.status in {"UNDER_REVIEW", "OWNER_COMMENTS_SENT", "CONTRACTOR_REPLY_I"}:
         revision.status = "CONTRACTOR_REPLY_A"
+    receiver_code = _project_reference_value(
+        db,
+        project_id=project.id,
+        code="TRM_RECEIVER_COMPANY_CODE",
+    ) or "IVA"
+    sender_code = (mdr.originator_code or "").strip().upper() or "CTR"
+    auto_crs_number = _next_crs_number(
+        db,
+        project_code=mdr.project_code,
+        sender_company_code=sender_code,
+        receiver_company_code=receiver_code,
+    )
     db.add(
         Notification(
             user_id=revision.author_id or document.created_by_id,
             event_type="OWNER_COMMENTS_PUBLISHED",
-            message=f"CRS по документу {document.document_num}, ревизия {revision.revision_code}: статус AP (замечаний нет).",
+            message=(
+                f"CRS по документу {document.document_num}, ревизия {revision.revision_code}: "
+                f"статус AP (замечаний нет). CRS: {auto_crs_number}"
+            ),
             project_code=mdr.project_code,
             document_num=document.document_num,
             revision_id=revision.id,
@@ -1522,6 +1557,8 @@ def create_revision(
     doc = db.query(Document).filter(Document.id == payload.document_id).first()
     if not doc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    if _is_completed_document(db, doc.id):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Document is completed (AFD+AP); new revisions are locked")
 
     latest = (
         db.query(Revision)
@@ -1630,13 +1667,16 @@ def create_revision(
 
     for receiver_id in receiver_ids:
         event_type = "NEW_REVISION_FOR_TDO" if lead_ids else "NEW_REVISION"
+        previous_review_code = latest.review_code.value if latest and latest.review_code is not None else "—"
+        author_label = current_user.full_name or current_user.email
         db.add(
             Notification(
                 user_id=receiver_id,
                 event_type=event_type,
                 message=(
                     f"Выпущен документ {doc.document_num}, ревизия {rev.revision_code}. "
-                    f"Дисциплина: {mdr.discipline_code}, тип: {mdr.doc_type}"
+                    f"Дисциплина: {mdr.discipline_code}, тип: {mdr.doc_type}. "
+                    f"Автор: {author_label}. Статус: {previous_review_code}"
                 ),
                 project_code=mdr.project_code,
                 document_num=doc.document_num,
@@ -2218,6 +2258,8 @@ def create_comment(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
     if not _owner_can_access_revision(current_user, rev):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
+    if _is_completed_document(db, rev.document_id):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Document is completed (AFD+AP); commenting is locked")
 
     document = db.query(Document).filter(Document.id == rev.document_id).first()
     if document is None:
@@ -2331,6 +2373,8 @@ def respond_comment(
     revision = db.query(Revision).filter(Revision.id == parent.revision_id).first()
     if revision is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
+    if _is_completed_document(db, revision.document_id):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Document is completed (AFD+AP); commenting is locked")
     if not _owner_can_access_revision(current_user, revision):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
 

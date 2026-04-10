@@ -1,8 +1,14 @@
 import type {
+  CipherTemplate,
+  CipherTemplateField,
   CommentItem,
+  CsrQueueItem,
   CompanyType,
   DocumentItem,
+  DocumentAttachmentItem,
+  CarryDecisionItem,
   MDRRecord,
+  MdrImportResult,
   NotificationItem,
   ProjectItem,
   ProjectMember,
@@ -14,6 +20,7 @@ import type {
   RegistrationRequest,
   RevisionCard,
   RevisionOverviewItem,
+  DocumentRegistryItem,
   Revision,
   User,
   UserSession,
@@ -114,6 +121,29 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await response.json()) as T;
 }
 
+async function requestBlob(path: string, init: RequestInit = {}): Promise<Blob> {
+  const token = getAccessToken();
+  const headers = new Headers(init.headers ?? {});
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  const response = await fetch(`${PREFIX}${path}`, { ...init, headers });
+  if (!response.ok) {
+    const rawText = await response.text();
+    throw new Error(rawText || "API request failed");
+  }
+  return response.blob();
+}
+
+function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export async function login(email: string, password: string): Promise<void> {
   const tokens = await request<Tokens>("/auth/login", {
     method: "POST",
@@ -144,19 +174,75 @@ export function createMdr(payload: Record<string, unknown>): Promise<MDRRecord> 
   });
 }
 
+export function updateMdr(mdrId: number, payload: Record<string, unknown>): Promise<MDRRecord> {
+  return request<MDRRecord>(`/mdr/${mdrId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteMdr(mdrId: number): Promise<void> {
+  return request<void>(`/mdr/${mdrId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function downloadMdrTemplate(projectCode: string): Promise<void> {
+  const blob = await requestBlob(`/mdr/template?project_code=${encodeURIComponent(projectCode)}`);
+  downloadBlob(blob, `mdr_template_${projectCode}.xlsx`);
+}
+
+export async function exportMdr(projectCode: string): Promise<void> {
+  const blob = await requestBlob(`/mdr/export?project_code=${encodeURIComponent(projectCode)}`);
+  downloadBlob(blob, `mdr_export_${projectCode}.xlsx`);
+}
+
+export function importMdr(projectCode: string, file: File, dryRun = false): Promise<MdrImportResult> {
+  const body = new FormData();
+  body.append("file", file);
+  return request<MdrImportResult>(
+    `/mdr/import?project_code=${encodeURIComponent(projectCode)}&dry_run=${dryRun ? "true" : "false"}`,
+    {
+      method: "POST",
+      body,
+    },
+  );
+}
+
 export function composeMdrCipher(payload: {
   project_code: string;
-  originator_code: string;
-  category: string;
-  title_object: string;
-  discipline_code: string;
-  doc_type: string;
-  serial_number: string;
+  category?: string;
+  values?: Record<string, string>;
+  originator_code?: string;
+  title_object?: string;
+  discipline_code?: string;
+  doc_type?: string;
+  serial_number?: string;
 }): Promise<{ cipher: string; rule: string }> {
   return request<{ cipher: string; rule: string }>("/mdr/compose-cipher", {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export function getCipherTemplate(projectCode: string, category: string): Promise<CipherTemplate | null> {
+  return request<CipherTemplate | null>(
+    `/mdr/cipher-template?project_code=${encodeURIComponent(projectCode)}&category=${encodeURIComponent(category)}`,
+  );
+}
+
+export function upsertCipherTemplate(
+  projectCode: string,
+  category: string,
+  fields: CipherTemplateField[],
+): Promise<CipherTemplate> {
+  return request<CipherTemplate>(
+    `/mdr/cipher-template?project_code=${encodeURIComponent(projectCode)}&category=${encodeURIComponent(category)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ fields }),
+    },
+  );
 }
 
 export function checkMdrCipher(projectCode: string, value: string): Promise<{ exists: boolean }> {
@@ -167,6 +253,27 @@ export function checkMdrCipher(projectCode: string, value: string): Promise<{ ex
 
 export function listDocuments(): Promise<DocumentItem[]> {
   return request<DocumentItem[]>("/documents");
+}
+
+export function listDocumentsRegistry(filters?: {
+  project_code?: string;
+  category?: string;
+  discipline_code?: string;
+  release_status?: string;
+  revision_status?: string;
+  comments_scope?: "ANY" | "OPEN" | "NONE";
+  overdue_only?: boolean;
+}): Promise<DocumentRegistryItem[]> {
+  const search = new URLSearchParams();
+  if (filters?.project_code) search.set("project_code", filters.project_code);
+  if (filters?.category) search.set("category", filters.category);
+  if (filters?.discipline_code) search.set("discipline_code", filters.discipline_code);
+  if (filters?.release_status) search.set("release_status", filters.release_status);
+  if (filters?.revision_status) search.set("revision_status", filters.revision_status);
+  if (filters?.comments_scope) search.set("comments_scope", filters.comments_scope);
+  if (filters?.overdue_only) search.set("overdue_only", "true");
+  const suffix = search.toString() ? `?${search.toString()}` : "";
+  return request<DocumentRegistryItem[]>(`/documents/registry${suffix}`);
 }
 
 export function createDocument(payload: Record<string, unknown>): Promise<DocumentItem> {
@@ -197,6 +304,15 @@ export function processRevisionTdoDecision(
   });
 }
 
+export function processRevisionsTdoDecisionBulk(
+  payload: { revision_ids: number[]; action: "SEND_TO_OWNER" | "CANCELLED"; note?: string },
+): Promise<Revision[]> {
+  return request<Revision[]>("/revisions/tdo-decision/bulk", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function listTdoQueue(): Promise<TdoQueueItem[]> {
   return request<TdoQueueItem[]>("/revisions/tdo-queue");
 }
@@ -211,6 +327,24 @@ export function listRevisionsOverview(): Promise<RevisionOverviewItem[]> {
 
 export function listComments(revisionId: number): Promise<CommentItem[]> {
   return request<CommentItem[]>(`/revisions/${revisionId}/comments`);
+}
+
+export function setRevisionReviewCode(revisionId: number, reviewCode: "AP"): Promise<Revision> {
+  return request<Revision>(`/revisions/${revisionId}/review-code`, {
+    method: "POST",
+    body: JSON.stringify({ review_code: reviewCode }),
+  });
+}
+
+export function listCarryDecisions(revisionId: number): Promise<CarryDecisionItem[]> {
+  return request<CarryDecisionItem[]>(`/revisions/${revisionId}/carry-decisions`);
+}
+
+export function setCarryDecision(revisionId: number, payload: { source_comment_id: number; status: "OPEN" | "CLOSED" }): Promise<CarryDecisionItem> {
+  return request<CarryDecisionItem>(`/revisions/${revisionId}/carry-decisions`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function createComment(payload: Record<string, unknown>): Promise<CommentItem> {
@@ -236,7 +370,10 @@ export function publishComment(commentId: number): Promise<CommentItem> {
   });
 }
 
-export function ownerCommentDecision(commentId: number, payload: { action: "PUBLISH" | "REJECT"; note?: string }): Promise<CommentItem> {
+export function ownerCommentDecision(
+  commentId: number,
+  payload: { action: "PUBLISH" | "REJECT" | "WITHDRAW" | "UPDATE"; note?: string; text?: string; review_code?: "RJ" | "AP" | "CO" | "AN" },
+): Promise<CommentItem> {
   return request<CommentItem>(`/comments/${commentId}/owner-decision`, {
     method: "POST",
     body: JSON.stringify(payload),
@@ -246,6 +383,23 @@ export function ownerCommentDecision(commentId: number, payload: { action: "PUBL
 export function publishAllCommentsForRevision(revisionId: number): Promise<{ revision_id: number; published_count: number }> {
   return request<{ revision_id: number; published_count: number }>(`/revisions/${revisionId}/comments/publish-all`, {
     method: "POST",
+  });
+}
+
+export function listCrsQueue(): Promise<CsrQueueItem[]> {
+  return request<CsrQueueItem[]>("/comments/crs-queue");
+}
+
+export function addCommentToCrs(commentId: number): Promise<CommentItem> {
+  return request<CommentItem>(`/comments/${commentId}/add-to-crs`, {
+    method: "POST",
+  });
+}
+
+export function sendCrsComments(commentIds: number[]): Promise<{ revision_id: number; published_count: number }> {
+  return request<{ revision_id: number; published_count: number }>("/comments/crs-send", {
+    method: "POST",
+    body: JSON.stringify({ comment_ids: commentIds }),
   });
 }
 
@@ -450,6 +604,46 @@ export function uploadRevisionPdf(revisionId: number, file: File): Promise<{
   });
 }
 
+export function listDocumentAttachments(documentId: number): Promise<DocumentAttachmentItem[]> {
+  return request<DocumentAttachmentItem[]>(`/documents/${documentId}/attachments`);
+}
+
+export function uploadDocumentAttachment(documentId: number, file: File): Promise<DocumentAttachmentItem> {
+  const body = new FormData();
+  body.append("file", file);
+  return request<DocumentAttachmentItem>(`/documents/${documentId}/attachments`, {
+    method: "POST",
+    body,
+  });
+}
+
+export function listRevisionAttachments(revisionId: number): Promise<DocumentAttachmentItem[]> {
+  return request<DocumentAttachmentItem[]>(`/revisions/${revisionId}/attachments`);
+}
+
+export function uploadRevisionAttachment(revisionId: number, file: File): Promise<DocumentAttachmentItem> {
+  const body = new FormData();
+  body.append("file", file);
+  return request<DocumentAttachmentItem>(`/revisions/${revisionId}/attachments`, {
+    method: "POST",
+    body,
+  });
+}
+
+export function getDocumentAttachmentsArchiveUrl(documentId: number): string {
+  return `${PREFIX}/documents/${documentId}/attachments/archive`;
+}
+
+export async function downloadDocumentAttachmentsArchive(documentId: number, documentNum: string): Promise<void> {
+  const blob = await requestBlob(`/documents/${documentId}/attachments/archive`);
+  downloadBlob(blob, `${documentNum}_files.zip`);
+}
+
+export async function downloadRevisionAttachmentsArchive(revisionId: number, documentNum: string): Promise<void> {
+  const blob = await requestBlob(`/revisions/${revisionId}/attachments/archive`);
+  downloadBlob(blob, `${documentNum}_files.zip`);
+}
+
 export function getRevisionPdfUrl(revisionId: number): string {
   return `${PREFIX}/revisions/${revisionId}/file`;
 }
@@ -465,10 +659,25 @@ export function listProjects(): Promise<ProjectItem[]> {
 export function createProject(payload: {
   code: string;
   name: string;
+  document_category: string;
   description?: string;
 }): Promise<ProjectItem> {
   return request<ProjectItem>("/projects", {
     method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateProject(
+  projectId: number,
+  payload: {
+    name?: string;
+    description?: string;
+    document_category?: string;
+  },
+): Promise<ProjectItem> {
+  return request<ProjectItem>(`/projects/${projectId}`, {
+    method: "PUT",
     body: JSON.stringify(payload),
   });
 }
@@ -510,6 +719,28 @@ export function deleteProjectMember(projectId: number, memberId: number): Promis
 export function listProjectReferences(projectId: number, refType?: string): Promise<ProjectReference[]> {
   const suffix = refType ? `?ref_type=${encodeURIComponent(refType)}` : "";
   return request<ProjectReference[]>(`/projects/${projectId}/references${suffix}`);
+}
+
+export async function downloadProjectReferencesTemplate(projectId: number, refType: string): Promise<void> {
+  const blob = await requestBlob(`/projects/${projectId}/references/template?ref_type=${encodeURIComponent(refType)}`);
+  downloadBlob(blob, `project_references_template_${refType}.xlsx`);
+}
+
+export async function exportProjectReferences(projectId: number, refType: string): Promise<void> {
+  const blob = await requestBlob(`/projects/${projectId}/references/export?ref_type=${encodeURIComponent(refType)}`);
+  downloadBlob(blob, `project_references_${refType}.xlsx`);
+}
+
+export function importProjectReferences(projectId: number, refType: string, file: File): Promise<{ imported: number; updated: number }> {
+  const body = new FormData();
+  body.append("file", file);
+  return request<{ imported: number; updated: number }>(
+    `/projects/${projectId}/references/import?ref_type=${encodeURIComponent(refType)}`,
+    {
+      method: "POST",
+      body,
+    },
+  );
 }
 
 export function createProjectReference(

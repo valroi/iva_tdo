@@ -11,7 +11,7 @@ import {
   RevisionStatusCell,
   contractorNeedsPdfReupload,
 } from "../utils/revisionHints";
-import { getRemarksSummaryLabel } from "../utils/revisionProcess";
+import { getDisplayRevisionCode, getRemarksSummaryLabel } from "../utils/revisionProcess";
 
 interface Props {
   currentUser: User;
@@ -115,7 +115,12 @@ export default function DocumentsRegistryPage({ currentUser, onOpenRevision, pre
   ];
 
   const revisionColumns: ColumnsType<RegistryRevisionItem> = [
-    { title: "Рев", dataIndex: "revision_code", width: 80, ellipsis: true },
+    {
+      title: "Рев",
+      width: 80,
+      ellipsis: true,
+      render: (_, row) => getDisplayRevisionCode(row),
+    },
     { title: "Цель", dataIndex: "issue_purpose", width: 100, ellipsis: true },
     {
       title: "Статус",
@@ -127,18 +132,9 @@ export default function DocumentsRegistryPage({ currentUser, onOpenRevision, pre
       title: "Статус по замечаниям",
       width: 190,
       render: (_, row) => {
-        const calculated = getRemarksSummaryLabel(row.comments as never, row.review_code);
-        if (calculated !== "Нет замечаний") return calculated;
-        const codes = new Set(
-          row.comments
-            .map((item) => (item as unknown as { review_code?: string | null }).review_code)
-            .filter((code): code is "AP" | "AN" | "CO" | "RJ" => code === "AP" || code === "AN" || code === "CO" || code === "RJ"),
-        );
-        if (codes.has("RJ")) return "RJ";
-        if (codes.has("CO")) return "CO";
-        if (codes.has("AN")) return "AN";
-        if (codes.has("AP")) return "AP";
-        return calculated;
+        // Registry must match the revision card status source exactly.
+        if (row.review_code) return row.review_code;
+        return getRemarksSummaryLabel(row.comments as never, row.review_code);
       },
     },
     {

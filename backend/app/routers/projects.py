@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+from io import BytesIO
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import File, UploadFile
+from fastapi.responses import StreamingResponse
+from openpyxl import Workbook, load_workbook
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -250,9 +255,11 @@ REVIEW_SLA_DAYS: list[tuple[str, str]] = [
 ]
 
 
-def _default_project_references() -> list[tuple[str, str, str]]:
+def _default_project_references(selected_document_category: str) -> list[tuple[str, str, str]]:
     refs: list[tuple[str, str, str]] = []
-    refs.extend(("document_category", code, value) for code, value in DOCUMENT_CATEGORIES)
+    refs.extend(
+        ("document_category", code, value) for code, value in DOCUMENT_CATEGORIES if code == selected_document_category
+    )
     refs.extend(("numbering_attribute", code, value) for code, value in NUMBERING_ATTRIBUTES)
     refs.extend(("document_type", code, value) for code, value in DOCUMENT_TYPES)
     refs.extend(("discipline", code, value) for code, value in DISCIPLINES)
@@ -261,6 +268,11 @@ def _default_project_references() -> list[tuple[str, str, str]]:
     refs.extend(("equipment_type", code, value) for code, value in EQUIPMENT_TYPE_CODES)
     refs.extend(("identifier_pattern", code, value) for code, value in IDENTIFIER_PATTERNS)
     refs.extend(("review_sla_days", code, value) for code, value in REVIEW_SLA_DAYS)
+    refs.extend(
+        [
+            ("other", "TRM_RECEIVER_COMPANY_CODE", "IVA"),
+        ]
+    )
     return refs
 
 
@@ -307,6 +319,7 @@ def _project_member_read(member: ProjectMember, db: Session) -> ProjectMemberRea
         update={
             "user_email": linked.email if linked else None,
             "user_full_name": linked.full_name if linked else None,
+            "user_company_type": linked.company_type if linked else None,
         }
     )
 
@@ -319,6 +332,35 @@ def _review_matrix_read(item: ReviewMatrixMember, db: Session) -> ReviewMatrixMe
             "user_full_name": linked.full_name if linked else None,
         }
     )
+
+
+def _validate_mark_discipline_mapping(
+    db: Session,
+    *,
+    project_id: int,
+    discipline_code: str,
+    mark_code: str,
+) -> None:
+    mapping = (
+        db.query(ProjectReference)
+        .filter(
+            ProjectReference.project_id == project_id,
+            ProjectReference.ref_type == "mark_discipline",
+            ProjectReference.code == mark_code,
+            ProjectReference.is_active.is_(True),
+        )
+        .first()
+    )
+    if mapping is None:
+        return
+    if (mapping.value or "").strip().upper() != (discipline_code or "").strip().upper():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Mark {mark_code} is mapped to discipline {mapping.value}. "
+                f"Use matching discipline for LR/R assignment."
+            ),
+        )
 
 
 @router.get("", response_model=list[ProjectRead])
@@ -344,16 +386,22 @@ def create_project(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not has_permission(current_user, "can_manage_projects"):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Project management permission required")
+    if current_user.role.value != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admin can create projects")
 
     existing = db.query(Project).filter(Project.code == payload.code).first()
     if existing is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Project code already exists")
 
+    selected_category = payload.document_category.upper().strip()
+    category_exists = any(code == selected_category for code, _ in DOCUMENT_CATEGORIES)
+    if not category_exists:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown document_category")
+
     project = Project(
         code=payload.code,
         name=payload.name,
+        document_category=selected_category,
         description=payload.description,
         created_by_id=current_user.id,
     )
@@ -369,7 +417,7 @@ def create_project(
         )
     )
 
-    for ref_type, code, value in _default_project_references():
+    for ref_type, code, value in _default_project_references(selected_category):
         db.add(
             ProjectReference(
                 project_id=project.id,
@@ -392,11 +440,45 @@ def update_project(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not has_permission(current_user, "can_manage_projects"):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Project management permission required")
+    if current_user.role.value != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admin can edit projects")
 
     project = _get_project_or_404(db, project_id)
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    changes = payload.model_dump(exclude_unset=True)
+
+    if "document_category" in changes and changes["document_category"] is not None:
+        selected_category = str(changes["document_category"]).upper().strip()
+        category_exists = any(code == selected_category for code, _ in DOCUMENT_CATEGORIES)
+        if not category_exists:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown document_category")
+
+        mismatched_mdr = (
+            db.query(MDRRecord.id)
+            .filter(MDRRecord.project_code == project.code, MDRRecord.category != selected_category)
+            .first()
+        )
+        if mismatched_mdr is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot change category: project already has MDR records with another category",
+            )
+        changes["document_category"] = selected_category
+
+        db.query(ProjectReference).filter(
+            ProjectReference.project_id == project.id, ProjectReference.ref_type == "document_category"
+        ).delete(synchronize_session=False)
+        selected_value = next((value for code, value in DOCUMENT_CATEGORIES if code == selected_category), selected_category)
+        db.add(
+            ProjectReference(
+                project_id=project.id,
+                ref_type="document_category",
+                code=selected_category,
+                value=selected_value,
+                is_active=True,
+            )
+        )
+
+    for field, value in changes.items():
         setattr(project, field, value)
 
     db.add(project)
@@ -646,6 +728,116 @@ def create_project_reference(
     return item
 
 
+@router.get("/{project_id}/references/template")
+def download_project_references_template(
+    project_id: int,
+    ref_type: str = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _ensure_project_access(db, project_id, current_user)
+    _get_project_or_404(db, project_id)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "references"
+    ws.append(["ref_type", "code", "value", "is_active"])
+    ws.append([ref_type, "EXAMPLE_CODE", "Example value", True])
+    stream = BytesIO()
+    wb.save(stream)
+    stream.seek(0)
+    return StreamingResponse(
+        stream,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="project_references_template_{ref_type}.xlsx"'},
+    )
+
+
+@router.get("/{project_id}/references/export")
+def export_project_references(
+    project_id: int,
+    ref_type: str = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _ensure_project_access(db, project_id, current_user)
+    _get_project_or_404(db, project_id)
+    refs = (
+        db.query(ProjectReference)
+        .filter(ProjectReference.project_id == project_id, ProjectReference.ref_type == ref_type)
+        .order_by(ProjectReference.code.asc())
+        .all()
+    )
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "references"
+    ws.append(["ref_type", "code", "value", "is_active"])
+    for item in refs:
+        ws.append([item.ref_type, item.code, item.value, item.is_active])
+    stream = BytesIO()
+    wb.save(stream)
+    stream.seek(0)
+    return StreamingResponse(
+        stream,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="project_references_{ref_type}.xlsx"'},
+    )
+
+
+@router.post("/{project_id}/references/import")
+def import_project_references(
+    project_id: int,
+    ref_type: str = Query(...),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not has_permission(current_user, "can_edit_project_references"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Reference edit permission required")
+    _get_project_or_404(db, project_id)
+    raw = file.file.read()
+    wb = load_workbook(BytesIO(raw))
+    ws = wb.active
+    imported = 0
+    updated = 0
+    for idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        row_ref_type = str(row[0] or "").strip()
+        code = str(row[1] or "").strip()
+        value = str(row[2] or "").strip()
+        is_active = bool(row[3]) if row[3] is not None else True
+        if not code:
+            continue
+        effective_ref_type = row_ref_type or ref_type
+        if effective_ref_type != ref_type:
+            continue
+        exists = (
+            db.query(ProjectReference)
+            .filter(
+                ProjectReference.project_id == project_id,
+                ProjectReference.ref_type == effective_ref_type,
+                ProjectReference.code == code,
+            )
+            .first()
+        )
+        if exists is None:
+            db.add(
+                ProjectReference(
+                    project_id=project_id,
+                    ref_type=effective_ref_type,
+                    code=code,
+                    value=value or code,
+                    is_active=is_active,
+                )
+            )
+            imported += 1
+        else:
+            exists.value = value or exists.value
+            exists.is_active = is_active
+            db.add(exists)
+            updated += 1
+    db.commit()
+    return {"imported": imported, "updated": updated}
+
+
 @router.put("/references/{reference_id}", response_model=ProjectReferenceRead)
 def update_project_reference(
     reference_id: int,
@@ -728,6 +920,13 @@ def create_review_matrix_item(
             detail="Only owner-side project members can be assigned to matrix",
         )
 
+    _validate_mark_discipline_mapping(
+        db,
+        project_id=project_id,
+        discipline_code=payload.discipline_code,
+        mark_code=payload.doc_type,
+    )
+
     exists = (
         db.query(ReviewMatrixMember)
         .filter(
@@ -763,6 +962,15 @@ def update_review_matrix_item(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Review matrix permission required")
     if not _can_manage_project_matrix(db, item.project_id, current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No rights to manage review matrix")
+
+    next_discipline = payload.discipline_code if payload.discipline_code is not None else item.discipline_code
+    next_mark = payload.doc_type if payload.doc_type is not None else item.doc_type
+    _validate_mark_discipline_mapping(
+        db,
+        project_id=item.project_id,
+        discipline_code=next_discipline,
+        mark_code=next_mark,
+    )
 
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(item, field, value)

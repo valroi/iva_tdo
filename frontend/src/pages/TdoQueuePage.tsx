@@ -1,9 +1,12 @@
-import { Button, Card, Modal, Space, Table, Typography, message } from "antd";
+import { Button, Card, Modal, Space, Table, Tooltip, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useState } from "react";
 
-import { listTdoQueue, processRevisionTdoDecision } from "../api";
+import { downloadRevisionAttachmentsArchive, listTdoQueue, processRevisionsTdoDecisionBulk } from "../api";
+import ProcessHint from "../components/ProcessHint";
 import type { TdoQueueItem, User } from "../types";
+import { formatDateTimeRu } from "../utils/datetime";
+import { getDisplayRevisionCode } from "../utils/revisionProcess";
 
 interface Props {
   currentUser: User;
@@ -15,6 +18,8 @@ export default function TdoQueuePage({ currentUser, onReload, onOpenRevision }: 
   const [items, setItems] = useState<TdoQueueItem[]>([]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<Array<string | number>>([]);
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [sendingBusy, setSendingBusy] = useState(false);
+  const [cancellingBusy, setCancellingBusy] = useState(false);
 
   const load = async () => {
     try {
@@ -36,27 +41,43 @@ export default function TdoQueuePage({ currentUser, onReload, onOpenRevision }: 
     { title: "Проект", dataIndex: "project_code", key: "project_code", width: 90 },
     { title: "Документ", dataIndex: "document_num", key: "document_num" },
     { title: "Название", dataIndex: "document_title", key: "document_title" },
-    { title: "Рев", dataIndex: "revision_code", key: "revision_code", width: 70 },
+    { title: "Рев", key: "revision_code", width: 70, render: (_, row) => getDisplayRevisionCode(row) },
     { title: "Цель", dataIndex: "issue_purpose", key: "issue_purpose", width: 80 },
     { title: "Статус", dataIndex: "status", key: "status", width: 220 },
-    { title: "Срок", dataIndex: "review_deadline", key: "review_deadline", width: 130 },
+    { title: "Срок", dataIndex: "review_deadline", key: "review_deadline", width: 130, render: (v: string | null) => formatDateTimeRu(v) },
     {
       title: "Ссылка",
       key: "link",
       render: (_, row) => (
-        <Button
-          size="small"
-          type="link"
-          onClick={() =>
-            onOpenRevision({
-              project_code: row.project_code,
-              document_num: row.document_num,
-              revision_id: row.revision_id,
-            })
-          }
-        >
-          Открыть ревизию
-        </Button>
+        <Space>
+          <Button
+            size="small"
+            type="link"
+            onClick={() =>
+              onOpenRevision({
+                project_code: row.project_code,
+                document_num: row.document_num,
+                revision_id: row.revision_id,
+              })
+            }
+          >
+            Открыть ревизию
+          </Button>
+          <Button
+            size="small"
+            type="link"
+            onClick={async () => {
+              try {
+                await downloadRevisionAttachmentsArchive(row.revision_id, row.document_num);
+              } catch (error: unknown) {
+                const text = error instanceof Error ? error.message : "Нет дополнительных файлов";
+                message.error(text);
+              }
+            }}
+          >
+            Файлы
+          </Button>
+        </Space>
       ),
     },
   ];
@@ -68,31 +89,57 @@ export default function TdoQueuePage({ currentUser, onReload, onOpenRevision }: 
           Очередь ТРМ подрядчика
         </Typography.Title>
         <Space>
-          <Button onClick={() => void load()}>Обновить</Button>
-          <Button
-            type="primary"
-            disabled={selectedIds.length === 0 || !currentUser.permissions.can_process_tdo_queue}
-            onClick={async () => {
-              for (const revisionId of selectedIds) {
-                await processRevisionTdoDecision(revisionId, { action: "SEND_TO_OWNER" });
-              }
-              message.success(`Отправлено заказчику: ${selectedIds.length}`);
-              setSelectedRowKeys([]);
-              await load();
-              await onReload();
-            }}
-          >
-            Сформировать TRM и отправить
-          </Button>
-          <Button
-            danger
-            disabled={selectedIds.length === 0 || !currentUser.permissions.can_process_tdo_queue}
-            onClick={() => setCancelOpen(true)}
-          >
-            Отклонить выбранные
-          </Button>
+          <Tooltip title="Обновить очередь ревизий">
+            <Button onClick={() => void load()}>Обновить</Button>
+          </Tooltip>
+          <Tooltip title="Передать выбранные ревизии заказчику (создается TRM)">
+            <Button
+              type="primary"
+              loading={sendingBusy}
+              disabled={selectedIds.length === 0 || !currentUser.permissions.can_process_tdo_queue}
+              onClick={async () => {
+                setSendingBusy(true);
+                try {
+                  await processRevisionsTdoDecisionBulk({
+                    revision_ids: selectedIds,
+                    action: "SEND_TO_OWNER",
+                  });
+                  message.success(`Отправлено заказчику: ${selectedIds.length}`);
+                } catch (error: unknown) {
+                  const text = error instanceof Error ? error.message : "Ошибка отправки TRM";
+                  message.error(text);
+                  return;
+                } finally {
+                  setSendingBusy(false);
+                }
+                setSelectedRowKeys([]);
+                await load();
+                await onReload();
+              }}
+            >
+              Сформировать TRM и отправить
+            </Button>
+          </Tooltip>
+          <Tooltip title="Вернуть выбранные ревизии подрядчику на доработку">
+            <Button
+              danger
+              disabled={selectedIds.length === 0 || !currentUser.permissions.can_process_tdo_queue}
+              onClick={() => setCancelOpen(true)}
+            >
+              Отклонить выбранные
+            </Button>
+          </Tooltip>
         </Space>
       </Space>
+      <ProcessHint
+        style={{ marginBottom: 12 }}
+        title="Как работать с очередью ТРМ"
+        steps={[
+          "Отметьте ревизии, которые готовы к передаче заказчику.",
+          "Нажмите «Сформировать TRM и отправить» для выбранных строк.",
+          "Если нужна доработка, выберите ревизии и нажмите «Отклонить выбранные».",
+        ]}
+      />
 
       <Card>
         <Table
@@ -105,21 +152,31 @@ export default function TdoQueuePage({ currentUser, onReload, onOpenRevision }: 
           }}
           pagination={{ pageSize: 10 }}
           scroll={{ x: "max-content" }}
+          locale={{ emptyText: "Очередь пуста. Новые ревизии появятся после загрузки подрядчиком." }}
         />
       </Card>
 
       <Modal
         open={cancelOpen}
         title="Отклонить выбранные ревизии"
+        confirmLoading={cancellingBusy}
         onCancel={() => setCancelOpen(false)}
         onOk={async () => {
-          for (const revisionId of selectedIds) {
-            await processRevisionTdoDecision(revisionId, {
+          setCancellingBusy(true);
+          try {
+            await processRevisionsTdoDecisionBulk({
+              revision_ids: selectedIds,
               action: "CANCELLED",
               note: "Отклонено руководителем ТДО, требуется доработка",
             });
+            message.success(`Отклонено: ${selectedIds.length}`);
+          } catch (error: unknown) {
+            const text = error instanceof Error ? error.message : "Ошибка отклонения ревизий";
+            message.error(text);
+            return;
+          } finally {
+            setCancellingBusy(false);
           }
-          message.success(`Отклонено: ${selectedIds.length}`);
           setCancelOpen(false);
           setSelectedRowKeys([]);
           await load();
