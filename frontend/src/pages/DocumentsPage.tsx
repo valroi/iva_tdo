@@ -491,18 +491,36 @@ export default function DocumentsPage({
   }, [latestRevision?.id]);
 
   useEffect(() => {
-    if (!selectedRevisionId || !canManageCarryOver) return;
-    listCarryDecisions(selectedRevisionId)
-      .then((items) => {
-        const closed = items.filter((item) => item.status === "CLOSED").map((item) => item.source_comment_id);
+    if (!selectedRevisionId || !canManageCarryOver || !selectedRevision) return;
+    const targetRevisionIds = revisions
+      .filter((rev) => isOlderRevision(rev, selectedRevision) || rev.id === selectedRevisionId)
+      .map((rev) => rev.id);
+    if (!targetRevisionIds.length) {
+      setCarryClosedByRevision((prev) => ({ ...prev, [selectedRevisionId]: [] }));
+      setCarryDecisionsByRevision((prev) => ({ ...prev, [selectedRevisionId]: [] }));
+      return;
+    }
+    Promise.all(targetRevisionIds.map(async (id) => listCarryDecisions(id).catch(() => [] as CarryDecisionItem[])))
+      .then((groups) => {
+        const all = groups.flat();
+        const latestBySource = new Map<number, CarryDecisionItem>();
+        const ordered = [...all].sort((a, b) => {
+          if (a.decided_at === b.decided_at) return a.id - b.id;
+          return a.decided_at < b.decided_at ? -1 : 1;
+        });
+        for (const item of ordered) {
+          latestBySource.set(item.source_comment_id, item);
+        }
+        const merged = Array.from(latestBySource.values());
+        const closed = merged.filter((item) => item.status === "CLOSED").map((item) => item.source_comment_id);
         setCarryClosedByRevision((prev) => ({ ...prev, [selectedRevisionId]: closed }));
-        setCarryDecisionsByRevision((prev) => ({ ...prev, [selectedRevisionId]: items }));
+        setCarryDecisionsByRevision((prev) => ({ ...prev, [selectedRevisionId]: merged }));
       })
       .catch(() => {
         setCarryClosedByRevision((prev) => ({ ...prev, [selectedRevisionId]: [] }));
         setCarryDecisionsByRevision((prev) => ({ ...prev, [selectedRevisionId]: [] }));
       });
-  }, [selectedRevisionId, canManageCarryOver]);
+  }, [selectedRevisionId, canManageCarryOver, selectedRevision, revisions]);
 
   useEffect(() => {
     if (!selectedRevisionId) {
@@ -1352,7 +1370,12 @@ export default function DocumentsPage({
                                 width: 170,
                                 render: (_: unknown, row) => {
                                   const d = (carryDecisionsByRevision[selectedRevisionId] ?? []).find((x) => x.source_comment_id === row.id);
-                                  return d?.decided_by_name ?? d?.decided_by_email ?? "—";
+                                  const name = d?.decided_by_name ?? d?.decided_by_email ?? "—";
+                                  return (
+                                    <Typography.Text ellipsis={{ tooltip: name }} style={{ maxWidth: 150, whiteSpace: "nowrap" }}>
+                                      {name}
+                                    </Typography.Text>
+                                  );
                                 },
                               },
                               {
@@ -1421,7 +1444,8 @@ export default function DocumentsPage({
                                 ),
                               },
                             ]}
-                            scroll={{ x: "max-content", y: 180 }}
+                            scroll={{ x: 980, y: 180 }}
+                            tableLayout="fixed"
                           />
                         ),
                       },
@@ -1445,7 +1469,12 @@ export default function DocumentsPage({
                                 width: 170,
                                 render: (_: unknown, row) => {
                                   const d = (carryDecisionsByRevision[selectedRevisionId] ?? []).find((x) => x.source_comment_id === row.id);
-                                  return d?.decided_by_name ?? d?.decided_by_email ?? "—";
+                                  const name = d?.decided_by_name ?? d?.decided_by_email ?? "—";
+                                  return (
+                                    <Typography.Text ellipsis={{ tooltip: name }} style={{ maxWidth: 150, whiteSpace: "nowrap" }}>
+                                      {name}
+                                    </Typography.Text>
+                                  );
                                 },
                               },
                               {
@@ -1462,7 +1491,8 @@ export default function DocumentsPage({
                                 render: () => <Typography.Text type="secondary">Зафиксировано</Typography.Text>,
                               },
                             ]}
-                            scroll={{ x: "max-content", y: 180 }}
+                            scroll={{ x: 980, y: 180 }}
+                            tableLayout="fixed"
                           />
                         ),
                       },

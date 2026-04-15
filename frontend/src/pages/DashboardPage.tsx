@@ -29,12 +29,10 @@ export default function DashboardPage({
   const activeNotifications = notifications.filter((n) => !n.is_read);
   const unread = activeNotifications.length;
   const myTasks = activeNotifications.slice(0, 12);
-  const parseCommentContext = (message: string): { author: string; status: string } => {
+  const parseCommentContext = (message: string): { author: string } => {
     const authorMatch = message.match(/Автор:\s*([^\.]+)/i);
-    const statusMatch = message.match(/Статус:\s*([^\.]+)/i);
     return {
       author: authorMatch?.[1]?.trim() ?? "—",
-      status: statusMatch?.[1]?.trim() ?? "—",
     };
   };
   const eventTitleMap: Record<string, string> = {
@@ -83,7 +81,7 @@ export default function DashboardPage({
     { title: "Появилась", dataIndex: "created_at", key: "created_at", width: 170, render: (v) => formatDateTimeRu(v) },
     { title: "Дедлайн", dataIndex: "task_deadline", key: "task_deadline", width: 130, render: (v) => formatDateTimeRu(v) },
     {
-      title: "От кого / статус",
+      title: "От кого",
       key: "author_status",
       width: 220,
       render: (_, row) => {
@@ -91,7 +89,6 @@ export default function DashboardPage({
         return (
           <Space direction="vertical" size={2}>
             <Typography.Text type="secondary">Автор: {meta.author}</Typography.Text>
-            <Typography.Text type="secondary">Статус: {meta.status}</Typography.Text>
           </Space>
         );
       },

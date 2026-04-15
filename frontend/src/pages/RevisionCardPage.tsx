@@ -97,6 +97,21 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
   const canManageCarryOver = currentUser.role === "admin" || currentUser.company_type === "owner";
   const canCommentOnSelectedRevision =
     selectedRevision?.status === "UNDER_REVIEW" || selectedRevision?.status === "OWNER_COMMENTS_SENT";
+  const getRevisionRemarksStatus = (revisionId: number, comments: CommentItem[]): string => {
+    const revisionReviewCode = (card?.revisions.find((rev) => rev.id === revisionId)?.review_code as string | null | undefined) ?? null;
+    if (revisionReviewCode) return revisionReviewCode;
+    const codes = new Set(
+      comments
+        .map((item) => item.review_code)
+        .filter((code): code is "AP" | "AN" | "CO" | "RJ" => code === "AP" || code === "AN" || code === "CO" || code === "RJ"),
+    );
+    if (codes.has("RJ")) return "RJ";
+    if (codes.has("CO")) return "CO";
+    if (codes.has("AN")) return "AN";
+    if (codes.has("AP")) return "AP";
+    const fallback = getRemarksSummaryLabel(comments, revisionReviewCode);
+    return fallback === "Нет замечаний" ? "—" : fallback;
+  };
   const formatDateRu = (value: string | null | undefined): string => {
     if (!value) return "—";
     const dt = new Date(value);
@@ -143,17 +158,28 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
 
   useEffect(() => {
     if (!selectedRevisionId || !canManageCarryOver) return;
-    listCarryDecisions(selectedRevisionId)
-      .then((items) => {
-        setCarryDecisionsByRevision((prev) => ({ ...prev, [selectedRevisionId]: items }));
-        const closed = items.filter((item) => item.status === "CLOSED").map((item) => item.source_comment_id);
+    const selectedIdx = filteredHistory.findIndex((item) => item.revision_id === selectedRevisionId);
+    if (selectedIdx < 0) return;
+    const targetRevisionIds = filteredHistory.slice(0, selectedIdx + 1).map((item) => item.revision_id);
+    Promise.all(targetRevisionIds.map(async (id) => listCarryDecisions(id).catch(() => [] as CarryDecisionItem[])))
+      .then((groups) => {
+        const all = groups.flat();
+        const latestBySource = new Map<number, CarryDecisionItem>();
+        const ordered = [...all].sort((a, b) => {
+          if (a.decided_at === b.decided_at) return a.id - b.id;
+          return a.decided_at < b.decided_at ? -1 : 1;
+        });
+        for (const item of ordered) latestBySource.set(item.source_comment_id, item);
+        const merged = Array.from(latestBySource.values());
+        setCarryDecisionsByRevision((prev) => ({ ...prev, [selectedRevisionId]: merged }));
+        const closed = merged.filter((item) => item.status === "CLOSED").map((item) => item.source_comment_id);
         setCarryClosedByRevision((prev) => ({ ...prev, [selectedRevisionId]: closed }));
       })
       .catch(() => {
         setCarryDecisionsByRevision((prev) => ({ ...prev, [selectedRevisionId]: [] }));
         setCarryClosedByRevision((prev) => ({ ...prev, [selectedRevisionId]: [] }));
       });
-  }, [selectedRevisionId, canManageCarryOver]);
+  }, [selectedRevisionId, canManageCarryOver, filteredHistory]);
 
   return (
     <div>
@@ -604,7 +630,19 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                               },
                               { title: "Код", key: "review_code", width: 90, render: (_, item) => item.review_code ?? "—" },
                               { title: "Текст", dataIndex: "text" },
-                              { title: "Автор", key: "author", width: 180, render: (_, item) => item.author_name ?? item.author_email ?? "—" },
+                              {
+                                title: "Автор",
+                                key: "author",
+                                width: 180,
+                                render: (_, item) => {
+                                  const name = item.author_name ?? item.author_email ?? "—";
+                                  return (
+                                    <Typography.Text ellipsis={{ tooltip: name }} style={{ maxWidth: 160, whiteSpace: "nowrap" }}>
+                                      {name}
+                                    </Typography.Text>
+                                  );
+                                },
+                              },
                               {
                                 title: "Кем подтверждено",
                                 width: 180,
@@ -680,7 +718,8 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                                 ),
                               },
                             ]}
-                            scroll={{ x: 900, y: 220 }}
+                            scroll={{ x: 980, y: 220 }}
+                            tableLayout="fixed"
                           />
                         ),
                       },
@@ -702,7 +741,19 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                               },
                               { title: "Код", key: "review_code", width: 90, render: (_, item) => item.review_code ?? "—" },
                               { title: "Текст", dataIndex: "text" },
-                              { title: "Автор", key: "author", width: 180, render: (_, item) => item.author_name ?? item.author_email ?? "—" },
+                              {
+                                title: "Автор",
+                                key: "author",
+                                width: 180,
+                                render: (_, item) => {
+                                  const name = item.author_name ?? item.author_email ?? "—";
+                                  return (
+                                    <Typography.Text ellipsis={{ tooltip: name }} style={{ maxWidth: 160, whiteSpace: "nowrap" }}>
+                                      {name}
+                                    </Typography.Text>
+                                  );
+                                },
+                              },
                               {
                                 title: "Кем подтверждено",
                                 width: 180,
@@ -725,7 +776,8 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                                 render: () => <Typography.Text type="secondary">Зафиксировано</Typography.Text>,
                               },
                             ]}
-                            scroll={{ x: 900, y: 220 }}
+                            scroll={{ x: 980, y: 220 }}
+                            tableLayout="fixed"
                           />
                         ),
                       },
@@ -749,7 +801,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                 <Space direction="vertical" size={2}>
                   <RevisionStatusCell currentUser={currentUser} status={v} />
                   <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    Код замечаний: {getRemarksSummaryLabel(row.comments, (card?.revisions.find((rev) => rev.id === row.revision_id)?.review_code as string | null | undefined) ?? null)}
+                    Код замечаний: {getRevisionRemarksStatus(row.revision_id, row.comments)}
                   </Typography.Text>
                 </Space>
               ),

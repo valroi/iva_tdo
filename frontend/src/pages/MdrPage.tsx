@@ -188,12 +188,6 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
       render: (value: MDRRecord["review_code"]) => (value ? <Tag>{value}</Tag> : "—"),
     },
     { title: "Вес", dataIndex: "doc_weight", key: "doc_weight" },
-    {
-      title: "Статус",
-      dataIndex: "status",
-      key: "status",
-      render: (value: string) => (value === "DRAFT" ? "Черновик" : value),
-    },
     ...(canManageMdr
       ? [
           {
@@ -701,7 +695,7 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
           <Form.Item name="doc_name" label="Наименование" rules={[{ required: true }]}>
             <Input placeholder="Piping layout" />
           </Form.Item>
-          <Form.Item name="planned_dev_start" label="Плановая дата начала разработки">
+          <Form.Item name="planned_dev_start" label="План выдачи ревизии A">
             <Input type="date" />
           </Form.Item>
           <Form.Item
