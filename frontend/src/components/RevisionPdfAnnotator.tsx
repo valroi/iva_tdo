@@ -5,7 +5,8 @@ import { Document, Page, pdfjs } from "react-pdf";
 import { addCommentToCrs, createComment, getAuthHeaders, getRevisionPdfUrl, ownerCommentDecision, respondToComment } from "../api";
 import type { CommentItem } from "../types";
 
-pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+const workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+pdfjs.GlobalWorkerOptions.workerSrc = `${workerSrc}?v=${pdfjs.version}`;
 
 interface Props {
   revisionId: number | null;
