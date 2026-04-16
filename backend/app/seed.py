@@ -261,46 +261,49 @@ def seed_default_data(db: Session) -> None:
             upsert_ref("mark", mark_code, mark_name)
             upsert_ref("mark_discipline", mark_code, discipline_code)
 
-    demo_users = [
-        ("tdolead_ctr@mail.ru", "Contractor TDO Lead", CompanyType.contractor),
-        ("dev_ctr@mail.ru", "Contractor Developer", CompanyType.contractor),
-        ("owner_lr@mail.ru", "Owner Lead Reviewer", CompanyType.owner),
-        ("owner_rev@mail.ru", "Owner Reviewer", CompanyType.owner),
-    ]
     demo_user_by_email: dict[str, User] = {}
 
-    for email, full_name, company_type in demo_users:
-        user = db.query(User).filter(User.email == email).first()
-        if user is None:
-            user = User(
-                email=email,
-                hashed_password=get_password_hash("Password_123!"),
-                full_name=full_name,
-                company_code=("CTR" if company_type == CompanyType.contractor else "OWN"),
-                company_type=company_type,
-                role=UserRole.user,
-                permissions=default_permissions_for_role(UserRole.user),
-                is_active=True,
-            )
-            db.add(user)
-        else:
-            user.hashed_password = get_password_hash("Password_123!")
-            user.full_name = full_name
-            user.company_type = company_type
-            user.company_code = user.company_code or ("CTR" if company_type == CompanyType.contractor else "OWN")
-            user.role = UserRole.user
-            user.permissions = DEMO_ROLE_PRESET_PERMISSIONS.get(email, default_permissions_for_role(UserRole.user))
-            user.is_active = True
-            db.add(user)
-        if user is not None:
-            user.permissions = DEMO_ROLE_PRESET_PERMISSIONS.get(email, default_permissions_for_role(UserRole.user))
-            db.add(user)
-            demo_user_by_email[email] = user
+    if settings.seed_demo_users:
+        demo_users = [
+            ("tdolead_ctr@mail.ru", "Contractor TDO Lead", CompanyType.contractor),
+            ("dev_ctr@mail.ru", "Contractor Developer", CompanyType.contractor),
+            ("owner_lr@mail.ru", "Owner Lead Reviewer", CompanyType.owner),
+            ("owner_rev@mail.ru", "Owner Reviewer", CompanyType.owner),
+        ]
+        for email, full_name, company_type in demo_users:
+            user = db.query(User).filter(User.email == email).first()
+            if user is None:
+                user = User(
+                    email=email,
+                    hashed_password=get_password_hash("Password_123!"),
+                    full_name=full_name,
+                    company_code=("CTR" if company_type == CompanyType.contractor else "OWN"),
+                    company_type=company_type,
+                    role=UserRole.user,
+                    permissions=default_permissions_for_role(UserRole.user),
+                    is_active=True,
+                )
+                db.add(user)
+            else:
+                user.hashed_password = get_password_hash("Password_123!")
+                user.full_name = full_name
+                user.company_type = company_type
+                user.company_code = user.company_code or ("CTR" if company_type == CompanyType.contractor else "OWN")
+                user.role = UserRole.user
+                user.permissions = DEMO_ROLE_PRESET_PERMISSIONS.get(email, default_permissions_for_role(UserRole.user))
+                user.is_active = True
+                db.add(user)
+            if user is not None:
+                user.permissions = DEMO_ROLE_PRESET_PERMISSIONS.get(email, default_permissions_for_role(UserRole.user))
+                db.add(user)
+                demo_user_by_email[email] = user
+        # Ensure newly created users have IDs before creating memberships.
+        db.flush()
 
     if project is not None:
         def upsert_member(email: str, role: ProjectMemberRole, can_manage: bool = False) -> None:
             user = demo_user_by_email.get(email)
-            if user is None:
+            if user is None or user.id is None:
                 return
             item = (
                 db.query(ProjectMember)
