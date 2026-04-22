@@ -2,11 +2,9 @@ services:
   db:
     image: postgres:17-alpine
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pass}
+      POSTGRES_USER: ${POSTGRES_USER:-tdo_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-32chars-min}
       POSTGRES_DB: ${POSTGRES_DB:-tdms}
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
