@@ -1,9 +1,18 @@
 import { InboxOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Col, Form, Input, Row, Space, Typography, Upload, message } from "antd";
+import { Alert, Button, Card, Col, Form, Input, Modal, Row, Space, Tree, Typography, Upload, message } from "antd";
 import type { UploadFile } from "antd/es/upload/interface";
-import { useMemo, useState } from "react";
+import type { DataNode } from "antd/es/tree";
+import { useEffect, useMemo, useState } from "react";
 
-import { smartUploadPreview, smartUploadProcess, type SmartUploadPreviewResult, type SmartUploadProcessResult } from "../api";
+import {
+  fetchSmartUploadFileBlob,
+  listSmartUploadTree,
+  smartUploadPreview,
+  smartUploadProcess,
+  type SmartUploadPreviewResult,
+  type SmartUploadProcessResult,
+  type SmartUploadTreeNode,
+} from "../api";
 
 type FieldMap = Record<string, string>;
 
@@ -27,19 +36,29 @@ export default function DocCheckerPage(): JSX.Element {
   const [processingResult, setProcessingResult] = useState<SmartUploadProcessResult | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [loadingProcess, setLoadingProcess] = useState(false);
+  const [treeLoading, setTreeLoading] = useState(false);
+  const [treeNodes, setTreeNodes] = useState<SmartUploadTreeNode[]>([]);
+  const [previewModalOpen, setPreviewModalOpen] = useState(false);
+  const [previewPdfTitle, setPreviewPdfTitle] = useState<string>("");
+  const [previewPdfUrl, setPreviewPdfUrl] = useState<string>("");
   const [form] = Form.useForm<FieldMap>();
 
-  const previewFields = useMemo(() => {
-    if (!preview) return null;
-    const next: FieldMap = {};
-    for (const key of FIELD_ORDER) {
-      const value = preview.fields[key];
-      if (value !== null && value !== undefined) {
-        next[key] = String(value);
-      }
+  const loadTree = async () => {
+    setTreeLoading(true);
+    try {
+      const items = await listSmartUploadTree();
+      setTreeNodes(items);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "Не удалось загрузить дерево DOCchecker");
+    } finally {
+      setTreeLoading(false);
     }
-    return next;
-  }, [preview]);
+  };
+
+  useEffect(() => {
+    void loadTree();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handlePreview = async () => {
     if (!pdfFile) {
@@ -81,6 +100,7 @@ export default function DocCheckerPage(): JSX.Element {
         overrides,
       });
       setProcessingResult(result);
+      await loadTree();
       message.success("DOCchecker завершил раскладку файлов");
     } catch (error) {
       message.error(error instanceof Error ? error.message : "Не удалось обработать файлы");
@@ -98,6 +118,57 @@ export default function DocCheckerPage(): JSX.Element {
     status: "done",
     originFileObj: file,
   }));
+
+  const openPdfPreview = async (node: SmartUploadTreeNode) => {
+    try {
+      const blob = await fetchSmartUploadFileBlob(node.relative_path);
+      if (previewPdfUrl) {
+        URL.revokeObjectURL(previewPdfUrl);
+      }
+      const url = URL.createObjectURL(blob);
+      setPreviewPdfUrl(url);
+      setPreviewPdfTitle(node.name);
+      setPreviewModalOpen(true);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "Не удалось открыть PDF");
+    }
+  };
+
+  const closePdfPreview = () => {
+    setPreviewModalOpen(false);
+    if (previewPdfUrl) {
+      URL.revokeObjectURL(previewPdfUrl);
+      setPreviewPdfUrl("");
+    }
+  };
+
+  const toAntTree = (nodes: SmartUploadTreeNode[]): DataNode[] =>
+    nodes.map((node) => ({
+      key: node.relative_path,
+      title:
+        node.node_type === "file" ? (
+          <Space size={8}>
+            <Typography.Text>{node.name}</Typography.Text>
+            {node.is_pdf && (
+              <Button
+                size="small"
+                type="link"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void openPdfPreview(node);
+                }}
+              >
+                Просмотр PDF
+              </Button>
+            )}
+          </Space>
+        ) : (
+          node.name
+        ),
+      isLeaf: node.node_type === "file",
+      children: toAntTree(node.children),
+    }));
 
   return (
     <Space direction="vertical" size={16} style={{ width: "100%" }}>
@@ -195,6 +266,35 @@ export default function DocCheckerPage(): JSX.Element {
           </Space>
         </Card>
       )}
+
+      <Card
+        title="Дерево иерархии документов"
+        className="hrp-card"
+        extra={
+          <Button loading={treeLoading} onClick={() => void loadTree()}>
+            Обновить
+          </Button>
+        }
+      >
+        <Tree treeData={toAntTree(treeNodes)} defaultExpandAll />
+      </Card>
+
+      <Modal
+        title={previewPdfTitle || "Просмотр PDF"}
+        open={previewModalOpen}
+        onCancel={closePdfPreview}
+        footer={null}
+        width={1000}
+        destroyOnHidden
+      >
+        {previewPdfUrl ? (
+          <iframe
+            src={previewPdfUrl}
+            title={previewPdfTitle || "PDF preview"}
+            style={{ width: "100%", height: "75vh", border: 0 }}
+          />
+        ) : null}
+      </Modal>
     </Space>
   );
 }

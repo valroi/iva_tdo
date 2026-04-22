@@ -675,6 +675,15 @@ export interface SmartUploadProcessResult {
   related_paths: string[];
 }
 
+export interface SmartUploadTreeNode {
+  key: string;
+  name: string;
+  node_type: "directory" | "file";
+  relative_path: string;
+  is_pdf: boolean;
+  children: SmartUploadTreeNode[];
+}
+
 export function smartUploadPreview(pdf: File): Promise<SmartUploadPreviewResult> {
   const body = new FormData();
   body.append("pdf", pdf);
@@ -701,6 +710,18 @@ export function smartUploadProcess(payload: {
     method: "POST",
     body,
   });
+}
+
+export function listSmartUploadTree(): Promise<SmartUploadTreeNode[]> {
+  return request<SmartUploadTreeNode[]>("/smart-upload/tree");
+}
+
+export function getSmartUploadFileUrl(relativePath: string): string {
+  return `${PREFIX}/smart-upload/file?relative_path=${encodeURIComponent(relativePath)}`;
+}
+
+export function fetchSmartUploadFileBlob(relativePath: string): Promise<Blob> {
+  return requestBlob(`/smart-upload/file?relative_path=${encodeURIComponent(relativePath)}`);
 }
 
 export function createProject(payload: {

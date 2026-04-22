@@ -6,7 +6,8 @@ from typing import Any
 import json
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
-from pydantic import BaseModel
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 
 from app.deps import require_permissions
 from app.models import User
@@ -52,6 +53,54 @@ class SmartUploadProcessResponse(BaseModel):
     destination: str
     pdf_path: str
     related_paths: list[str]
+
+
+class SmartUploadTreeNode(BaseModel):
+    key: str
+    name: str
+    node_type: str
+    relative_path: str
+    is_pdf: bool = False
+    children: list["SmartUploadTreeNode"] = Field(default_factory=list)
+
+
+def _resolve_relative_path(relative_path: str) -> Path:
+    target = (SMART_UPLOAD_ROOT / relative_path).resolve()
+    root = SMART_UPLOAD_ROOT.resolve()
+    if root not in target.parents and target != root:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid path")
+    return target
+
+
+def _build_tree(path: Path, root: Path) -> list[SmartUploadTreeNode]:
+    if not path.exists():
+        return []
+    nodes: list[SmartUploadTreeNode] = []
+    for item in sorted(path.iterdir(), key=lambda x: (x.is_file(), x.name.lower())):
+        relative_path = str(item.relative_to(root))
+        if item.is_dir():
+            nodes.append(
+                SmartUploadTreeNode(
+                    key=relative_path,
+                    name=item.name,
+                    node_type="directory",
+                    relative_path=relative_path,
+                    children=_build_tree(item, root),
+                )
+            )
+            continue
+        is_pdf = item.suffix.lower() == ".pdf"
+        nodes.append(
+            SmartUploadTreeNode(
+                key=relative_path,
+                name=item.name,
+                node_type="file",
+                relative_path=relative_path,
+                is_pdf=is_pdf,
+                children=[],
+            )
+        )
+    return nodes
 
 
 @router.post("/preview", response_model=SmartUploadPreviewResponse)
@@ -126,3 +175,22 @@ async def process_smart_upload(
         pdf_path=stored["pdf_path"],
         related_paths=stored["related_paths"],
     )
+
+
+@router.get("/tree", response_model=list[SmartUploadTreeNode])
+def list_smart_upload_tree(
+    _: User = Depends(require_permissions("can_upload_files")),
+):
+    return _build_tree(SMART_UPLOAD_ROOT, SMART_UPLOAD_ROOT)
+
+
+@router.get("/file")
+def get_smart_upload_file(
+    relative_path: str,
+    _: User = Depends(require_permissions("can_upload_files")),
+):
+    target = _resolve_relative_path(relative_path)
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    media_type = "application/pdf" if target.suffix.lower() == ".pdf" else "application/octet-stream"
+    return FileResponse(path=target, filename=target.name, media_type=media_type)
