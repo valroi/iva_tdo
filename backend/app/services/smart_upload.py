@@ -86,6 +86,32 @@ def _extract_title(text: str) -> str | None:
     return None
 
 
+def _extract_labeled_value(text_upper: str, labels: list[str], pattern: str) -> str | None:
+    label_union = "|".join(re.escape(item) for item in labels)
+    match = re.search(rf"(?:{label_union})\s*[:\-]?\s*({pattern})", text_upper)
+    if match:
+        return match.group(1).strip().upper()
+    return None
+
+
+def _compose_full_cipher_from_components(fields: dict[str, str]) -> str | None:
+    required = ["project", "phase", "discipline", "doc_type", "serial", "revision"]
+    if any(not fields.get(key) for key in required):
+        return None
+    return "-".join(
+        [
+            fields["project"],
+            fields["phase"],
+            fields.get("unit") or "00",
+            fields.get("title_code") or "00",
+            fields["discipline"],
+            fields["doc_type"],
+            fields["serial"],
+            fields["revision"],
+        ]
+    )
+
+
 def extract_document_metadata(pdf_bytes: bytes, file_name: str) -> dict[str, Any]:
     text = _extract_text(pdf_bytes)
     source = "pdf_text"
@@ -96,30 +122,54 @@ def extract_document_metadata(pdf_bytes: bytes, file_name: str) -> dict[str, Any
     upper_text = text.upper()
     filename_without_ext = Path(file_name).stem.upper()
 
+    project = _extract_labeled_value(upper_text, ["PROJECT"], r"[A-Z0-9]{2,8}")
+    phase = _extract_labeled_value(upper_text, ["PHASE"], r"[A-Z0-9]{2,8}")
+    discipline = _extract_labeled_value(upper_text, ["DISC", "DISC.", "DISCIPLINE"], r"[A-Z0-9]{1,8}")
+    doc_type = _extract_labeled_value(upper_text, ["DOC TYPE", "DOC. TYPE"], r"[A-Z0-9]{2,8}")
+    serial = _extract_labeled_value(upper_text, ["SERIAL"], r"[A-Z0-9]{2,4}")
+    revision = _extract_labeled_value(upper_text, ["REV", "REV."], r"[A-Z0-9]{1,4}")
+
     match = FULL_CIPHER_RE.search(upper_text) or FULL_CIPHER_RE.search(filename_without_ext)
-    full_cipher = match.group(1) if match else filename_without_ext
+    if match:
+        full_cipher = match.group(1)
+    else:
+        composed = _compose_full_cipher_from_components(
+            {
+                "project": project or "",
+                "phase": phase or "",
+                "discipline": discipline or "",
+                "doc_type": doc_type or "",
+                "serial": serial or "",
+                "revision": revision or "",
+                "unit": "00",
+                "title_code": "00",
+            }
+        )
+        full_cipher = composed or filename_without_ext
     parsed = _parse_cipher(full_cipher)
     title_text = _extract_title(text)
 
     fields = {
         "full_cipher": full_cipher,
-        "project": parsed["project"],
-        "phase": parsed["phase"],
-        "document_category": parsed["document_category"],
+        "project": project or parsed["project"],
+        "phase": phase or parsed["phase"],
+        "document_category": phase or parsed["document_category"],
         "unit": parsed["unit"],
         "title_code": parsed["title_code"],
-        "discipline": parsed["discipline"],
-        "doc_type": parsed["doc_type"],
-        "serial": parsed["serial"],
-        "revision": parsed["revision"],
+        "discipline": discipline or parsed["discipline"],
+        "doc_type": doc_type or parsed["doc_type"],
+        "serial": serial or parsed["serial"],
+        "revision": revision or parsed["revision"],
         "title_text": title_text,
     }
     found_in_text = bool(match and FULL_CIPHER_RE.search(upper_text))
-    confidence = 0.98 if found_in_text else 0.72
+    composed_from_fields = not found_in_text and bool(project and phase and discipline and doc_type and serial and revision)
+    confidence = 0.98 if found_in_text else (0.86 if composed_from_fields else 0.72)
+    effective_source = source if found_in_text else ("composed_from_fields" if composed_from_fields else "file_name_fallback")
     return {
         "fields": fields,
         "confidence": confidence,
-        "source": source if found_in_text else "file_name_fallback",
+        "source": effective_source,
         "requires_confirmation": not found_in_text or confidence < 0.9,
     }
 

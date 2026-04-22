@@ -27,6 +27,10 @@ def get_db() -> Generator:
 
 
 def init_db() -> None:
+    # Import models lazily here so SQLAlchemy metadata is fully populated
+    # before create_all, without creating circular imports at module load time.
+    from app import models  # noqa: F401
+
     Base.metadata.create_all(bind=engine)
     _ensure_projects_document_category_column()
     _ensure_users_permissions_column()

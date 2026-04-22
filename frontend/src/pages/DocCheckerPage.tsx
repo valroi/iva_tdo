@@ -1,13 +1,13 @@
 import { InboxOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Col, Form, Input, Modal, Row, Space, Table, Tree, Typography, Upload, message } from "antd";
+import { Alert, Button, Card, Col, Form, Input, Modal, Popconfirm, Row, Select, Space, Table, Tree, Typography, Upload, message } from "antd";
 import type { UploadFile } from "antd/es/upload/interface";
 import type { DataNode } from "antd/es/tree";
 import { useEffect, useMemo, useState } from "react";
 
 import {
+  deleteSmartUploadRegistryItem,
   fetchSmartUploadFileBlob,
   listSmartUploadRegistry,
-  listSmartUploadTree,
   smartUploadProcessBatch,
   smartUploadPreview,
   smartUploadProcess,
@@ -45,7 +45,14 @@ export default function DocCheckerPage(): JSX.Element {
   const [loadingProcess, setLoadingProcess] = useState(false);
   const [loadingBatchProcess, setLoadingBatchProcess] = useState(false);
   const [treeLoading, setTreeLoading] = useState(false);
-  const [treeNodes, setTreeNodes] = useState<SmartUploadTreeNode[]>([]);
+  const [hierarchyOrder, setHierarchyOrder] = useState<Array<"project" | "document_category" | "discipline" | "title_code" | "cipher_no_revision" | "revision">>([
+    "project",
+    "document_category",
+    "discipline",
+    "title_code",
+    "cipher_no_revision",
+    "revision",
+  ]);
   const [registryLoading, setRegistryLoading] = useState(false);
   const [registry, setRegistry] = useState<SmartUploadRegistryItem[]>([]);
   const [docChatQuery, setDocChatQuery] = useState("");
@@ -57,10 +64,7 @@ export default function DocCheckerPage(): JSX.Element {
   const loadTree = async () => {
     setTreeLoading(true);
     try {
-      const items = await listSmartUploadTree();
-      setTreeNodes(items);
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : "Не удалось загрузить дерево DOCchecker");
+      await loadRegistry();
     } finally {
       setTreeLoading(false);
     }
@@ -79,8 +83,8 @@ export default function DocCheckerPage(): JSX.Element {
   };
 
   useEffect(() => {
-    void loadTree();
     void loadRegistry();
+    void loadTree();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -126,8 +130,8 @@ export default function DocCheckerPage(): JSX.Element {
       });
       setProcessingResult(result);
       setBatchResult(null);
-      await loadTree();
       await loadRegistry();
+      await loadTree();
       message.success("DOCchecker завершил раскладку файлов");
     } catch (error) {
       message.error(error instanceof Error ? error.message : "Не удалось обработать файлы");
@@ -148,8 +152,8 @@ export default function DocCheckerPage(): JSX.Element {
       setProcessingResult(null);
       setPreview(null);
       form.resetFields();
-      await loadTree();
       await loadRegistry();
+      await loadTree();
       message.success(`Пакетная обработка завершена: ${result.processed}/${result.total}`);
     } catch (error) {
       message.error(error instanceof Error ? error.message : "Ошибка пакетной обработки");
@@ -197,33 +201,75 @@ export default function DocCheckerPage(): JSX.Element {
     }
   };
 
-  const toAntTree = (nodes: SmartUploadTreeNode[]): DataNode[] =>
-    nodes.map((node) => ({
-      key: node.relative_path,
-      title:
-        node.node_type === "file" ? (
-          <Space size={8}>
-            <Typography.Text>{node.name}</Typography.Text>
-            {node.is_pdf && (
-              <Button
-                size="small"
-                type="link"
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  void openPdfPreview(node);
-                }}
-              >
-                Просмотр PDF
-              </Button>
-            )}
-          </Space>
-        ) : (
-          node.name
-        ),
-      isLeaf: node.node_type === "file",
-      children: toAntTree(node.children),
-    }));
+  const toAntTree = (rows: SmartUploadRegistryItem[]): DataNode[] => {
+    type TreeBucket = Map<string, TreeBucket | SmartUploadRegistryItem[]>;
+    const root: TreeBucket = new Map();
+
+    const getLevelValue = (
+      row: SmartUploadRegistryItem,
+      key: "project" | "document_category" | "discipline" | "title_code" | "cipher_no_revision" | "revision",
+    ): string => String(row[key] ?? "—");
+
+    for (const row of rows) {
+      let cursor = root;
+      for (const level of hierarchyOrder) {
+        const value = getLevelValue(row, level);
+        if (!cursor.has(value)) {
+          cursor.set(value, new Map());
+        }
+        cursor = cursor.get(value) as TreeBucket;
+      }
+      if (!cursor.has("__files__")) {
+        cursor.set("__files__", []);
+      }
+      (cursor.get("__files__") as SmartUploadRegistryItem[]).push(row);
+    }
+
+    const build = (bucket: TreeBucket, prefix: string): DataNode[] => {
+      const nodes: DataNode[] = [];
+      for (const [key, value] of bucket.entries()) {
+        if (key === "__files__") {
+          for (const row of value as SmartUploadRegistryItem[]) {
+            nodes.push({
+              key: `${prefix}/${row.pdf_relative_path}`,
+              title: (
+                <Space size={8}>
+                  <Typography.Text>{row.pdf_name}</Typography.Text>
+                  <Button
+                    size="small"
+                    type="link"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      void openPdfPreview({
+                        key: row.pdf_relative_path,
+                        name: row.pdf_name,
+                        node_type: "file",
+                        relative_path: row.pdf_relative_path,
+                        is_pdf: true,
+                        children: [],
+                      });
+                    }}
+                  >
+                    Просмотр PDF
+                  </Button>
+                </Space>
+              ),
+              isLeaf: true,
+            });
+          }
+          continue;
+        }
+        nodes.push({
+          key: `${prefix}/${key}`,
+          title: key,
+          children: build(value as TreeBucket, `${prefix}/${key}`),
+        });
+      }
+      return nodes;
+    };
+    return build(root, "root");
+  };
 
   const filteredRegistry = useMemo(() => {
     const query = docChatQuery.trim().toLowerCase();
@@ -234,6 +280,17 @@ export default function DocCheckerPage(): JSX.Element {
       return terms.every((term) => source.includes(term));
     });
   }, [registry, docChatQuery]);
+
+  const handleDeleteRegistryItem = async (row: SmartUploadRegistryItem) => {
+    try {
+      await deleteSmartUploadRegistryItem(row.entry_key);
+      message.success(`Удалено: ${row.full_cipher}`);
+      await loadRegistry();
+      await loadTree();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "Не удалось удалить документ");
+    }
+  };
 
   const docChatAnswer = useMemo(() => {
     if (!docChatQuery.trim()) return "Введи запрос: шифр, дисциплина, категория, титул.";
@@ -375,12 +432,29 @@ export default function DocCheckerPage(): JSX.Element {
         title="Дерево иерархии документов"
         className="hrp-card"
         extra={
-          <Button loading={treeLoading} onClick={() => void loadTree()}>
-            Обновить
-          </Button>
+          <Space>
+            <Select
+              mode="multiple"
+              value={hierarchyOrder}
+              onChange={(value) => setHierarchyOrder(value as Array<"project" | "document_category" | "discipline" | "title_code" | "cipher_no_revision" | "revision">)}
+              style={{ minWidth: 420 }}
+              options={[
+                { label: "Проект", value: "project" },
+                { label: "Категория", value: "document_category" },
+                { label: "Дисциплина", value: "discipline" },
+                { label: "Титул", value: "title_code" },
+                { label: "Шифр без ревизии", value: "cipher_no_revision" },
+                { label: "Ревизия", value: "revision" },
+              ]}
+              placeholder="Порядок уровней дерева"
+            />
+            <Button loading={treeLoading} onClick={() => void loadTree()}>
+              Обновить
+            </Button>
+          </Space>
         }
       >
-        <Tree treeData={toAntTree(treeNodes)} defaultExpandAll />
+        <Tree treeData={toAntTree(filteredRegistry)} defaultExpandAll />
       </Card>
 
       <Card
@@ -418,24 +492,37 @@ export default function DocCheckerPage(): JSX.Element {
               {
                 title: "PDF",
                 key: "pdf_preview",
-                width: 120,
+                width: 180,
                 render: (_, row) => (
-                  <Button
-                    type="link"
-                    size="small"
-                    onClick={() =>
-                      void openPdfPreview({
-                        key: row.pdf_relative_path,
-                        name: row.pdf_name,
-                        node_type: "file",
-                        relative_path: row.pdf_relative_path,
-                        is_pdf: true,
-                        children: [],
-                      })
-                    }
-                  >
-                    Открыть
-                  </Button>
+                  <Space>
+                    <Button
+                      type="link"
+                      size="small"
+                      onClick={() =>
+                        void openPdfPreview({
+                          key: row.pdf_relative_path,
+                          name: row.pdf_name,
+                          node_type: "file",
+                          relative_path: row.pdf_relative_path,
+                          is_pdf: true,
+                          children: [],
+                        })
+                      }
+                    >
+                      Открыть
+                    </Button>
+                    <Popconfirm
+                      title="Удалить документ?"
+                      description="Будет удалена запись и файлы этой ревизии из DOCchecker."
+                      okText="Удалить"
+                      cancelText="Отмена"
+                      onConfirm={() => void handleDeleteRegistryItem(row)}
+                    >
+                      <Button type="link" danger size="small">
+                        Удалить
+                      </Button>
+                    </Popconfirm>
+                  </Space>
                 ),
               },
             ]}

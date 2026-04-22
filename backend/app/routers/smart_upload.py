@@ -72,6 +72,7 @@ class SmartUploadTreeNode(BaseModel):
 
 
 class SmartUploadRegistryItem(BaseModel):
+    entry_key: str
     full_cipher: str
     cipher_no_revision: str
     revision: str
@@ -147,6 +148,7 @@ def _build_registry(root: Path) -> list[SmartUploadRegistryItem]:
         full_cipher = str(fields.get("full_cipher") or pdf_path.stem).upper()
         cipher_no_revision = "-".join(full_cipher.split("-")[:-1]) if "-" in full_cipher else full_cipher
         item = SmartUploadRegistryItem(
+            entry_key=str(metadata_path.relative_to(root)),
             full_cipher=full_cipher,
             cipher_no_revision=cipher_no_revision,
             revision=str(fields.get("revision") or ""),
@@ -171,6 +173,15 @@ def _build_registry(root: Path) -> list[SmartUploadRegistryItem]:
     rows = [item for item, _ in rows_by_key.values()]
     rows.sort(key=lambda item: (item.project, item.cipher_no_revision, item.revision), reverse=False)
     return rows
+
+
+def _prune_empty_parent_dirs(path: Path, root: Path) -> None:
+    current = path
+    while current != root and root in current.parents:
+        if any(current.iterdir()):
+            break
+        current.rmdir()
+        current = current.parent
 
 
 @router.post("/preview", response_model=SmartUploadPreviewResponse)
@@ -297,6 +308,28 @@ def list_smart_upload_registry(
     _: User = Depends(require_permissions("can_upload_files")),
 ):
     return _build_registry(SMART_UPLOAD_ROOT)
+
+
+@router.delete("/registry-item")
+def delete_smart_upload_registry_item(
+    entry_key: str,
+    _: User = Depends(require_permissions("can_upload_files")),
+):
+    metadata_path = _resolve_relative_path(entry_key)
+    if metadata_path.name != "_smart_upload_result.json":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid registry entry key")
+    if not metadata_path.exists() or not metadata_path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registry entry not found")
+
+    destination = metadata_path.parent
+    removed_count = 0
+    for file_path in destination.iterdir():
+        if file_path.is_file():
+            file_path.unlink()
+            removed_count += 1
+    destination.rmdir()
+    _prune_empty_parent_dirs(destination.parent, SMART_UPLOAD_ROOT.resolve())
+    return {"deleted_files": removed_count, "deleted_folder": str(destination)}
 
 
 @router.get("/file")

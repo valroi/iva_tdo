@@ -691,6 +691,7 @@ export interface SmartUploadTreeNode {
 }
 
 export interface SmartUploadRegistryItem {
+  entry_key: string;
   full_cipher: string;
   cipher_no_revision: string;
   revision: string;
@@ -752,6 +753,15 @@ export function listSmartUploadTree(): Promise<SmartUploadTreeNode[]> {
 
 export function listSmartUploadRegistry(): Promise<SmartUploadRegistryItem[]> {
   return request<SmartUploadRegistryItem[]>("/smart-upload/registry");
+}
+
+export function deleteSmartUploadRegistryItem(entryKey: string): Promise<{ deleted_files: number; deleted_folder: string }> {
+  return request<{ deleted_files: number; deleted_folder: string }>(
+    `/smart-upload/registry-item?entry_key=${encodeURIComponent(entryKey)}`,
+    {
+      method: "DELETE",
+    },
+  );
 }
 
 export function getSmartUploadFileUrl(relativePath: string): string {
