@@ -1,12 +1,13 @@
 import {
   BellOutlined,
+  FileSearchOutlined,
   HomeOutlined,
   LogoutOutlined,
   ProjectOutlined,
   ReadOutlined,
   TeamOutlined,
 } from "@ant-design/icons";
-import { Avatar, Breadcrumb, Button, Layout, Menu, Space, Spin, Typography, message } from "antd";
+import { Avatar, Breadcrumb, Button, Layout, Menu, Segmented, Space, Spin, Typography, message } from "antd";
 import { Component, useCallback, useEffect, useMemo, useState } from "react";
 
 import {
@@ -34,11 +35,27 @@ import RevisionCardPage from "./pages/RevisionCardPage";
 import DocumentsRegistryPage from "./pages/DocumentsRegistryPage";
 import CrsPage from "./pages/CrsPage";
 import ReportingPage from "./pages/ReportingPage";
+import DocCheckerPage from "./pages/DocCheckerPage";
 import type { DocumentItem, MDRRecord, NotificationItem, ProjectItem, User, WorkflowStatus } from "./types";
 
 const { Header, Sider, Content } = Layout;
 
-type Section = "dashboard" | "projects" | "documents_registry" | "revisions" | "trm" | "reporting" | "crs_queue" | "revision_card" | "notifications" | "tdo_queue" | "sessions" | "admin" | "help";
+type Section =
+  | "dashboard"
+  | "projects"
+  | "documents_registry"
+  | "revisions"
+  | "trm"
+  | "reporting"
+  | "crs_queue"
+  | "revision_card"
+  | "notifications"
+  | "tdo_queue"
+  | "sessions"
+  | "admin"
+  | "help"
+  | "docchecker";
+type AppModule = "dcc" | "docchecker";
 
 class UiErrorBoundary extends Component<{ children: JSX.Element }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -75,6 +92,7 @@ export default function App(): JSX.Element {
   const [authenticated, setAuthenticated] = useState(hasAccessToken());
   const [loading, setLoading] = useState(false);
   const [activeSection, setActiveSection] = useState<Section>("dashboard");
+  const [activeModule, setActiveModule] = useState<AppModule>("dcc");
 
   const [user, setUser] = useState<User | null>(null);
   const [mdr, setMdr] = useState<MDRRecord[]>([]);
@@ -176,6 +194,7 @@ export default function App(): JSX.Element {
     sessions: "Сессии",
     admin: "Администрирование",
     help: "Инструкция",
+    docchecker: "DOCchecker",
   };
 
   if (!authenticated) {
@@ -187,12 +206,39 @@ export default function App(): JSX.Element {
       <Layout style={{ minHeight: "100vh" }} className="hrp-shell">
         <Sider width={260} className="app-sider" theme="light">
           <div className="app-logo">IvaMaris TDO</div>
+          <div className="module-switcher">
+            <Segmented
+              block
+              value={activeModule}
+              options={[
+                { label: "DCC", value: "dcc" },
+                { label: "DOCchecker", value: "docchecker" },
+              ]}
+              onChange={(value) => {
+                const next = value as AppModule;
+                setActiveModule(next);
+                setActiveSection(next === "docchecker" ? "docchecker" : "dashboard");
+              }}
+            />
+          </div>
           <Menu
             theme="light"
             mode="inline"
-            items={menuItems}
-            selectedKeys={[activeSection]}
-            onSelect={(item) => setActiveSection(item.key as Section)}
+            items={
+              activeModule === "docchecker"
+                ? [{ key: "docchecker", icon: <FileSearchOutlined />, label: "DOCchecker" }]
+                : menuItems
+            }
+            selectedKeys={[activeModule === "docchecker" ? "docchecker" : activeSection]}
+            onSelect={(item) => {
+              if (item.key === "docchecker") {
+                setActiveModule("docchecker");
+                setActiveSection("docchecker");
+                return;
+              }
+              setActiveModule("dcc");
+              setActiveSection(item.key as Section);
+            }}
           />
 
           <div className="sider-user-card">
@@ -211,7 +257,7 @@ export default function App(): JSX.Element {
               <div>
                 <Breadcrumb
                   items={[
-                    { title: "Проекты" },
+                    { title: activeModule === "docchecker" ? "DOCchecker" : "DCC" },
                     { title: sectionTitleMap[activeSection] },
                   ]}
                 />
@@ -342,6 +388,7 @@ export default function App(): JSX.Element {
                 <AdminPage currentUser={user} onGlobalReload={loadInitialData} />
               )}
               {activeSection === "help" && user && <HelpPage currentUser={user} />}
+              {activeSection === "docchecker" && user && <DocCheckerPage />}
               </div>
             )}
           </Content>

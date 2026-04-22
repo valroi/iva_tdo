@@ -656,6 +656,53 @@ export function listProjects(): Promise<ProjectItem[]> {
   return request<ProjectItem[]>("/projects");
 }
 
+export interface SmartUploadPreviewResult {
+  fields: Record<string, string | null>;
+  confidence: number;
+  source: string;
+  requires_confirmation: boolean;
+  suggested_hierarchy: string;
+}
+
+export interface SmartUploadProcessResult {
+  fields: Record<string, string | null>;
+  confidence: number;
+  source: string;
+  requires_confirmation: boolean;
+  hierarchy: string;
+  destination: string;
+  pdf_path: string;
+  related_paths: string[];
+}
+
+export function smartUploadPreview(pdf: File): Promise<SmartUploadPreviewResult> {
+  const body = new FormData();
+  body.append("pdf", pdf);
+  return request<SmartUploadPreviewResult>("/smart-upload/preview", {
+    method: "POST",
+    body,
+  });
+}
+
+export function smartUploadProcess(payload: {
+  pdf: File;
+  relatedFiles?: File[];
+  overrides?: Record<string, string>;
+}): Promise<SmartUploadProcessResult> {
+  const body = new FormData();
+  body.append("pdf", payload.pdf);
+  for (const file of payload.relatedFiles ?? []) {
+    body.append("related_files", file);
+  }
+  if (payload.overrides && Object.keys(payload.overrides).length > 0) {
+    body.append("overrides_json", JSON.stringify(payload.overrides));
+  }
+  return request<SmartUploadProcessResult>("/smart-upload/process", {
+    method: "POST",
+    body,
+  });
+}
+
 export function createProject(payload: {
   code: string;
   name: string;

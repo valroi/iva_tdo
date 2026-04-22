@@ -43,6 +43,24 @@ body {
   background: transparent;
 }
 
+.module-switcher {
+  padding: 12px 10px 8px;
+}
+
+.module-switcher .ant-segmented {
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.module-switcher .ant-segmented-item-label {
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.module-switcher .ant-segmented-item-selected .ant-segmented-item-label {
+  color: #0f172a;
+}
+
 .app-sider .ant-menu-item {
   border-radius: 9px;
   margin-inline: 8px;
