@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import io
+import json
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -37,6 +39,23 @@ def _extract_text(pdf_bytes: bytes) -> str:
     return "\n".join(parts)
 
 
+def _extract_text_pdftotext(pdf_bytes: bytes) -> str:
+    """Fallback extractor for scanned/problematic PDFs if pdftotext exists."""
+    try:
+        result = subprocess.run(
+            ["pdftotext", "-", "-"],
+            input=pdf_bytes,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    except FileNotFoundError:
+        return ""
+    if result.returncode != 0:
+        return ""
+    return result.stdout.decode("utf-8", errors="ignore")
+
+
 def _parse_cipher(cipher: str) -> dict[str, str]:
     chunks = [item.strip().upper() for item in cipher.split("-")]
     while len(chunks) < 8:
@@ -68,6 +87,11 @@ def _extract_title(text: str) -> str | None:
 
 def extract_document_metadata(pdf_bytes: bytes, file_name: str) -> dict[str, Any]:
     text = _extract_text(pdf_bytes)
+    source = "pdf_text"
+    if not text.strip():
+        text = _extract_text_pdftotext(pdf_bytes)
+        if text.strip():
+            source = "ocr_fallback"
     upper_text = text.upper()
     filename_without_ext = Path(file_name).stem.upper()
 
@@ -88,8 +112,14 @@ def extract_document_metadata(pdf_bytes: bytes, file_name: str) -> dict[str, Any
         "revision": parsed["revision"],
         "title_text": title_text,
     }
-    confidence = 0.98 if match and FULL_CIPHER_RE.search(upper_text) else 0.72
-    return {"fields": fields, "confidence": confidence}
+    found_in_text = bool(match and FULL_CIPHER_RE.search(upper_text))
+    confidence = 0.98 if found_in_text else 0.72
+    return {
+        "fields": fields,
+        "confidence": confidence,
+        "source": source if found_in_text else "file_name_fallback",
+        "requires_confirmation": not found_in_text or confidence < 0.9,
+    }
 
 
 def build_target_hierarchy(fields: dict[str, Any]) -> str:
@@ -112,6 +142,7 @@ def store_upload_set(
     pdf_bytes: bytes,
     related_files: list[tuple[str, bytes]],
     fields: dict[str, Any],
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     job_id = str(uuid4())
     hierarchy = build_target_hierarchy(fields)
@@ -126,6 +157,10 @@ def store_upload_set(
         related_destination = destination / _safe_token(related_name)
         related_destination.write_bytes(related_bytes)
         related_saved.append(str(related_destination))
+
+    if metadata:
+        metadata_path = destination / "_smart_upload_result.json"
+        metadata_path.write_text(json.dumps(metadata, ensure_ascii=True, indent=2), encoding="utf-8")
 
     return {
         "job_id": job_id,
