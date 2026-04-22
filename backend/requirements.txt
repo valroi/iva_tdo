@@ -11,3 +11,4 @@ pytest
 httpx
 eval_type_backport
 openpyxl
+pypdf
