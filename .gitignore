@@ -1,14 +1,17 @@
 .env
+.DS_Store
 
 # Python
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
+*.db
 backend/.venv/
 backend/test_tdo.db
 
 # Node
 node_modules/
 frontend/dist/
+frontend/.vite/
 
