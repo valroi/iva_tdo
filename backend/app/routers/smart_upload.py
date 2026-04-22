@@ -28,6 +28,7 @@ def _apply_full_cipher(fields: dict[str, Any], full_cipher: str) -> None:
     fields["full_cipher"] = full_cipher.upper()
     fields["project"] = chunks[0]
     fields["phase"] = chunks[1]
+    fields["document_category"] = chunks[1]
     fields["unit"] = chunks[2]
     fields["title_code"] = chunks[3]
     fields["discipline"] = chunks[4]
@@ -55,6 +56,12 @@ class SmartUploadProcessResponse(BaseModel):
     related_paths: list[str]
 
 
+class SmartUploadBatchProcessResponse(BaseModel):
+    total: int
+    processed: int
+    items: list[SmartUploadProcessResponse]
+
+
 class SmartUploadTreeNode(BaseModel):
     key: str
     name: str
@@ -62,6 +69,23 @@ class SmartUploadTreeNode(BaseModel):
     relative_path: str
     is_pdf: bool = False
     children: list["SmartUploadTreeNode"] = Field(default_factory=list)
+
+
+class SmartUploadRegistryItem(BaseModel):
+    full_cipher: str
+    cipher_no_revision: str
+    revision: str
+    project: str
+    document_category: str
+    discipline: str
+    title_code: str
+    title_text: str | None = None
+    hierarchy: str
+    destination: str
+    pdf_name: str
+    pdf_relative_path: str
+    source: str
+    confidence: float
 
 
 def _resolve_relative_path(relative_path: str) -> Path:
@@ -101,6 +125,47 @@ def _build_tree(path: Path, root: Path) -> list[SmartUploadTreeNode]:
             )
         )
     return nodes
+
+
+def _build_registry(root: Path) -> list[SmartUploadRegistryItem]:
+    if not root.exists():
+        return []
+    rows: list[SmartUploadRegistryItem] = []
+    for metadata_path in root.rglob("_smart_upload_result.json"):
+        try:
+            payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        fields = payload.get("fields") or {}
+        if not isinstance(fields, dict):
+            continue
+        destination = metadata_path.parent
+        pdf_files = sorted(destination.glob("*.pdf"))
+        if not pdf_files:
+            continue
+        pdf_path = pdf_files[0]
+        full_cipher = str(fields.get("full_cipher") or pdf_path.stem).upper()
+        cipher_no_revision = "-".join(full_cipher.split("-")[:-1]) if "-" in full_cipher else full_cipher
+        rows.append(
+            SmartUploadRegistryItem(
+                full_cipher=full_cipher,
+                cipher_no_revision=cipher_no_revision,
+                revision=str(fields.get("revision") or ""),
+                project=str(fields.get("project") or ""),
+                document_category=str(fields.get("document_category") or fields.get("phase") or ""),
+                discipline=str(fields.get("discipline") or ""),
+                title_code=str(fields.get("title_code") or ""),
+                title_text=(str(fields.get("title_text")) if fields.get("title_text") is not None else None),
+                hierarchy=str(destination.relative_to(root)),
+                destination=str(destination),
+                pdf_name=pdf_path.name,
+                pdf_relative_path=str(pdf_path.relative_to(root)),
+                source=str(payload.get("source") or ""),
+                confidence=float(payload.get("confidence") or 0.0),
+            )
+        )
+    rows.sort(key=lambda item: (item.project, item.cipher_no_revision, item.revision), reverse=False)
+    return rows
 
 
 @router.post("/preview", response_model=SmartUploadPreviewResponse)
@@ -177,11 +242,56 @@ async def process_smart_upload(
     )
 
 
+@router.post("/process-batch", response_model=SmartUploadBatchProcessResponse)
+async def process_smart_upload_batch(
+    pdf_files: list[UploadFile] = File(...),
+    _: User = Depends(require_permissions("can_upload_files")),
+):
+    items: list[SmartUploadProcessResponse] = []
+    for pdf in pdf_files:
+        pdf_bytes = await pdf.read()
+        parsed = extract_document_metadata(pdf_bytes, pdf.filename or "document.pdf")
+        fields = dict(parsed["fields"])
+        stored = store_upload_set(
+            storage_root=SMART_UPLOAD_ROOT,
+            pdf_name=pdf.filename or "document.pdf",
+            pdf_bytes=pdf_bytes,
+            related_files=[],
+            fields=fields,
+            metadata={
+                "fields": fields,
+                "confidence": parsed["confidence"],
+                "source": parsed["source"],
+                "requires_confirmation": parsed["requires_confirmation"],
+            },
+        )
+        items.append(
+            SmartUploadProcessResponse(
+                fields=fields,
+                confidence=parsed["confidence"],
+                source=parsed["source"],
+                requires_confirmation=parsed["requires_confirmation"],
+                hierarchy=stored["hierarchy"],
+                destination=stored["destination"],
+                pdf_path=stored["pdf_path"],
+                related_paths=stored["related_paths"],
+            )
+        )
+    return SmartUploadBatchProcessResponse(total=len(pdf_files), processed=len(items), items=items)
+
+
 @router.get("/tree", response_model=list[SmartUploadTreeNode])
 def list_smart_upload_tree(
     _: User = Depends(require_permissions("can_upload_files")),
 ):
     return _build_tree(SMART_UPLOAD_ROOT, SMART_UPLOAD_ROOT)
+
+
+@router.get("/registry", response_model=list[SmartUploadRegistryItem])
+def list_smart_upload_registry(
+    _: User = Depends(require_permissions("can_upload_files")),
+):
+    return _build_registry(SMART_UPLOAD_ROOT)
 
 
 @router.get("/file")

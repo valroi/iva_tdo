@@ -1,15 +1,19 @@
 import { InboxOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Col, Form, Input, Modal, Row, Space, Tree, Typography, Upload, message } from "antd";
+import { Alert, Button, Card, Col, Form, Input, Modal, Row, Space, Table, Tree, Typography, Upload, message } from "antd";
 import type { UploadFile } from "antd/es/upload/interface";
 import type { DataNode } from "antd/es/tree";
 import { useEffect, useMemo, useState } from "react";
 
 import {
   fetchSmartUploadFileBlob,
+  listSmartUploadRegistry,
   listSmartUploadTree,
+  smartUploadProcessBatch,
   smartUploadPreview,
   smartUploadProcess,
+  type SmartUploadRegistryItem,
   type SmartUploadPreviewResult,
+  type SmartUploadBatchProcessResult,
   type SmartUploadProcessResult,
   type SmartUploadTreeNode,
 } from "../api";
@@ -20,6 +24,7 @@ const FIELD_ORDER = [
   "full_cipher",
   "project",
   "phase",
+  "document_category",
   "unit",
   "title_code",
   "discipline",
@@ -30,14 +35,20 @@ const FIELD_ORDER = [
 ];
 
 export default function DocCheckerPage(): JSX.Element {
+  const [pdfFiles, setPdfFiles] = useState<File[]>([]);
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [relatedFiles, setRelatedFiles] = useState<File[]>([]);
   const [preview, setPreview] = useState<SmartUploadPreviewResult | null>(null);
   const [processingResult, setProcessingResult] = useState<SmartUploadProcessResult | null>(null);
+  const [batchResult, setBatchResult] = useState<SmartUploadBatchProcessResult | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [loadingProcess, setLoadingProcess] = useState(false);
+  const [loadingBatchProcess, setLoadingBatchProcess] = useState(false);
   const [treeLoading, setTreeLoading] = useState(false);
   const [treeNodes, setTreeNodes] = useState<SmartUploadTreeNode[]>([]);
+  const [registryLoading, setRegistryLoading] = useState(false);
+  const [registry, setRegistry] = useState<SmartUploadRegistryItem[]>([]);
+  const [docChatQuery, setDocChatQuery] = useState("");
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
   const [previewPdfTitle, setPreviewPdfTitle] = useState<string>("");
   const [previewPdfUrl, setPreviewPdfUrl] = useState<string>("");
@@ -55,8 +66,21 @@ export default function DocCheckerPage(): JSX.Element {
     }
   };
 
+  const loadRegistry = async () => {
+    setRegistryLoading(true);
+    try {
+      const items = await listSmartUploadRegistry();
+      setRegistry(items);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "Не удалось загрузить реестр DOCchecker");
+    } finally {
+      setRegistryLoading(false);
+    }
+  };
+
   useEffect(() => {
     void loadTree();
+    void loadRegistry();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -69,6 +93,7 @@ export default function DocCheckerPage(): JSX.Element {
     try {
       const result = await smartUploadPreview(pdfFile);
       setPreview(result);
+      setBatchResult(null);
       setProcessingResult(null);
       const values: FieldMap = {};
       for (const key of FIELD_ORDER) {
@@ -100,7 +125,9 @@ export default function DocCheckerPage(): JSX.Element {
         overrides,
       });
       setProcessingResult(result);
+      setBatchResult(null);
       await loadTree();
+      await loadRegistry();
       message.success("DOCchecker завершил раскладку файлов");
     } catch (error) {
       message.error(error instanceof Error ? error.message : "Не удалось обработать файлы");
@@ -109,9 +136,37 @@ export default function DocCheckerPage(): JSX.Element {
     }
   };
 
+  const handleBatchProcess = async () => {
+    if (pdfFiles.length === 0) {
+      message.warning("Добавь PDF файлы для пакетной обработки");
+      return;
+    }
+    setLoadingBatchProcess(true);
+    try {
+      const result = await smartUploadProcessBatch(pdfFiles);
+      setBatchResult(result);
+      setProcessingResult(null);
+      setPreview(null);
+      form.resetFields();
+      await loadTree();
+      await loadRegistry();
+      message.success(`Пакетная обработка завершена: ${result.processed}/${result.total}`);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "Ошибка пакетной обработки");
+    } finally {
+      setLoadingBatchProcess(false);
+    }
+  };
+
   const pdfList: UploadFile[] = pdfFile
     ? [{ uid: "pdf-1", name: pdfFile.name, status: "done", originFileObj: pdfFile }]
     : [];
+  const pdfBatchList: UploadFile[] = pdfFiles.map((file, index) => ({
+    uid: `batch-${index}`,
+    name: file.name,
+    status: "done",
+    originFileObj: file,
+  }));
   const relatedList: UploadFile[] = relatedFiles.map((file, index) => ({
     uid: `related-${index}`,
     name: file.name,
@@ -170,10 +225,50 @@ export default function DocCheckerPage(): JSX.Element {
       children: toAntTree(node.children),
     }));
 
+  const filteredRegistry = useMemo(() => {
+    const query = docChatQuery.trim().toLowerCase();
+    if (!query) return registry;
+    const terms = query.split(/\s+/).filter(Boolean);
+    return registry.filter((item) => {
+      const source = `${item.full_cipher} ${item.cipher_no_revision} ${item.title_text ?? ""} ${item.project} ${item.document_category} ${item.discipline} ${item.title_code}`.toLowerCase();
+      return terms.every((term) => source.includes(term));
+    });
+  }, [registry, docChatQuery]);
+
+  const docChatAnswer = useMemo(() => {
+    if (!docChatQuery.trim()) return "Введи запрос: шифр, дисциплина, категория, титул.";
+    if (filteredRegistry.length === 0) return "Ничего не найдено. Попробуй упростить запрос.";
+    const previewRows = filteredRegistry.slice(0, 3).map((item) => `${item.full_cipher} (rev ${item.revision})`);
+    return `Найдено ${filteredRegistry.length} документов. Примеры: ${previewRows.join("; ")}`;
+  }, [docChatQuery, filteredRegistry]);
+
   return (
     <Space direction="vertical" size={16} style={{ width: "100%" }}>
       <Card title="DOCchecker - умная загрузка документов" className="hrp-card">
         <Space direction="vertical" size={14} style={{ width: "100%" }}>
+          <Typography.Text strong>Пакетная загрузка PDF (много документов сразу)</Typography.Text>
+          <Upload.Dragger
+            accept=".pdf"
+            multiple
+            fileList={pdfBatchList}
+            beforeUpload={(file) => {
+              setPdfFiles((prev) => [...prev, file]);
+              return false;
+            }}
+            onRemove={(file) => {
+              setPdfFiles((prev) => prev.filter((item) => item.name !== file.name));
+            }}
+          >
+            <p className="ant-upload-drag-icon">
+              <InboxOutlined />
+            </p>
+            <p className="ant-upload-text">Пакетная загрузка: перетащи сразу много PDF</p>
+          </Upload.Dragger>
+          <Button type="primary" loading={loadingBatchProcess} onClick={handleBatchProcess}>
+            Обработать пакет PDF
+          </Button>
+
+          <Typography.Text strong>Одиночная загрузка PDF + связанные файлы</Typography.Text>
           <Upload.Dragger
             accept=".pdf"
             maxCount={1}
@@ -186,6 +281,7 @@ export default function DocCheckerPage(): JSX.Element {
               setPdfFile(null);
               setPreview(null);
               setProcessingResult(null);
+              setBatchResult(null);
               form.resetFields();
             }}
           >
@@ -267,6 +363,14 @@ export default function DocCheckerPage(): JSX.Element {
         </Card>
       )}
 
+      {batchResult && (
+        <Card title="Результат пакетной обработки" className="hrp-card">
+          <Typography.Text>
+            Обработано {batchResult.processed} из {batchResult.total}
+          </Typography.Text>
+        </Card>
+      )}
+
       <Card
         title="Дерево иерархии документов"
         className="hrp-card"
@@ -277,6 +381,67 @@ export default function DocCheckerPage(): JSX.Element {
         }
       >
         <Tree treeData={toAntTree(treeNodes)} defaultExpandAll />
+      </Card>
+
+      <Card
+        title="Реестр документов DOCchecker"
+        className="hrp-card"
+        extra={
+          <Button loading={registryLoading} onClick={() => void loadRegistry()}>
+            Обновить реестр
+          </Button>
+        }
+      >
+        <Space direction="vertical" size={12} style={{ width: "100%" }}>
+          <Input.TextArea
+            value={docChatQuery}
+            onChange={(event) => setDocChatQuery(event.target.value)}
+            autoSize={{ minRows: 2, maxRows: 4 }}
+            placeholder="Чат по документам: например 'найди IMP FD IN ревизия 00'"
+          />
+          <Alert type="info" message="DOCchecker chat" description={docChatAnswer} />
+          <Table<SmartUploadRegistryItem>
+            rowKey={(row) => `${row.full_cipher}-${row.revision}-${row.pdf_name}`}
+            loading={registryLoading}
+            dataSource={filteredRegistry}
+            pagination={{ pageSize: 8 }}
+            size="small"
+            columns={[
+              { title: "Проект", dataIndex: "project", width: 80 },
+              { title: "Категория", dataIndex: "document_category", width: 110 },
+              { title: "Дисц.", dataIndex: "discipline", width: 90 },
+              { title: "Титул", dataIndex: "title_code", width: 90 },
+              { title: "Шифр без рев.", dataIndex: "cipher_no_revision", width: 260 },
+              { title: "Рев.", dataIndex: "revision", width: 70 },
+              { title: "Полный шифр", dataIndex: "full_cipher", width: 260 },
+              { title: "Название", dataIndex: "title_text", width: 240, ellipsis: true },
+              {
+                title: "PDF",
+                key: "pdf_preview",
+                width: 120,
+                render: (_, row) => (
+                  <Button
+                    type="link"
+                    size="small"
+                    onClick={() =>
+                      void openPdfPreview({
+                        key: row.pdf_relative_path,
+                        name: row.pdf_name,
+                        node_type: "file",
+                        relative_path: row.pdf_relative_path,
+                        is_pdf: true,
+                        children: [],
+                      })
+                    }
+                  >
+                    Открыть
+                  </Button>
+                ),
+              },
+            ]}
+            scroll={{ x: 1700 }}
+          />
+        </Space>
       </Card>
 
       <Modal

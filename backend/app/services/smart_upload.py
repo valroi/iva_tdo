@@ -63,6 +63,7 @@ def _parse_cipher(cipher: str) -> dict[str, str]:
     return {
         "project": chunks[0],
         "phase": chunks[1],
+        "document_category": chunks[1],
         "unit": chunks[2],
         "title_code": chunks[3],
         "discipline": chunks[4],
@@ -104,6 +105,7 @@ def extract_document_metadata(pdf_bytes: bytes, file_name: str) -> dict[str, Any
         "full_cipher": full_cipher,
         "project": parsed["project"],
         "phase": parsed["phase"],
+        "document_category": parsed["document_category"],
         "unit": parsed["unit"],
         "title_code": parsed["title_code"],
         "discipline": parsed["discipline"],
@@ -123,13 +125,17 @@ def extract_document_metadata(pdf_bytes: bytes, file_name: str) -> dict[str, Any
 
 
 def build_target_hierarchy(fields: dict[str, Any]) -> str:
+    full_cipher = str(fields.get("full_cipher", "")).upper()
+    cipher_no_revision = "-".join(full_cipher.split("-")[:-1]) if "-" in full_cipher else full_cipher
+    if not cipher_no_revision:
+        cipher_no_revision = str(fields.get("serial", "unknown"))
     return "/".join(
         [
             _safe_token(str(fields.get("project", "unknown"))),
-            _safe_token(str(fields.get("phase", "unknown"))),
+            _safe_token(str(fields.get("document_category", fields.get("phase", "unknown")))),
             _safe_token(str(fields.get("discipline", "unknown"))),
-            _safe_token(str(fields.get("doc_type", "unknown"))),
-            _safe_token(str(fields.get("serial", "unknown"))),
+            _safe_token(str(fields.get("title_code", "unknown"))),
+            _safe_token(cipher_no_revision),
             _safe_token(str(fields.get("revision", "unknown"))),
         ]
     )

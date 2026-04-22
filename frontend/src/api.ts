@@ -675,6 +675,12 @@ export interface SmartUploadProcessResult {
   related_paths: string[];
 }
 
+export interface SmartUploadBatchProcessResult {
+  total: number;
+  processed: number;
+  items: SmartUploadProcessResult[];
+}
+
 export interface SmartUploadTreeNode {
   key: string;
   name: string;
@@ -682,6 +688,23 @@ export interface SmartUploadTreeNode {
   relative_path: string;
   is_pdf: boolean;
   children: SmartUploadTreeNode[];
+}
+
+export interface SmartUploadRegistryItem {
+  full_cipher: string;
+  cipher_no_revision: string;
+  revision: string;
+  project: string;
+  document_category: string;
+  discipline: string;
+  title_code: string;
+  title_text: string | null;
+  hierarchy: string;
+  destination: string;
+  pdf_name: string;
+  pdf_relative_path: string;
+  source: string;
+  confidence: number;
 }
 
 export function smartUploadPreview(pdf: File): Promise<SmartUploadPreviewResult> {
@@ -712,8 +735,23 @@ export function smartUploadProcess(payload: {
   });
 }
 
+export function smartUploadProcessBatch(pdfFiles: File[]): Promise<SmartUploadBatchProcessResult> {
+  const body = new FormData();
+  for (const file of pdfFiles) {
+    body.append("pdf_files", file);
+  }
+  return request<SmartUploadBatchProcessResult>("/smart-upload/process-batch", {
+    method: "POST",
+    body,
+  });
+}
+
 export function listSmartUploadTree(): Promise<SmartUploadTreeNode[]> {
   return request<SmartUploadTreeNode[]>("/smart-upload/tree");
+}
+
+export function listSmartUploadRegistry(): Promise<SmartUploadRegistryItem[]> {
+  return request<SmartUploadRegistryItem[]>("/smart-upload/registry");
 }
 
 export function getSmartUploadFileUrl(relativePath: string): string {
