@@ -130,7 +130,7 @@ def _build_tree(path: Path, root: Path) -> list[SmartUploadTreeNode]:
 def _build_registry(root: Path) -> list[SmartUploadRegistryItem]:
     if not root.exists():
         return []
-    rows: list[SmartUploadRegistryItem] = []
+    rows_by_key: dict[tuple[str, str], tuple[SmartUploadRegistryItem, float]] = {}
     for metadata_path in root.rglob("_smart_upload_result.json"):
         try:
             payload = json.loads(metadata_path.read_text(encoding="utf-8"))
@@ -146,24 +146,29 @@ def _build_registry(root: Path) -> list[SmartUploadRegistryItem]:
         pdf_path = pdf_files[0]
         full_cipher = str(fields.get("full_cipher") or pdf_path.stem).upper()
         cipher_no_revision = "-".join(full_cipher.split("-")[:-1]) if "-" in full_cipher else full_cipher
-        rows.append(
-            SmartUploadRegistryItem(
-                full_cipher=full_cipher,
-                cipher_no_revision=cipher_no_revision,
-                revision=str(fields.get("revision") or ""),
-                project=str(fields.get("project") or ""),
-                document_category=str(fields.get("document_category") or fields.get("phase") or ""),
-                discipline=str(fields.get("discipline") or ""),
-                title_code=str(fields.get("title_code") or ""),
-                title_text=(str(fields.get("title_text")) if fields.get("title_text") is not None else None),
-                hierarchy=str(destination.relative_to(root)),
-                destination=str(destination),
-                pdf_name=pdf_path.name,
-                pdf_relative_path=str(pdf_path.relative_to(root)),
-                source=str(payload.get("source") or ""),
-                confidence=float(payload.get("confidence") or 0.0),
-            )
+        item = SmartUploadRegistryItem(
+            full_cipher=full_cipher,
+            cipher_no_revision=cipher_no_revision,
+            revision=str(fields.get("revision") or ""),
+            project=str(fields.get("project") or ""),
+            document_category=str(fields.get("document_category") or fields.get("phase") or ""),
+            discipline=str(fields.get("discipline") or ""),
+            title_code=str(fields.get("title_code") or ""),
+            title_text=(str(fields.get("title_text")) if fields.get("title_text") is not None else None),
+            hierarchy=str(destination.relative_to(root)),
+            destination=str(destination),
+            pdf_name=pdf_path.name,
+            pdf_relative_path=str(pdf_path.relative_to(root)),
+            source=str(payload.get("source") or ""),
+            confidence=float(payload.get("confidence") or 0.0),
         )
+        dedupe_key = (item.cipher_no_revision, item.revision)
+        candidate_mtime = metadata_path.stat().st_mtime
+        existing = rows_by_key.get(dedupe_key)
+        if existing is None or candidate_mtime >= existing[1]:
+            rows_by_key[dedupe_key] = (item, candidate_mtime)
+
+    rows = [item for item, _ in rows_by_key.values()]
     rows.sort(key=lambda item: (item.project, item.cipher_no_revision, item.revision), reverse=False)
     return rows
 
