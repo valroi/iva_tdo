@@ -149,6 +149,7 @@ def _build_registry(root: Path) -> list[SmartUploadRegistryItem]:
         fields = payload.get("fields") or {}
         if not isinstance(fields, dict):
             continue
+        fields = _normalize_fields_for_registry(fields)
         destination = metadata_path.parent
         pdf_files = sorted(destination.glob("*.pdf"))
         if not pdf_files:

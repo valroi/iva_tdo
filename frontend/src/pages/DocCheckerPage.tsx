@@ -320,6 +320,10 @@ export default function DocCheckerPage(): JSX.Element {
   };
 
   const handleDeleteRegistryItem = async (row: SmartUploadRegistryItem) => {
+    if (!row.entry_key) {
+      message.error("Нельзя удалить строку: отсутствует ключ записи. Обнови реестр.");
+      return;
+    }
     try {
       await deleteSmartUploadRegistryItem(row.entry_key);
       message.success(`Удалено: ${row.full_cipher}`);
@@ -666,6 +670,7 @@ export default function DocCheckerPage(): JSX.Element {
                       Открыть
                     </Button>
                     <Popconfirm
+                      disabled={!row.entry_key}
                       title="Удалить документ?"
                       description="Будет удалена запись и файлы этой ревизии из DOCchecker."
                       okText="Удалить"
