@@ -697,8 +697,11 @@ export interface SmartUploadRegistryItem {
   revision: string;
   project: string;
   document_category: string;
+  document_class: string;
   discipline: string;
   title_code: string;
+  development_date: string | null;
+  issue_purpose: string | null;
   title_text: string | null;
   hierarchy: string;
   destination: string;
@@ -762,6 +765,16 @@ export function deleteSmartUploadRegistryItem(entryKey: string): Promise<{ delet
       method: "DELETE",
     },
   );
+}
+
+export function updateSmartUploadRegistryItem(payload: {
+  entry_key: string;
+  fields: Record<string, string | null>;
+}): Promise<SmartUploadRegistryItem> {
+  return request<SmartUploadRegistryItem>("/smart-upload/registry-item", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function getSmartUploadFileUrl(relativePath: string): string {

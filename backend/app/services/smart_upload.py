@@ -4,6 +4,7 @@ import io
 import json
 import re
 import subprocess
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -94,6 +95,37 @@ def _extract_labeled_value(text_upper: str, labels: list[str], pattern: str) -> 
     return None
 
 
+def _extract_date(text_upper: str) -> str | None:
+    # 17.Mar.2026 -> 2026-03-17
+    match = re.search(r"\b(\d{1,2})\.([A-Z]{3})\.(\d{4})\b", text_upper)
+    if not match:
+        return None
+    day = int(match.group(1))
+    month_name = match.group(2)
+    year = int(match.group(3))
+    months = {
+        "JAN": 1,
+        "FEB": 2,
+        "MAR": 3,
+        "APR": 4,
+        "MAY": 5,
+        "JUN": 6,
+        "JUL": 7,
+        "AUG": 8,
+        "SEP": 9,
+        "OCT": 10,
+        "NOV": 11,
+        "DEC": 12,
+    }
+    month = months.get(month_name)
+    if not month:
+        return None
+    try:
+        return datetime(year, month, day).strftime("%Y-%m-%d")
+    except ValueError:
+        return None
+
+
 def _compose_full_cipher_from_components(fields: dict[str, str]) -> str | None:
     required = ["project", "phase", "discipline", "doc_type", "serial", "revision"]
     if any(not fields.get(key) for key in required):
@@ -128,6 +160,13 @@ def extract_document_metadata(pdf_bytes: bytes, file_name: str) -> dict[str, Any
     doc_type = _extract_labeled_value(upper_text, ["DOC TYPE", "DOC. TYPE"], r"[A-Z0-9]{2,8}")
     serial = _extract_labeled_value(upper_text, ["SERIAL"], r"[A-Z0-9]{2,4}")
     revision = _extract_labeled_value(upper_text, ["REV", "REV."], r"[A-Z0-9]{1,4}")
+    document_class = _extract_labeled_value(upper_text, ["CLASS", "CLASS:"], r"[A-Z0-9]{1,8}")
+    issue_purpose = _extract_labeled_value(
+        upper_text,
+        ["ISSUED FOR", "DESCRIPTION"],
+        r"(REVIEW|APPROVAL|CONSTRUCTION|IFR|IFA|IFC|IFD|AFD|AS-BUILT)",
+    )
+    development_date = _extract_date(upper_text)
 
     match = FULL_CIPHER_RE.search(upper_text) or FULL_CIPHER_RE.search(filename_without_ext)
     if match:
@@ -169,12 +208,15 @@ def extract_document_metadata(pdf_bytes: bytes, file_name: str) -> dict[str, Any
         "project": project or parsed["project"],
         "phase": phase or parsed["phase"],
         "document_category": phase or parsed["document_category"],
+        "document_class": document_class or "",
         "unit": parsed["unit"],
         "title_code": parsed["title_code"],
         "discipline": discipline or parsed["discipline"],
         "doc_type": doc_type or parsed["doc_type"],
         "serial": serial or parsed["serial"],
         "revision": revision or parsed["revision"],
+        "issue_purpose": issue_purpose or "",
+        "development_date": development_date or "",
         "title_text": title_text,
     }
     found_in_text = bool(match and FULL_CIPHER_RE.search(upper_text))
@@ -198,8 +240,10 @@ def build_target_hierarchy(fields: dict[str, Any]) -> str:
         [
             _safe_token(str(fields.get("project", "unknown"))),
             _safe_token(str(fields.get("document_category", fields.get("phase", "unknown")))),
+            _safe_token(str(fields.get("document_class", "unknown"))),
             _safe_token(str(fields.get("discipline", "unknown"))),
             _safe_token(str(fields.get("title_code", "unknown"))),
+            _safe_token(str(fields.get("issue_purpose", "unknown"))),
             _safe_token(cipher_no_revision),
             _safe_token(str(fields.get("revision", "unknown"))),
         ]

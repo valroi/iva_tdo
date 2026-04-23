@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import json
+import shutil
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
@@ -78,8 +79,11 @@ class SmartUploadRegistryItem(BaseModel):
     revision: str
     project: str
     document_category: str
+    document_class: str
     discipline: str
     title_code: str
+    development_date: str | None = None
+    issue_purpose: str | None = None
     title_text: str | None = None
     hierarchy: str
     destination: str
@@ -87,6 +91,11 @@ class SmartUploadRegistryItem(BaseModel):
     pdf_relative_path: str
     source: str
     confidence: float
+
+
+class SmartUploadRegistryUpdatePayload(BaseModel):
+    entry_key: str
+    fields: dict[str, str | None]
 
 
 def _resolve_relative_path(relative_path: str) -> Path:
@@ -154,8 +163,11 @@ def _build_registry(root: Path) -> list[SmartUploadRegistryItem]:
             revision=str(fields.get("revision") or ""),
             project=str(fields.get("project") or ""),
             document_category=str(fields.get("document_category") or fields.get("phase") or ""),
+            document_class=str(fields.get("document_class") or ""),
             discipline=str(fields.get("discipline") or ""),
             title_code=str(fields.get("title_code") or ""),
+            development_date=(str(fields.get("development_date")) if fields.get("development_date") else None),
+            issue_purpose=(str(fields.get("issue_purpose")) if fields.get("issue_purpose") else None),
             title_text=(str(fields.get("title_text")) if fields.get("title_text") is not None else None),
             hierarchy=str(destination.relative_to(root)),
             destination=str(destination),
@@ -182,6 +194,25 @@ def _prune_empty_parent_dirs(path: Path, root: Path) -> None:
             break
         current.rmdir()
         current = current.parent
+
+
+def _normalize_fields_for_registry(raw_fields: dict[str, Any]) -> dict[str, Any]:
+    full_cipher = str(raw_fields.get("full_cipher") or "").upper()
+    chunks = [item.strip().upper() for item in full_cipher.split("-") if item.strip()]
+    while len(chunks) < 8:
+        chunks.append("00")
+    normalized = dict(raw_fields)
+    normalized["full_cipher"] = "-".join(chunks[:8]) if chunks else full_cipher
+    normalized["project"] = str(raw_fields.get("project") or chunks[0] if chunks else "").upper()
+    normalized["document_category"] = str(raw_fields.get("document_category") or raw_fields.get("phase") or (chunks[1] if len(chunks) > 1 else "")).upper()
+    normalized["phase"] = normalized["document_category"]
+    normalized["unit"] = str(raw_fields.get("unit") or (chunks[2] if len(chunks) > 2 else "00")).upper()
+    normalized["title_code"] = str(raw_fields.get("title_code") or (chunks[3] if len(chunks) > 3 else "00")).upper()
+    normalized["discipline"] = str(raw_fields.get("discipline") or (chunks[4] if len(chunks) > 4 else "")).upper()
+    normalized["doc_type"] = str(raw_fields.get("doc_type") or (chunks[5] if len(chunks) > 5 else "")).upper()
+    normalized["serial"] = str(raw_fields.get("serial") or (chunks[6] if len(chunks) > 6 else "")).upper()
+    normalized["revision"] = str(raw_fields.get("revision") or (chunks[7] if len(chunks) > 7 else "00")).upper()
+    return normalized
 
 
 @router.post("/preview", response_model=SmartUploadPreviewResponse)
@@ -330,6 +361,47 @@ def delete_smart_upload_registry_item(
     destination.rmdir()
     _prune_empty_parent_dirs(destination.parent, SMART_UPLOAD_ROOT.resolve())
     return {"deleted_files": removed_count, "deleted_folder": str(destination)}
+
+
+@router.put("/registry-item", response_model=SmartUploadRegistryItem)
+def update_smart_upload_registry_item(
+    payload: SmartUploadRegistryUpdatePayload,
+    _: User = Depends(require_permissions("can_upload_files")),
+):
+    metadata_path = _resolve_relative_path(payload.entry_key)
+    if metadata_path.name != "_smart_upload_result.json":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid registry entry key")
+    if not metadata_path.exists() or not metadata_path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Registry entry not found")
+
+    data = json.loads(metadata_path.read_text(encoding="utf-8"))
+    fields = dict(data.get("fields") or {})
+    for key, value in payload.fields.items():
+        if value is not None:
+            fields[key] = str(value).strip()
+    fields = _normalize_fields_for_registry(fields)
+    data["fields"] = fields
+
+    current_dir = metadata_path.parent
+    new_hierarchy = build_target_hierarchy(fields)
+    new_dir = (SMART_UPLOAD_ROOT / new_hierarchy).resolve()
+    root = SMART_UPLOAD_ROOT.resolve()
+    if root not in new_dir.parents and new_dir != root:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid target hierarchy")
+    if new_dir != current_dir.resolve():
+        new_dir.mkdir(parents=True, exist_ok=True)
+        for file_path in current_dir.iterdir():
+            shutil.move(str(file_path), str(new_dir / file_path.name))
+        current_dir.rmdir()
+        _prune_empty_parent_dirs(current_dir.parent, root)
+        metadata_path = new_dir / "_smart_upload_result.json"
+    metadata_path.write_text(json.dumps(data, ensure_ascii=True, indent=2), encoding="utf-8")
+
+    registry_rows = _build_registry(SMART_UPLOAD_ROOT)
+    row = next((item for item in registry_rows if item.entry_key == str(metadata_path.relative_to(SMART_UPLOAD_ROOT))), None)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Registry update failed")
+    return row
 
 
 @router.get("/file")

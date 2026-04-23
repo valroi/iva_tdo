@@ -11,6 +11,7 @@ import {
   smartUploadProcessBatch,
   smartUploadPreview,
   smartUploadProcess,
+  updateSmartUploadRegistryItem,
   type SmartUploadRegistryItem,
   type SmartUploadPreviewResult,
   type SmartUploadBatchProcessResult,
@@ -45,12 +46,22 @@ export default function DocCheckerPage(): JSX.Element {
   const [loadingProcess, setLoadingProcess] = useState(false);
   const [loadingBatchProcess, setLoadingBatchProcess] = useState(false);
   const [treeLoading, setTreeLoading] = useState(false);
-  type HierarchyKey = "project" | "document_category" | "discipline" | "title_code" | "cipher_no_revision" | "revision";
+  type HierarchyKey =
+    | "project"
+    | "document_category"
+    | "document_class"
+    | "discipline"
+    | "title_code"
+    | "issue_purpose"
+    | "cipher_no_revision"
+    | "revision";
   const [hierarchyOrder, setHierarchyOrder] = useState<HierarchyKey[]>([
     "project",
     "document_category",
+    "document_class",
     "discipline",
     "title_code",
+    "issue_purpose",
     "cipher_no_revision",
     "revision",
   ]);
@@ -60,12 +71,16 @@ export default function DocCheckerPage(): JSX.Element {
   const [previewModalOpen, setPreviewModalOpen] = useState(false);
   const [previewPdfTitle, setPreviewPdfTitle] = useState<string>("");
   const [previewPdfUrl, setPreviewPdfUrl] = useState<string>("");
+  const [editingEntryKey, setEditingEntryKey] = useState<string | null>(null);
+  const [editingFields, setEditingFields] = useState<Record<string, string>>({});
   const [form] = Form.useForm<FieldMap>();
   const hierarchyLabels: Record<HierarchyKey, string> = {
     project: "Проект",
     document_category: "Категория",
+    document_class: "Класс",
     discipline: "Дисциплина",
     title_code: "Титул",
+    issue_purpose: "Цель выпуска",
     cipher_no_revision: "Шифр без ревизии",
     revision: "Ревизия",
   };
@@ -315,6 +330,38 @@ export default function DocCheckerPage(): JSX.Element {
     }
   };
 
+  const startEditRegistryItem = (row: SmartUploadRegistryItem) => {
+    setEditingEntryKey(row.entry_key);
+    setEditingFields({
+      full_cipher: row.full_cipher,
+      document_class: row.document_class || "",
+      development_date: row.development_date || "",
+      issue_purpose: row.issue_purpose || "",
+      title_text: row.title_text || "",
+    });
+  };
+
+  const cancelEditRegistryItem = () => {
+    setEditingEntryKey(null);
+    setEditingFields({});
+  };
+
+  const saveEditRegistryItem = async (row: SmartUploadRegistryItem) => {
+    try {
+      await updateSmartUploadRegistryItem({
+        entry_key: row.entry_key,
+        fields: editingFields,
+      });
+      message.success("Документ обновлен");
+      setEditingEntryKey(null);
+      setEditingFields({});
+      await loadRegistry();
+      await loadTree();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "Не удалось сохранить изменения");
+    }
+  };
+
   const docChatAnswer = useMemo(() => {
     if (!docChatQuery.trim()) return "Введи запрос: шифр, дисциплина, категория, титул.";
     if (filteredRegistry.length === 0) return "Ничего не найдено. Попробуй упростить запрос.";
@@ -510,16 +557,96 @@ export default function DocCheckerPage(): JSX.Element {
             columns={[
               { title: "Проект", dataIndex: "project", width: 80 },
               { title: "Категория", dataIndex: "document_category", width: 110 },
+              {
+                title: "Класс",
+                dataIndex: "document_class",
+                width: 90,
+                render: (_, row) =>
+                  editingEntryKey === row.entry_key ? (
+                    <Input
+                      value={editingFields.document_class ?? ""}
+                      onChange={(event) =>
+                        setEditingFields((prev) => ({ ...prev, document_class: event.target.value }))
+                      }
+                    />
+                  ) : (
+                    row.document_class || "—"
+                  ),
+              },
               { title: "Дисц.", dataIndex: "discipline", width: 90 },
               { title: "Титул", dataIndex: "title_code", width: 90 },
               { title: "Шифр без рев.", dataIndex: "cipher_no_revision", width: 260 },
               { title: "Рев.", dataIndex: "revision", width: 70 },
-              { title: "Полный шифр", dataIndex: "full_cipher", width: 260 },
-              { title: "Название", dataIndex: "title_text", width: 240, ellipsis: true },
+              {
+                title: "Полный шифр",
+                dataIndex: "full_cipher",
+                width: 260,
+                render: (_, row) =>
+                  editingEntryKey === row.entry_key ? (
+                    <Input
+                      value={editingFields.full_cipher ?? ""}
+                      onChange={(event) =>
+                        setEditingFields((prev) => ({ ...prev, full_cipher: event.target.value }))
+                      }
+                    />
+                  ) : (
+                    row.full_cipher
+                  ),
+              },
+              {
+                title: "Дата разработки",
+                dataIndex: "development_date",
+                width: 140,
+                render: (_, row) =>
+                  editingEntryKey === row.entry_key ? (
+                    <Input
+                      placeholder="YYYY-MM-DD"
+                      value={editingFields.development_date ?? ""}
+                      onChange={(event) =>
+                        setEditingFields((prev) => ({ ...prev, development_date: event.target.value }))
+                      }
+                    />
+                  ) : (
+                    row.development_date || "—"
+                  ),
+              },
+              {
+                title: "Цель выпуска",
+                dataIndex: "issue_purpose",
+                width: 140,
+                render: (_, row) =>
+                  editingEntryKey === row.entry_key ? (
+                    <Input
+                      value={editingFields.issue_purpose ?? ""}
+                      onChange={(event) =>
+                        setEditingFields((prev) => ({ ...prev, issue_purpose: event.target.value }))
+                      }
+                    />
+                  ) : (
+                    row.issue_purpose || "—"
+                  ),
+              },
+              {
+                title: "Название",
+                dataIndex: "title_text",
+                width: 240,
+                ellipsis: true,
+                render: (_, row) =>
+                  editingEntryKey === row.entry_key ? (
+                    <Input
+                      value={editingFields.title_text ?? ""}
+                      onChange={(event) =>
+                        setEditingFields((prev) => ({ ...prev, title_text: event.target.value }))
+                      }
+                    />
+                  ) : (
+                    row.title_text || "—"
+                  ),
+              },
               {
                 title: "PDF",
                 key: "pdf_preview",
-                width: 180,
+                width: 270,
                 render: (_, row) => (
                   <Space>
                     <Button
@@ -549,6 +676,20 @@ export default function DocCheckerPage(): JSX.Element {
                         Удалить
                       </Button>
                     </Popconfirm>
+                    {editingEntryKey === row.entry_key ? (
+                      <>
+                        <Button type="link" size="small" onClick={() => void saveEditRegistryItem(row)}>
+                          Сохранить
+                        </Button>
+                        <Button type="link" size="small" onClick={cancelEditRegistryItem}>
+                          Отмена
+                        </Button>
+                      </>
+                    ) : (
+                      <Button type="link" size="small" onClick={() => startEditRegistryItem(row)}>
+                        Редактировать
+                      </Button>
+                    )}
                   </Space>
                 ),
               },
