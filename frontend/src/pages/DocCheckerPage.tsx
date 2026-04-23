@@ -1,5 +1,5 @@
-import { InboxOutlined } from "@ant-design/icons";
-import { Alert, Button, Card, Col, Form, Input, Modal, Popconfirm, Row, Select, Space, Table, Tree, Typography, Upload, message } from "antd";
+import { InboxOutlined, LeftOutlined, RightOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Col, Form, Input, Modal, Popconfirm, Row, Space, Table, Tree, Typography, Upload, message } from "antd";
 import type { UploadFile } from "antd/es/upload/interface";
 import type { DataNode } from "antd/es/tree";
 import { useEffect, useMemo, useState } from "react";
@@ -45,7 +45,8 @@ export default function DocCheckerPage(): JSX.Element {
   const [loadingProcess, setLoadingProcess] = useState(false);
   const [loadingBatchProcess, setLoadingBatchProcess] = useState(false);
   const [treeLoading, setTreeLoading] = useState(false);
-  const [hierarchyOrder, setHierarchyOrder] = useState<Array<"project" | "document_category" | "discipline" | "title_code" | "cipher_no_revision" | "revision">>([
+  type HierarchyKey = "project" | "document_category" | "discipline" | "title_code" | "cipher_no_revision" | "revision";
+  const [hierarchyOrder, setHierarchyOrder] = useState<HierarchyKey[]>([
     "project",
     "document_category",
     "discipline",
@@ -60,6 +61,14 @@ export default function DocCheckerPage(): JSX.Element {
   const [previewPdfTitle, setPreviewPdfTitle] = useState<string>("");
   const [previewPdfUrl, setPreviewPdfUrl] = useState<string>("");
   const [form] = Form.useForm<FieldMap>();
+  const hierarchyLabels: Record<HierarchyKey, string> = {
+    project: "Проект",
+    document_category: "Категория",
+    discipline: "Дисциплина",
+    title_code: "Титул",
+    cipher_no_revision: "Шифр без ревизии",
+    revision: "Ревизия",
+  };
 
   const loadTree = async () => {
     setTreeLoading(true);
@@ -207,7 +216,7 @@ export default function DocCheckerPage(): JSX.Element {
 
     const getLevelValue = (
       row: SmartUploadRegistryItem,
-      key: "project" | "document_category" | "discipline" | "title_code" | "cipher_no_revision" | "revision",
+      key: HierarchyKey,
     ): string => String(row[key] ?? "—");
 
     for (const row of rows) {
@@ -280,6 +289,20 @@ export default function DocCheckerPage(): JSX.Element {
       return terms.every((term) => source.includes(term));
     });
   }, [registry, docChatQuery]);
+
+  const moveHierarchyLevel = (index: number, direction: -1 | 1) => {
+    setHierarchyOrder((prev) => {
+      const nextIndex = index + direction;
+      if (nextIndex < 0 || nextIndex >= prev.length) {
+        return prev;
+      }
+      const next = [...prev];
+      const temp = next[index];
+      next[index] = next[nextIndex];
+      next[nextIndex] = temp;
+      return next;
+    });
+  };
 
   const handleDeleteRegistryItem = async (row: SmartUploadRegistryItem) => {
     try {
@@ -433,21 +456,25 @@ export default function DocCheckerPage(): JSX.Element {
         className="hrp-card"
         extra={
           <Space>
-            <Select
-              mode="multiple"
-              value={hierarchyOrder}
-              onChange={(value) => setHierarchyOrder(value as Array<"project" | "document_category" | "discipline" | "title_code" | "cipher_no_revision" | "revision">)}
-              style={{ minWidth: 420 }}
-              options={[
-                { label: "Проект", value: "project" },
-                { label: "Категория", value: "document_category" },
-                { label: "Дисциплина", value: "discipline" },
-                { label: "Титул", value: "title_code" },
-                { label: "Шифр без ревизии", value: "cipher_no_revision" },
-                { label: "Ревизия", value: "revision" },
-              ]}
-              placeholder="Порядок уровней дерева"
-            />
+            <Space size={4} wrap>
+              {hierarchyOrder.map((level, index) => (
+                <Space key={level} size={4}>
+                  <Typography.Text>{hierarchyLabels[level]}</Typography.Text>
+                  <Button
+                    size="small"
+                    icon={<LeftOutlined />}
+                    onClick={() => moveHierarchyLevel(index, -1)}
+                    disabled={index === 0}
+                  />
+                  <Button
+                    size="small"
+                    icon={<RightOutlined />}
+                    onClick={() => moveHierarchyLevel(index, 1)}
+                    disabled={index === hierarchyOrder.length - 1}
+                  />
+                </Space>
+              ))}
+            </Space>
             <Button loading={treeLoading} onClick={() => void loadTree()}>
               Обновить
             </Button>

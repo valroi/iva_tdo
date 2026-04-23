@@ -149,6 +149,21 @@ def extract_document_metadata(pdf_bytes: bytes, file_name: str) -> dict[str, Any
     parsed = _parse_cipher(full_cipher)
     title_text = _extract_title(text)
 
+    merged_for_cipher = {
+        "project": project or parsed["project"],
+        "phase": phase or parsed["phase"],
+        "discipline": discipline or parsed["discipline"],
+        "doc_type": doc_type or parsed["doc_type"],
+        "serial": serial or parsed["serial"],
+        "revision": revision or parsed["revision"],
+        "unit": parsed["unit"],
+        "title_code": parsed["title_code"],
+    }
+    recomposed_cipher = _compose_full_cipher_from_components(merged_for_cipher)
+    if recomposed_cipher:
+        full_cipher = recomposed_cipher
+        parsed = _parse_cipher(full_cipher)
+
     fields = {
         "full_cipher": full_cipher,
         "project": project or parsed["project"],
