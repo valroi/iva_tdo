@@ -22,6 +22,7 @@ interface Props {
   canManageOwnerRemarks?: boolean;
   carryOverRemarks?: CarryRemark[];
   carryClosedIds?: number[];
+  carryDecidedIds?: number[];
   onCarryOpen?: (item: CarryRemark) => Promise<void>;
   onCarryClose?: (id: number) => void;
   onCarryReopen?: (id: number) => void;
@@ -67,6 +68,7 @@ export default function RevisionPdfAnnotator({
   canManageOwnerRemarks = false,
   carryOverRemarks = [],
   carryClosedIds = [],
+  carryDecidedIds = [],
   onCarryOpen,
   onCarryClose,
   onCarryReopen,
@@ -293,8 +295,15 @@ export default function RevisionPdfAnnotator({
       message.warning("Сначала выбери замечание из списка");
       return;
     }
-    if (comments.find((item) => item.id === activeCommentId)?.contractor_status) {
-      message.warning("Статус подрядчика уже установлен для этого замечания");
+    const active = comments.find((item) => item.id === activeCommentId) ?? null;
+    if (!active) {
+      message.warning("Замечание не найдено");
+      return;
+    }
+    const canSetI = active.contractor_status === null;
+    const canSetA = active.contractor_status === null || (active.contractor_status === "I" && active.backlog_status === "LR_FINAL_CONFIRM");
+    if ((status === "I" && !canSetI) || (status === "A" && !canSetA)) {
+      message.warning("Для этого замечания доступен только финальный ответ A");
       return;
     }
     await respondToComment(activeCommentId, {
@@ -326,7 +335,12 @@ export default function RevisionPdfAnnotator({
     await onCreated();
   };
   const contractorPendingParentComments = useMemo(
-    () => comments.filter((item) => item.parent_id === null && item.contractor_status === null),
+    () =>
+      comments.filter(
+        (item) =>
+          item.parent_id === null &&
+          (item.contractor_status === null || (item.contractor_status === "I" && item.backlog_status === "LR_FINAL_CONFIRM")),
+      ),
     [comments],
   );
   const carryOpenRemarks = useMemo(
@@ -524,6 +538,23 @@ export default function RevisionPdfAnnotator({
                             Отклонить замечание
                           </Button>
                         )}
+                        {active.contractor_status === "I" && active.backlog_status !== "LR_FINAL_CONFIRM" && (
+                          <Button
+                            size="small"
+                            onClick={async () => {
+                              const note = window.prompt("Комментарий подрядчику (финальное подтверждение замечания):", "");
+                              if (!note || note.trim().length < 3) {
+                                message.warning("Нужен комментарий минимум 3 символа");
+                                return;
+                              }
+                              await ownerCommentDecision(active.id, { action: "FINAL_CONFIRM", note: note.trim() });
+                              message.success("LR финально подтвердил замечание, подрядчику доступен только статус A");
+                              await onCreated();
+                            }}
+                          >
+                            Финально подтвердить (LR)
+                          </Button>
+                        )}
                       </>
                     );
                   })()}
@@ -592,6 +623,7 @@ export default function RevisionPdfAnnotator({
                               <Space>
                                 <Button
                                   size="small"
+                                  disabled={carryDecidedIds.includes(item.id)}
                                   onClick={async () => {
                                     if (!revisionId) return;
                                     if (onCarryOpen) {
@@ -627,6 +659,7 @@ export default function RevisionPdfAnnotator({
                                 </Button>
                                 <Button
                                   size="small"
+                                  disabled={carryDecidedIds.includes(item.id)}
                                   onClick={() => onCarryClose?.(item.id)}
                                 >
                                   CLOSED
@@ -650,6 +683,7 @@ export default function RevisionPdfAnnotator({
                               </Typography.Text>
                               <Button
                                 size="small"
+                                disabled={carryDecidedIds.includes(item.id)}
                                 onClick={() => onCarryReopen?.(item.id)}
                               >
                                 Вернуть в OPEN
@@ -674,7 +708,11 @@ export default function RevisionPdfAnnotator({
                   }}
                   disabled={
                     !activeCommentId ||
-                    comments.find((item) => item.id === activeCommentId)?.contractor_status !== null ||
+                    (() => {
+                      const active = comments.find((item) => item.id === activeCommentId);
+                      if (!active) return true;
+                      return active.contractor_status !== null;
+                    })() ||
                     contractorPendingParentComments.length === 0
                   }
                 >
@@ -688,7 +726,11 @@ export default function RevisionPdfAnnotator({
                   }}
                   disabled={
                     !activeCommentId ||
-                    comments.find((item) => item.id === activeCommentId)?.contractor_status !== null ||
+                    (() => {
+                      const active = comments.find((item) => item.id === activeCommentId);
+                      if (!active) return true;
+                      return !(active.contractor_status === null || (active.contractor_status === "I" && active.backlog_status === "LR_FINAL_CONFIRM"));
+                    })() ||
                     contractorPendingParentComments.length === 0
                   }
                 >

@@ -18,7 +18,19 @@ except Exception:  # pragma: no cover - optional dependency fallback
 FULL_CIPHER_RE = re.compile(
     r"\b([A-Z0-9]{2,}-[A-Z0-9]{2,}-[A-Z0-9]{2,}-[A-Z0-9]{2,}-[A-Z0-9]{2,}-[A-Z0-9]{2,}-[A-Z0-9]{2,4}-[A-Z0-9]{2,})\b"
 )
+SPACED_CIPHER_RE = re.compile(
+    r"\b([A-Z0-9]{2,})[\s\-]+([A-Z0-9]{2,})[\s\-]+([A-Z0-9]{2,})[\s\-]+([A-Z0-9]{2,})[\s\-]+([A-Z0-9]{2,})[\s\-]+([A-Z0-9]{2,})[\s\-]+([A-Z0-9]{2,4})[\s\-]+([A-Z0-9]{2})\b"
+)
 GENERIC_TITLE_PREFIXES = ("page ", "class:", "doc. type", "project", "-- ")
+ISSUE_PURPOSE_MAP = {
+    "APPROVAL": "IFA",
+    "REVIEW": "IFR",
+    "CONSTRUCTION": "IFC",
+    "DESIGN": "IFD",
+    "FINAL": "FIN",
+    "AS-BUILT": "ASB",
+}
+INVALID_LABEL_VALUES = {"PROJECT", "PHASE", "UNIT", "TITLE", "SERIAL", "REV", "DISC", "DOC", "TYPE", "CLASS"}
 
 
 def _safe_token(value: str) -> str:
@@ -87,17 +99,163 @@ def _extract_title(text: str) -> str | None:
     return None
 
 
+def _extract_english_labeled_line(text: str, label: str) -> str | None:
+    # Handles bilingual stamp rows where the first (English) row should win.
+    lines = [re.sub(r"\s+", " ", line).strip() for line in text.splitlines()]
+    for index, line in enumerate(lines):
+        upper_line = line.upper()
+        if not upper_line.startswith(label):
+            continue
+        value = re.sub(rf"^{re.escape(label)}\s*[:\-]?\s*", "", line, flags=re.IGNORECASE).strip()
+        if value:
+            return value
+        if index + 1 < len(lines):
+            next_line = lines[index + 1].strip()
+            # Skip obvious RU helper line after bilingual label.
+            if any(token in next_line.upper() for token in ["НАИМЕНОВАНИЕ", "КЛАСС", "ПРОЕКТА", "НОМЕР ДОКУМЕНТА"]):
+                continue
+            return next_line or None
+    return None
+
+
+def _extract_drawing_title_parts(text: str) -> tuple[str | None, str | None]:
+    upper_text = text.upper()
+    start_match = re.search(r"DRAWING\s+TITLE\s*:", upper_text)
+    if not start_match:
+        return None, None
+
+    tail = text[start_match.end() :]
+    stop_match = re.search(
+        r"\n\s*(DOCUMENT\s+NO\.|CLASS\s*:|PROJECT\s+PHASE|OWNER\s*:|CONTRACTOR\s*:)",
+        tail,
+        flags=re.IGNORECASE,
+    )
+    block = tail[: stop_match.start()] if stop_match else tail[:400]
+    lines = [re.sub(r"\s+", " ", line).strip(" .-") for line in block.splitlines() if line.strip()]
+
+    ru_parts: list[str] = []
+    en_parts: list[str] = []
+    for raw in lines:
+        line = raw
+        line = re.sub(r"^НАИМЕНОВАНИЕ\s*:\s*", "", line, flags=re.IGNORECASE).strip()
+        if not line:
+            continue
+        if "/" in line:
+            left, right = [part.strip(" .-") for part in line.split("/", 1)]
+            if left and re.search(r"[А-ЯЁ]", left.upper()):
+                ru_parts.append(left)
+            elif left:
+                en_parts.append(left)
+            if right and re.search(r"[A-Z]", right.upper()):
+                en_parts.append(right)
+            elif right:
+                ru_parts.append(right)
+            continue
+        has_cyr = bool(re.search(r"[А-ЯЁ]", line.upper()))
+        has_lat = bool(re.search(r"[A-Z]", line.upper()))
+        if has_lat and not has_cyr:
+            en_parts.append(line)
+        elif has_cyr and not has_lat:
+            ru_parts.append(line)
+        elif has_lat and has_cyr:
+            # Mixed line: prefer English tail if present.
+            en_candidate = re.sub(r"^[^A-Za-z]*", "", line).strip(" .-")
+            ru_candidate = re.sub(r"[^А-Яа-яЁё].*$", "", line).strip(" .-")
+            if ru_candidate:
+                ru_parts.append(ru_candidate)
+            if en_candidate and re.search(r"[A-Z]", en_candidate.upper()):
+                en_parts.append(en_candidate)
+
+    en_title = " ".join(part for part in en_parts if part).strip() or None
+    ru_title = " ".join(part for part in ru_parts if part).strip() or None
+    return en_title, ru_title
+
+
 def _extract_labeled_value(text_upper: str, labels: list[str], pattern: str) -> str | None:
     label_union = "|".join(re.escape(item) for item in labels)
     match = re.search(rf"(?:{label_union})\s*[:\-]?\s*({pattern})", text_upper)
     if match:
-        return match.group(1).strip().upper()
+        value = match.group(1).strip().upper()
+        if value in INVALID_LABEL_VALUES:
+            return None
+        return value
     return None
 
 
+def _extract_cipher_from_text(text_upper: str) -> str | None:
+    direct = FULL_CIPHER_RE.search(text_upper)
+    if direct:
+        candidate = direct.group(1)
+        if _is_plausible_cipher(candidate):
+            return candidate
+
+    for match in SPACED_CIPHER_RE.finditer(text_upper):
+        chunks = [part.strip().upper() for part in match.groups()]
+        if len(chunks) != 8:
+            continue
+        if not chunks[6].isdigit() or not chunks[7].isdigit():
+            continue
+        if not re.search(r"[A-Z]", chunks[4]):
+            continue
+        if not re.search(r"[A-Z]", chunks[5]):
+            continue
+        if chunks[0] in INVALID_LABEL_VALUES or chunks[1] in INVALID_LABEL_VALUES:
+            continue
+        return "-".join(chunks)
+    return None
+
+
+def _is_plausible_cipher(cipher: str) -> bool:
+    parts = [p.strip().upper() for p in cipher.split("-") if p.strip()]
+    if len(parts) < 8:
+        return False
+    discipline = parts[4]
+    doc_type = parts[5]
+    serial = parts[6]
+    revision = parts[7]
+    if discipline == doc_type:
+        return False
+    if not serial.isdigit() or not revision.isdigit():
+        return False
+    return True
+
+
+def _extract_stamp_triplet(text_upper: str) -> tuple[str | None, str | None, str | None]:
+    # Typical stamp row: "00 24.FEB.2026 ISSUED FOR APPROVAL ..."
+    match = re.search(
+        r"\b([0-9]{2}|[A-Z]{1,2})\s+(\d{1,2}[.\-/][A-Z]{3}[.\-/]\d{4})\s+ISSUED\s+FOR\s+([A-Z\- ]{3,40})",
+        text_upper,
+    )
+    if not match:
+        return None, None, None
+    revision = match.group(1).strip().upper()
+    date_raw = match.group(2).strip().upper().replace("-", ".").replace("/", ".")
+    purpose_raw = match.group(3).strip().upper()
+    purpose_code = ""
+    for key, code in ISSUE_PURPOSE_MAP.items():
+        if key in purpose_raw:
+            purpose_code = code
+            break
+    if not purpose_code and purpose_raw in {"IFA", "IFR", "IFD", "IFC", "FIN", "AFD"}:
+        purpose_code = purpose_raw
+    return revision, date_raw, purpose_code or None
+
+
+def _normalize_issue_purpose(value: str | None) -> str:
+    raw = (value or "").strip().upper()
+    if not raw:
+        return ""
+    if raw in {"IFA", "IFR", "IFD", "IFC", "FIN", "AFD", "ASB"}:
+        return raw
+    for key, code in ISSUE_PURPOSE_MAP.items():
+        if key in raw:
+            return code
+    return raw
+
+
 def _extract_date(text_upper: str) -> str | None:
-    # 17.Mar.2026 -> 2026-03-17
-    match = re.search(r"\b(\d{1,2})\.([A-Z]{3})\.(\d{4})\b", text_upper)
+    # Supports: 17.Mar.2026, 17 MAR.2026, 17-Mar-2026
+    match = re.search(r"\b(\d{1,2})[.\-/\s]+([A-Z]{3})[.\-/\s]+(\d{4})\b", text_upper)
     if not match:
         return None
     day = int(match.group(1))
@@ -124,6 +282,44 @@ def _extract_date(text_upper: str) -> str | None:
         return datetime(year, month, day).strftime("%Y-%m-%d")
     except ValueError:
         return None
+
+
+def _extract_revision_rows(text_upper: str) -> list[tuple[str, str, str]]:
+    rows: list[tuple[str, str, str]] = []
+    pattern = re.compile(
+        r"\b([0-9]{2}|[A-Z]{1,2})\s+(\d{1,2}[.\-/\s]+[A-Z]{3}[.\-/\s]+\d{4})\s+ISSUED\s+FOR\s+([A-Z\- ]{3,60})"
+    )
+    for match in pattern.finditer(text_upper):
+        rev = match.group(1).strip().upper()
+        date_raw = re.sub(r"\s+", ".", match.group(2).strip().upper())
+        purpose_raw = match.group(3).strip().upper()
+        rows.append((rev, date_raw, purpose_raw))
+    return rows
+
+
+def _extract_components_from_title_block(text_upper: str) -> dict[str, str]:
+    # Typical title block value row:
+    # IMP FD 90 05 ST DWG 196 01
+    header = re.search(r"PROJECT\s+PHASE\s+UNIT\s+TITLE\s+DISC\.?\s+DOC\.?\s*TYPE\s+SERIAL\s+REV\.?", text_upper)
+    if not header:
+        return {}
+    tail = text_upper[header.end() : header.end() + 800]
+    value_row = re.search(
+        r"\b([A-Z0-9]{2,8})\s+([A-Z0-9]{2,8})\s+([A-Z0-9]{1,4})\s+([A-Z0-9]{1,4})\s+([A-Z0-9]{1,8})\s+([A-Z0-9]{2,8})\s+([A-Z0-9]{2,4})\s+([A-Z0-9]{2,4})\b",
+        tail,
+    )
+    if not value_row:
+        return {}
+    return {
+        "project": value_row.group(1),
+        "phase": value_row.group(2),
+        "unit": value_row.group(3),
+        "title_code": value_row.group(4),
+        "discipline": value_row.group(5),
+        "doc_type": value_row.group(6),
+        "serial": value_row.group(7),
+        "revision": value_row.group(8),
+    }
 
 
 def _compose_full_cipher_from_components(fields: dict[str, str]) -> str | None:
@@ -154,23 +350,52 @@ def extract_document_metadata(pdf_bytes: bytes, file_name: str) -> dict[str, Any
     upper_text = text.upper()
     filename_without_ext = Path(file_name).stem.upper()
 
-    project = _extract_labeled_value(upper_text, ["PROJECT"], r"[A-Z0-9]{2,8}")
-    phase = _extract_labeled_value(upper_text, ["PHASE"], r"[A-Z0-9]{2,8}")
-    discipline = _extract_labeled_value(upper_text, ["DISC", "DISC.", "DISCIPLINE"], r"[A-Z0-9]{1,8}")
-    doc_type = _extract_labeled_value(upper_text, ["DOC TYPE", "DOC. TYPE"], r"[A-Z0-9]{2,8}")
-    serial = _extract_labeled_value(upper_text, ["SERIAL"], r"[A-Z0-9]{2,4}")
-    revision = _extract_labeled_value(upper_text, ["REV", "REV."], r"[A-Z0-9]{1,4}")
+    block_components = _extract_components_from_title_block(upper_text)
+    project = block_components.get("project") or _extract_labeled_value(upper_text, ["PROJECT"], r"[A-Z0-9]{2,8}")
+    phase = block_components.get("phase") or _extract_labeled_value(upper_text, ["PHASE"], r"[A-Z0-9]{2,8}")
+    discipline = block_components.get("discipline") or _extract_labeled_value(upper_text, ["DISC", "DISC.", "DISCIPLINE"], r"[A-Z]{1,8}")
+    doc_type = block_components.get("doc_type") or _extract_labeled_value(upper_text, ["DOC TYPE", "DOC. TYPE"], r"[A-Z]{2,8}")
+    serial = block_components.get("serial") or _extract_labeled_value(upper_text, ["SERIAL"], r"[A-Z0-9]{2,4}")
+    revision = block_components.get("revision") or _extract_labeled_value(upper_text, ["REV", "REV."], r"[A-Z0-9]{1,4}")
+    drawing_title_en, drawing_title_ru = _extract_drawing_title_parts(text)
+    class_from_stamp = _extract_english_labeled_line(text, "DRAWING TITLE")
+    title_from_stamp = _extract_english_labeled_line(text, "CLASS")
     document_class = _extract_labeled_value(upper_text, ["CLASS", "CLASS:"], r"[A-Z0-9]{1,8}")
+    if title_from_stamp:
+        class_match = re.search(r"\b([0-9A-Z]{1,4})\b", title_from_stamp.upper())
+        if class_match:
+            document_class = class_match.group(1)
     issue_purpose = _extract_labeled_value(
         upper_text,
         ["ISSUED FOR", "DESCRIPTION"],
         r"(REVIEW|APPROVAL|CONSTRUCTION|IFR|IFA|IFC|IFD|AFD|AS-BUILT)",
     )
     development_date = _extract_date(upper_text)
+    revision_rows = _extract_revision_rows(upper_text)
+    if revision_rows:
+        latest_rev, latest_date_raw, latest_purpose_raw = revision_rows[0]
+        revision = latest_rev or revision
+        parsed_latest_date = _extract_date(latest_date_raw)
+        if parsed_latest_date:
+            development_date = parsed_latest_date
+        issue_purpose = _normalize_issue_purpose(latest_purpose_raw) or issue_purpose
+    else:
+        stamp_revision, stamp_date_raw, stamp_purpose = _extract_stamp_triplet(upper_text)
+        if stamp_revision:
+            revision = stamp_revision
+        if stamp_date_raw:
+            parsed_stamp_date = _extract_date(stamp_date_raw)
+            if parsed_stamp_date:
+                development_date = parsed_stamp_date
+        if stamp_purpose:
+            issue_purpose = stamp_purpose
 
-    match = FULL_CIPHER_RE.search(upper_text) or FULL_CIPHER_RE.search(filename_without_ext)
-    if match:
-        full_cipher = match.group(1)
+    text_cipher = _extract_cipher_from_text(upper_text)
+    filename_match = FULL_CIPHER_RE.search(filename_without_ext)
+    if text_cipher and _is_plausible_cipher(text_cipher):
+        full_cipher = text_cipher
+    elif filename_match:
+        full_cipher = filename_match.group(1)
     else:
         composed = _compose_full_cipher_from_components(
             {
@@ -186,40 +411,45 @@ def extract_document_metadata(pdf_bytes: bytes, file_name: str) -> dict[str, Any
         )
         full_cipher = composed or filename_without_ext
     parsed = _parse_cipher(full_cipher)
-    title_text = _extract_title(text)
+    title_text = drawing_title_en or class_from_stamp or _extract_title(text)
+    has_reliable_cipher = bool(text_cipher or filename_match)
 
     merged_for_cipher = {
-        "project": project or parsed["project"],
-        "phase": phase or parsed["phase"],
-        "discipline": discipline or parsed["discipline"],
-        "doc_type": doc_type or parsed["doc_type"],
-        "serial": serial or parsed["serial"],
+        "project": parsed["project"] if has_reliable_cipher else (project or parsed["project"]),
+        "phase": parsed["phase"] if has_reliable_cipher else (phase or parsed["phase"]),
+        "discipline": parsed["discipline"] if has_reliable_cipher else (discipline or parsed["discipline"]),
+        "doc_type": parsed["doc_type"] if has_reliable_cipher else (doc_type or parsed["doc_type"]),
+        "serial": parsed["serial"] if has_reliable_cipher else (serial or parsed["serial"]),
         "revision": revision or parsed["revision"],
-        "unit": parsed["unit"],
-        "title_code": parsed["title_code"],
+        "unit": block_components.get("unit") or parsed["unit"],
+        "title_code": block_components.get("title_code") or parsed["title_code"],
     }
+    if merged_for_cipher.get("revision", "").isdigit() and len(merged_for_cipher["revision"]) == 1:
+        merged_for_cipher["revision"] = f"0{merged_for_cipher['revision']}"
     recomposed_cipher = _compose_full_cipher_from_components(merged_for_cipher)
     if recomposed_cipher:
         full_cipher = recomposed_cipher
         parsed = _parse_cipher(full_cipher)
 
     fields = {
+        "cipher": full_cipher,
         "full_cipher": full_cipher,
-        "project": project or parsed["project"],
-        "phase": phase or parsed["phase"],
-        "document_category": phase or parsed["document_category"],
+        "project": parsed["project"] if has_reliable_cipher else (project or parsed["project"]),
+        "phase": parsed["phase"] if has_reliable_cipher else (phase or parsed["phase"]),
+        "document_category": parsed["document_category"] if has_reliable_cipher else (phase or parsed["document_category"]),
         "document_class": document_class or "",
-        "unit": parsed["unit"],
-        "title_code": parsed["title_code"],
-        "discipline": discipline or parsed["discipline"],
-        "doc_type": doc_type or parsed["doc_type"],
-        "serial": serial or parsed["serial"],
+        "unit": block_components.get("unit") or parsed["unit"],
+        "title_code": block_components.get("title_code") or parsed["title_code"],
+        "discipline": parsed["discipline"] if has_reliable_cipher else (discipline or parsed["discipline"]),
+        "doc_type": parsed["doc_type"] if has_reliable_cipher else (doc_type or parsed["doc_type"]),
+        "serial": parsed["serial"] if has_reliable_cipher else (serial or parsed["serial"]),
         "revision": revision or parsed["revision"],
-        "issue_purpose": issue_purpose or "",
+        "issue_purpose": _normalize_issue_purpose(issue_purpose),
         "development_date": development_date or "",
         "title_text": title_text,
+        "title_text_ru": drawing_title_ru,
     }
-    found_in_text = bool(match and FULL_CIPHER_RE.search(upper_text))
+    found_in_text = bool(text_cipher)
     composed_from_fields = not found_in_text and bool(project and phase and discipline and doc_type and serial and revision)
     confidence = 0.98 if found_in_text else (0.86 if composed_from_fields else 0.72)
     effective_source = source if found_in_text else ("composed_from_fields" if composed_from_fields else "file_name_fallback")

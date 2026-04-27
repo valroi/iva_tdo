@@ -286,6 +286,7 @@ export default function App(): JSX.Element {
                 <DashboardPage
                   mdr={mdr}
                   documents={documents}
+                  projects={projects}
                   notifications={notifications}
                   currentUser={user}
                   onNavigate={(target, revisionId, options) => {

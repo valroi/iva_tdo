@@ -68,11 +68,11 @@ interface Props {
 }
 
 const projectMemberRoleOptions: { value: ProjectMemberRole; label: string }[] = [
-  { value: "main_admin", label: "main_admin" },
-  { value: "contractor_tdo_lead", label: "contractor_tdo_lead" },
-  { value: "contractor_member", label: "contractor_member" },
-  { value: "owner_member", label: "owner_member" },
-  { value: "observer", label: "observer" },
+  { value: "main_admin", label: "Главный администратор" },
+  { value: "contractor_tdo_lead", label: "ТДО разработчика" },
+  { value: "contractor_member", label: "Участник разработчика" },
+  { value: "owner_member", label: "R/LR заказчика" },
+  { value: "observer", label: "Наблюдатель" },
 ];
 
 const referenceTabs: { key: string; label: string }[] = [
@@ -294,8 +294,15 @@ export default function ProjectsPage({
     },
   ];
 
+  const roleLabelByValue: Record<ProjectMemberRole, string> = useMemo(
+    () =>
+      projectMemberRoleOptions.reduce<Record<ProjectMemberRole, string>>((acc, item) => {
+        acc[item.value] = item.label;
+        return acc;
+      }, {} as Record<ProjectMemberRole, string>),
+    [],
+  );
   const memberColumns: ColumnsType<ProjectMember> = [
-    { title: "ID", dataIndex: "id", key: "id", width: 80 },
     {
       title: "Пользователь",
       key: "user",
@@ -311,34 +318,39 @@ export default function ProjectsPage({
       title: "Роль в проекте",
       dataIndex: "member_role",
       key: "member_role",
-      render: (value: ProjectMemberRole) => <Tag color="blue">{value}</Tag>,
+      render: (value: ProjectMemberRole) => <Tag color="blue">{roleLabelByValue[value] ?? value}</Tag>,
     },
-    {
-      title: "Приглашение подрядчика",
-      dataIndex: "can_manage_contractor_users",
-      key: "can_manage_contractor_users",
-      render: (value: boolean) => (value ? <Tag color="green">Да</Tag> : <Tag>Нет</Tag>),
-    },
-    {
-      title: "Действие",
-      key: "action",
-      render: (_, row) => (
-        <Popconfirm
-          title="Удалить участника?"
-          disabled={!canManageMembers}
-          onConfirm={async () => {
-            if (!selectedProjectId) return;
-            await deleteProjectMember(selectedProjectId, row.id);
-            message.success("Участник удален");
-            await reloadProjectData();
-          }}
-        >
-          <Button size="small" danger disabled={!canManageMembers}>
-            Удалить
-          </Button>
-        </Popconfirm>
-      ),
-    },
+    ...(canManageMembers
+      ? [
+          { title: "ID", dataIndex: "id", key: "id", width: 80 },
+          {
+            title: "Приглашение подрядчика",
+            dataIndex: "can_manage_contractor_users",
+            key: "can_manage_contractor_users",
+            render: (value: boolean) => (value ? <Tag color="green">Да</Tag> : <Tag>Нет</Tag>),
+          },
+          {
+            title: "Действие",
+            key: "action",
+            render: (_: unknown, row: ProjectMember) => (
+              <Popconfirm
+                title="Удалить участника?"
+                disabled={!canManageMembers}
+                onConfirm={async () => {
+                  if (!selectedProjectId) return;
+                  await deleteProjectMember(selectedProjectId, row.id);
+                  message.success("Участник удален");
+                  await reloadProjectData();
+                }}
+              >
+                <Button size="small" danger disabled={!canManageMembers}>
+                  Удалить
+                </Button>
+              </Popconfirm>
+            ),
+          },
+        ]
+      : []),
   ];
 
   const referenceColumns: ColumnsType<ProjectReference> = [
@@ -414,6 +426,14 @@ export default function ProjectsPage({
   ];
 
   const selectedProject = projects.find((p) => p.id === selectedProjectId) ?? null;
+  const orderedProjects = useMemo(
+    () =>
+      [...projects].sort((a, b) => {
+        if (a.code === b.code) return a.name.localeCompare(b.name);
+        return a.code.localeCompare(b.code);
+      }),
+    [projects],
+  );
   const referenceTypeOptions = useMemo(
     () =>
       Array.from(new Set(references.map((ref) => ref.ref_type)))
@@ -559,12 +579,11 @@ export default function ProjectsPage({
               children: (
                 <>
                   <Space style={{ marginBottom: 12 }}>
-                    <Button
-                      onClick={() => setMemberOpen(true)}
-                      disabled={!selectedProjectId || !canManageMembers}
-                    >
-                      + Добавить участника
-                    </Button>
+                    {canManageMembers && (
+                      <Button onClick={() => setMemberOpen(true)} disabled={!selectedProjectId}>
+                        + Добавить участника
+                      </Button>
+                    )}
                   </Space>
                   <Table rowKey="id" columns={memberColumns} dataSource={members} pagination={false} />
                 </>
@@ -715,6 +734,15 @@ export default function ProjectsPage({
             }]
               : []),
           ]}
+        />
+      </Card>
+      <Card title="Список проектов" className="hrp-card" style={{ marginTop: 16 }}>
+        <Table
+          rowKey="id"
+          columns={projectColumns}
+          dataSource={orderedProjects}
+          pagination={false}
+          size="small"
         />
       </Card>
 

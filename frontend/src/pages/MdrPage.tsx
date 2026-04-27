@@ -140,7 +140,6 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
   }, [currentCategory, currentProjectCode, mdr]);
 
   const columns: ColumnsType<MDRRecord> = [
-    { title: "ID", dataIndex: "document_key", key: "document_key", width: 130 },
     {
       title: "Шифр",
       dataIndex: "doc_number",

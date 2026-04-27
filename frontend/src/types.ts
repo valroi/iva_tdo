@@ -139,7 +139,7 @@ export interface CommentItem {
   status: "OPEN" | "IN_PROGRESS" | "RESOLVED" | "REJECTED";
   review_code: "AP" | "AN" | "CO" | "RJ" | null;
   is_published_to_contractor: boolean;
-  backlog_status: "IN_NEXT_REVISION" | "REJECTED" | null;
+  backlog_status: "IN_NEXT_REVISION" | "REJECTED" | "LR_FINAL_CONFIRM" | null;
   contractor_status: "I" | "A" | null;
   contractor_response_text?: string | null;
   contractor_response_at?: string | null;
@@ -251,6 +251,9 @@ export interface RegistryRevisionCommentItem {
   id: number;
   text: string;
   status: "OPEN" | "IN_PROGRESS" | "RESOLVED" | "REJECTED";
+  review_code: "AP" | "AN" | "CO" | "RJ" | null;
+  contractor_status: "I" | "A" | null;
+  is_published_to_contractor: boolean;
   author_id: number;
   created_at: string;
   carry_finalized?: boolean;

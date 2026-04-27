@@ -372,7 +372,7 @@ export function publishComment(commentId: number): Promise<CommentItem> {
 
 export function ownerCommentDecision(
   commentId: number,
-  payload: { action: "PUBLISH" | "REJECT" | "WITHDRAW" | "UPDATE"; note?: string; text?: string; review_code?: "RJ" | "AP" | "CO" | "AN" },
+  payload: { action: "PUBLISH" | "REJECT" | "WITHDRAW" | "UPDATE" | "FINAL_CONFIRM"; note?: string; text?: string; review_code?: "RJ" | "AP" | "CO" | "AN" },
 ): Promise<CommentItem> {
   return request<CommentItem>(`/comments/${commentId}/owner-decision`, {
     method: "POST",

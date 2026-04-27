@@ -57,6 +57,8 @@ import { getDisplayRevisionCode, getRemarksSummaryLabel } from "../utils/revisio
 import {
   PROCESS_STEPS,
   getProcessCurrentStep,
+  isContractorResponseAllowedStatus,
+  isOwnerCommentLockedStatus,
   isOlderRevision,
   shouldCarryRemark,
   type PreviousRevisionRemark,
@@ -178,13 +180,13 @@ export default function DocumentsPage({
     })[0];
   }, [revisions]);
   const isLatestSelected = selectedRevisionId !== null && latestRevision?.id === selectedRevisionId;
-  const ownerCommentLocked =
-    selectedRevision?.status === "OWNER_COMMENTS_SENT" ||
-    selectedRevision?.status === "CONTRACTOR_REPLY_I" ||
-    selectedRevision?.status === "CONTRACTOR_REPLY_A";
-  const contractorCanRespondNow =
-    selectedRevision?.status === "OWNER_COMMENTS_SENT" || selectedRevision?.status === "CONTRACTOR_REPLY_I";
+  const ownerCommentLocked = isOwnerCommentLockedStatus(selectedRevision?.status);
+  const contractorCanRespondNow = isContractorResponseAllowedStatus(selectedRevision?.status);
   const selectedDocumentCompleted = selectedDocument !== null && isDocumentCompleted(selectedDocument);
+  const selectedCarryDecidedIds =
+    selectedRevisionId !== null
+      ? (carryDecisionsByRevision[selectedRevisionId] ?? []).map((item) => item.source_comment_id)
+      : [];
   const formatDateRu = (value: string | null | undefined): string => {
     if (!value) return "—";
     const dt = new Date(value);
@@ -809,7 +811,11 @@ export default function DocumentsPage({
             (() => {
               const rowComments = commentsByRevision[row.id];
               const activeCount = (rowComments ?? []).filter(
-                (c) => c.parent_id === null && (c.status === "OPEN" || c.status === "IN_PROGRESS"),
+                (c) =>
+                  c.parent_id === null &&
+                  c.is_published_to_contractor &&
+                  c.status !== "REJECTED" &&
+                  (c.status === "OPEN" || c.status === "IN_PROGRESS"),
               ).length;
               const carryOpenCount =
                 selectedRevisionId === row.id && isLatestSelected
@@ -951,7 +957,12 @@ export default function DocumentsPage({
           {currentUser.permissions.can_respond_comments && currentUser.company_type === "contractor" && (
             <Button
               size="small"
-              disabled={selectedDocumentCompleted || row.author_id === currentUser.id || row.contractor_status !== null || !contractorCanRespondNow}
+              disabled={
+                selectedDocumentCompleted ||
+                row.author_id === currentUser.id ||
+                !(row.contractor_status === null || (row.contractor_status === "I" && row.backlog_status === "LR_FINAL_CONFIRM")) ||
+                !contractorCanRespondNow
+              }
               onClick={() => openCommentContext(row)}
             >
               Ответить
@@ -1394,8 +1405,14 @@ export default function DocumentsPage({
                                   <Space>
                                     <Button
                                       size="small"
+                                      disabled={(carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => x.source_comment_id === row.id)}
                                       onClick={async () => {
                                         if (!selectedRevisionId) return;
+                                        if ((carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => x.source_comment_id === row.id)) {
+                                          message.info("Решение по замечанию уже зафиксировано");
+                                          return;
+                                        }
+                                        await setCarryDecision(selectedRevisionId, { source_comment_id: row.id, status: "OPEN" });
                                         const exists = comments.some((c) => c.text === row.text && c.review_code === row.review_code);
                                         if (!exists) {
                                           await createComment({
@@ -1418,8 +1435,13 @@ export default function DocumentsPage({
                                     </Button>
                                     <Button
                                       size="small"
+                                      disabled={(carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => x.source_comment_id === row.id)}
                                       onClick={() => {
                                         if (!selectedRevisionId) return;
+                                        if ((carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => x.source_comment_id === row.id)) {
+                                          message.info("Решение по замечанию уже зафиксировано");
+                                          return;
+                                        }
                                         void setCarryDecision(selectedRevisionId, { source_comment_id: row.id, status: "CLOSED" })
                                           .then((decision) => {
                                             const next = Array.from(new Set([...(carryClosedByRevision[selectedRevisionId] ?? []), row.id]));
@@ -1540,8 +1562,10 @@ export default function DocumentsPage({
         comments={comments}
         carryOverRemarks={canManageCarryOver ? previousRevisionRemarks.filter((row) => row.status === "RESOLVED") : []}
         carryClosedIds={canManageCarryOver && selectedRevisionId ? (carryClosedByRevision[selectedRevisionId] ?? []) : []}
+        carryDecidedIds={canManageCarryOver ? selectedCarryDecidedIds : []}
         onCarryClose={canManageCarryOver ? (id) => {
           if (!selectedRevisionId) return;
+          if ((carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => x.source_comment_id === id)) return;
           void setCarryDecision(selectedRevisionId, { source_comment_id: id, status: "CLOSED" })
             .then((decision) => {
               const next = Array.from(new Set([...(carryClosedByRevision[selectedRevisionId] ?? []), id]));
@@ -1560,26 +1584,12 @@ export default function DocumentsPage({
             });
         } : undefined}
         onCarryReopen={canManageCarryOver ? (id) => {
-          if (!selectedRevisionId) return;
-          void setCarryDecision(selectedRevisionId, { source_comment_id: id, status: "OPEN" })
-            .then((decision) => {
-              const next = (carryClosedByRevision[selectedRevisionId] ?? []).filter((itemId) => itemId !== id);
-              setCarryClosedByRevision((prev) => ({ ...prev, [selectedRevisionId]: next }));
-              setCarryDecisionsByRevision((prev) => ({
-                ...prev,
-                [selectedRevisionId]: [
-                  decision,
-                  ...(prev[selectedRevisionId] ?? []).filter((x) => x.source_comment_id !== decision.source_comment_id),
-                ],
-              }));
-            })
-            .catch((error: unknown) => {
-              const text = error instanceof Error ? error.message : "Не удалось сохранить OPEN";
-              message.error(text);
-            });
+          message.info("Решение уже зафиксировано и не может быть изменено");
         } : undefined}
         onCarryOpen={canManageCarryOver ? async (item) => {
           if (!selectedRevisionId) return;
+          if ((carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => x.source_comment_id === item.id)) return;
+          await setCarryDecision(selectedRevisionId, { source_comment_id: item.id, status: "OPEN" });
           await createComment({
             revision_id: selectedRevisionId,
             text: item.text,
@@ -1804,6 +1814,32 @@ export default function DocumentsPage({
               >
                 Отклонить
               </Button>
+              {selectedCommentForResponse.parent_id === null &&
+                selectedCommentForResponse.contractor_status === "I" &&
+                selectedCommentForResponse.backlog_status !== "LR_FINAL_CONFIRM" && (
+                <Button
+                  onClick={async () => {
+                    const note = window.prompt("Комментарий подрядчику (финальное подтверждение замечания):", "");
+                    if (!note || note.trim().length < 3) {
+                      message.warning("Нужен комментарий минимум 3 символа");
+                      return;
+                    }
+                    const activeRevisionId = selectedRevisionId ?? selectedCommentForResponse.revision_id;
+                    try {
+                      message.loading({ content: "Финальное подтверждение LR...", key: "lr_final_confirm" });
+                      await ownerCommentDecision(selectedCommentForResponse.id, { action: "FINAL_CONFIRM", note: note.trim() });
+                      message.success({ content: "Замечание финально подтверждено LR", key: "lr_final_confirm" });
+                      setResponseModalOpen(false);
+                      await reloadRevisionContext(activeRevisionId);
+                    } catch (error: unknown) {
+                      const text = error instanceof Error ? error.message : "Не удалось финально подтвердить замечание";
+                      message.error({ content: text, key: "lr_final_confirm" });
+                    }
+                  }}
+                >
+                  Финально подтвердить LR
+                </Button>
+              )}
             </Space>
           )}
         </Form>

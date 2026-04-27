@@ -2,13 +2,18 @@ import type { CommentItem } from "../types";
 
 export type RemarksSummaryCode = "RJ" | "CO" | "AN" | "NONE";
 
-function parentAddressedRemarks(comments: CommentItem[]): CommentItem[] {
-  return comments.filter(
-    (item) =>
-      item.parent_id === null &&
-      item.status === "RESOLVED" &&
-      !!item.review_code,
+function isEffectiveContractorRemark(item: CommentItem): boolean {
+  return (
+    item.parent_id === null &&
+    item.is_published_to_contractor === true &&
+    item.contractor_status === "A" &&
+    item.status !== "REJECTED" &&
+    !!item.review_code
   );
+}
+
+function parentAddressedRemarks(comments: CommentItem[]): CommentItem[] {
+  return comments.filter((item) => isEffectiveContractorRemark(item) && item.status === "RESOLVED");
 }
 
 export function getRemarksSummaryCode(comments: CommentItem[]): RemarksSummaryCode {
@@ -24,7 +29,7 @@ export function getRemarksSummaryLabel(comments: CommentItem[], fallbackReviewCo
   if (code !== "NONE") return code;
   const parentCodes = new Set(
     comments
-      .filter((item) => item.parent_id === null)
+      .filter((item) => isEffectiveContractorRemark(item))
       .map((item) => item.review_code)
       .filter((item): item is "AP" | "AN" | "CO" | "RJ" => item === "AP" || item === "AN" || item === "CO" || item === "RJ"),
   );

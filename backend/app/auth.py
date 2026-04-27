@@ -33,7 +33,8 @@ def _create_token(subject: str, token_type: str, minutes: int, session_id: int |
 
 
 def create_access_token(subject: str) -> str:
-    return _create_token(subject, "access", settings.access_token_expire_minutes)
+    # Keep UX stable: access session should live at least 1 hour.
+    return _create_token(subject, "access", max(60, settings.access_token_expire_minutes))
 
 
 def create_refresh_token(subject: str, session_id: int | None = None) -> str:

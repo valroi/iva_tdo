@@ -45,3 +45,15 @@ export function isOlderRevision(revision: Revision, selected: Revision | null): 
   if (!selected) return false;
   return revision.created_at < selected.created_at;
 }
+
+export function isOwnerCommentLockedStatus(status: string | null | undefined): boolean {
+  return status === "OWNER_COMMENTS_SENT" || status === "CONTRACTOR_REPLY_I" || status === "CONTRACTOR_REPLY_A";
+}
+
+export function isContractorResponseAllowedStatus(status: string | null | undefined): boolean {
+  return status === "OWNER_COMMENTS_SENT" || status === "CONTRACTOR_REPLY_I";
+}
+
+export function isOwnerCommentingAllowedStatus(status: string | null | undefined): boolean {
+  return status === "UNDER_REVIEW" || status === "OWNER_COMMENTS_SENT";
+}

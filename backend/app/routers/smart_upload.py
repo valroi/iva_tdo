@@ -27,6 +27,7 @@ def _apply_full_cipher(fields: dict[str, Any], full_cipher: str) -> None:
     while len(chunks) < 8:
         chunks.append("00")
     fields["full_cipher"] = full_cipher.upper()
+    fields["cipher"] = fields["full_cipher"]
     fields["project"] = chunks[0]
     fields["phase"] = chunks[1]
     fields["document_category"] = chunks[1]
@@ -204,6 +205,7 @@ def _normalize_fields_for_registry(raw_fields: dict[str, Any]) -> dict[str, Any]
         chunks.append("00")
     normalized = dict(raw_fields)
     normalized["full_cipher"] = "-".join(chunks[:8]) if chunks else full_cipher
+    normalized["cipher"] = normalized["full_cipher"]
     normalized["project"] = str(raw_fields.get("project") or chunks[0] if chunks else "").upper()
     normalized["document_category"] = str(raw_fields.get("document_category") or raw_fields.get("phase") or (chunks[1] if len(chunks) > 1 else "")).upper()
     normalized["phase"] = normalized["document_category"]
@@ -254,6 +256,8 @@ async def process_smart_upload(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Invalid overrides_json: {exc}",
             ) from exc
+        if overrides.get("cipher") and not overrides.get("full_cipher"):
+            overrides["full_cipher"] = overrides["cipher"]
         for key, value in overrides.items():
             if key in fields and value is not None and str(value).strip():
                 fields[key] = str(value).strip()

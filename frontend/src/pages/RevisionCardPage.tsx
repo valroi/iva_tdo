@@ -9,7 +9,7 @@ import type { CarryDecisionItem, CommentItem, RevisionCard, User } from "../type
 import { formatDateTimeRu } from "../utils/datetime";
 import { ContractorReuploadPdfTag, RevisionStatusCell, contractorNeedsPdfReupload } from "../utils/revisionHints";
 import { getDisplayRevisionCode, getRemarksSummaryLabel } from "../utils/revisionProcess";
-import { PROCESS_STEPS, getProcessCurrentStep } from "../utils/workflowProgress";
+import { PROCESS_STEPS, getProcessCurrentStep, isOwnerCommentingAllowedStatus } from "../utils/workflowProgress";
 
 interface Props {
   revisionId: number;
@@ -95,20 +95,11 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
 
   const canOwnerCreateRemarks = currentUser.company_type !== "owner" || Boolean(card?.can_current_user_raise_comments);
   const canManageCarryOver = currentUser.role === "admin" || currentUser.company_type === "owner";
-  const canCommentOnSelectedRevision =
-    selectedRevision?.status === "UNDER_REVIEW" || selectedRevision?.status === "OWNER_COMMENTS_SENT";
+  const selectedCarryDecidedIds = (carryDecisionsByRevision[selectedRevisionId] ?? []).map((item) => item.source_comment_id);
+  const canCommentOnSelectedRevision = isOwnerCommentingAllowedStatus(selectedRevision?.status);
   const getRevisionRemarksStatus = (revisionId: number, comments: CommentItem[]): string => {
     const revisionReviewCode = (card?.revisions.find((rev) => rev.id === revisionId)?.review_code as string | null | undefined) ?? null;
     if (revisionReviewCode) return revisionReviewCode;
-    const codes = new Set(
-      comments
-        .map((item) => item.review_code)
-        .filter((code): code is "AP" | "AN" | "CO" | "RJ" => code === "AP" || code === "AN" || code === "CO" || code === "RJ"),
-    );
-    if (codes.has("RJ")) return "RJ";
-    if (codes.has("CO")) return "CO";
-    if (codes.has("AN")) return "AN";
-    if (codes.has("AP")) return "AP";
     const fallback = getRemarksSummaryLabel(comments, revisionReviewCode);
     return fallback === "Нет замечаний" ? "—" : fallback;
   };
@@ -666,8 +657,13 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                                   <Space>
                                     <Button
                                       size="small"
-                                      disabled={!isLatestRow}
+                                      disabled={!isLatestRow || (carryDecisionsByRevision[row.revision_id] ?? []).some((x) => x.source_comment_id === item.id)}
                                       onClick={async () => {
+                                        if ((carryDecisionsByRevision[row.revision_id] ?? []).some((x) => x.source_comment_id === item.id)) {
+                                          message.info("Решение по замечанию уже зафиксировано");
+                                          return;
+                                        }
+                                        await setCarryDecision(row.revision_id, { source_comment_id: item.id, status: "OPEN" });
                                         const exists = row.comments.some((c) => c.text === item.text && c.review_code === item.review_code);
                                         if (!exists) {
                                           await createComment({
@@ -689,8 +685,12 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                                     </Button>
                                     <Button
                                       size="small"
-                                      disabled={!isLatestRow}
+                                      disabled={!isLatestRow || (carryDecisionsByRevision[row.revision_id] ?? []).some((x) => x.source_comment_id === item.id)}
                                       onClick={() => {
+                                        if ((carryDecisionsByRevision[row.revision_id] ?? []).some((x) => x.source_comment_id === item.id)) {
+                                          message.info("Решение по замечанию уже зафиксировано");
+                                          return;
+                                        }
                                         void setCarryDecision(row.revision_id, { source_comment_id: item.id, status: "CLOSED" })
                                           .then((decision) => {
                                             setCarryClosedByRevision((prev) => {
@@ -824,7 +824,9 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
         comments={selectedRevisionComments}
         carryOverRemarks={canManageCarryOver ? selectedCarryRemarks : []}
         carryClosedIds={canManageCarryOver ? (carryClosedByRevision[selectedRevisionId] ?? []) : []}
+        carryDecidedIds={canManageCarryOver ? selectedCarryDecidedIds : []}
         onCarryClose={canManageCarryOver ? (id) => {
+          if ((carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => x.source_comment_id === id)) return;
           void setCarryDecision(selectedRevisionId, { source_comment_id: id, status: "CLOSED" })
             .then((decision) => {
               setCarryClosedByRevision((prev) => {
@@ -845,27 +847,12 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
             });
         } : undefined}
         onCarryReopen={canManageCarryOver ? (id) => {
-          void setCarryDecision(selectedRevisionId, { source_comment_id: id, status: "OPEN" })
-            .then((decision) => {
-              setCarryClosedByRevision((prev) => {
-                const next = (prev[selectedRevisionId] ?? []).filter((itemId) => itemId !== id);
-                return { ...prev, [selectedRevisionId]: next };
-              });
-              setCarryDecisionsByRevision((prev) => ({
-                ...prev,
-                [selectedRevisionId]: [
-                  decision,
-                  ...(prev[selectedRevisionId] ?? []).filter((x) => x.source_comment_id !== decision.source_comment_id),
-                ],
-              }));
-            })
-            .catch((error: unknown) => {
-              const text = error instanceof Error ? error.message : "Не удалось сохранить OPEN";
-              message.error(text);
-            });
+          message.info("Решение уже зафиксировано и не может быть изменено");
         } : undefined}
         onCarryOpen={canManageCarryOver ? async (item) => {
           if (!selectedRevisionId) return;
+          if ((carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => x.source_comment_id === item.id)) return;
+          await setCarryDecision(selectedRevisionId, { source_comment_id: item.id, status: "OPEN" });
           const exists = selectedRevisionComments.some(
             (c) => c.parent_id === null && c.text === item.text && (c.review_code ?? null) === (item.review_code ?? null),
           );

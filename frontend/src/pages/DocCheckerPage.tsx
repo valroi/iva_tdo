@@ -22,9 +22,8 @@ import {
 type FieldMap = Record<string, string>;
 
 const FIELD_ORDER = [
-  "full_cipher",
+  "cipher",
   "project",
-  "phase",
   "document_category",
   "unit",
   "title_code",
@@ -34,6 +33,19 @@ const FIELD_ORDER = [
   "revision",
   "title_text",
 ];
+
+const FIELD_LABELS: Record<string, string> = {
+  cipher: "Шифр",
+  project: "Проект",
+  document_category: "Категория документа",
+  unit: "Объект/Юнит",
+  title_code: "Титул",
+  discipline: "Дисциплина",
+  doc_type: "Тип документа",
+  serial: "Номер документа",
+  revision: "Ревизия",
+  title_text: "Название документа",
+};
 
 export default function DocCheckerPage(): JSX.Element {
   const [pdfFiles, setPdfFiles] = useState<File[]>([]);
@@ -464,7 +476,7 @@ export default function DocCheckerPage(): JSX.Element {
               <Row gutter={[12, 0]}>
                 {FIELD_ORDER.map((key) => (
                   <Col span={8} key={key}>
-                    <Form.Item name={key} label={key}>
+                    <Form.Item name={key} label={FIELD_LABELS[key] ?? key}>
                       <Input />
                     </Form.Item>
                   </Col>

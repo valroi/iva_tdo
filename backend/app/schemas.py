@@ -362,12 +362,12 @@ class CommentCreate(BaseModel):
 class CommentResponse(BaseModel):
     text: str
     status: CommentStatus = CommentStatus.IN_PROGRESS
-    backlog_status: str | None = Field(default=None, pattern="^(IN_NEXT_REVISION|REJECTED)$")
+    backlog_status: str | None = Field(default=None, pattern="^(IN_NEXT_REVISION|REJECTED|LR_FINAL_CONFIRM)$")
     contractor_status: ContractorCommentStatus | None = None
 
 
 class CommentOwnerDecision(BaseModel):
-    action: str = Field(pattern="^(PUBLISH|REJECT|WITHDRAW|UPDATE)$")
+    action: str = Field(pattern="^(PUBLISH|REJECT|WITHDRAW|UPDATE|FINAL_CONFIRM)$")
     review_code: ReviewCode | None = None
     note: str | None = None
     text: str | None = None
@@ -409,6 +409,7 @@ class RevisionRegistryCommentRead(BaseModel):
     status: CommentStatus
     review_code: ReviewCode | None = None
     contractor_status: ContractorCommentStatus | None = None
+    is_published_to_contractor: bool = False
     author_id: int
     created_at: datetime
     carry_finalized: bool = False

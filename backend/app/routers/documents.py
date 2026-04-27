@@ -71,6 +71,14 @@ OWNER_VISIBLE_REVISION_STATUSES = {
     "CONTRACTOR_REPLY_A",
     "SUBMITTED",
 }
+REVISION_STATUS_TRANSITIONS: dict[str, set[str]] = {
+    "UPLOADED_WAITING_TDO": {"REVISION_CREATED", "SUBMITTED", "CANCELLED_BY_TDO", "UPLOADED_WAITING_TDO"},
+    "UNDER_REVIEW": {"UPLOADED_WAITING_TDO", "UNDER_REVIEW", "SUBMITTED"},
+    "CANCELLED_BY_TDO": {"UPLOADED_WAITING_TDO", "CANCELLED_BY_TDO"},
+    "OWNER_COMMENTS_SENT": {"UNDER_REVIEW", "SUBMITTED", "CONTRACTOR_REPLY_I", "CONTRACTOR_REPLY_A", "OWNER_COMMENTS_SENT"},
+    "CONTRACTOR_REPLY_I": {"SUBMITTED", "OWNER_COMMENTS_SENT", "CONTRACTOR_REPLY_I"},
+    "CONTRACTOR_REPLY_A": {"SUBMITTED", "UNDER_REVIEW", "OWNER_COMMENTS_SENT", "CONTRACTOR_REPLY_I", "CONTRACTOR_REPLY_A"},
+}
 
 
 def _owner_can_access_revision(current_user: User, revision: Revision) -> bool:
@@ -91,6 +99,20 @@ def _is_completed_document(db: Session, document_id: int) -> bool:
     if latest is None:
         return False
     return (latest.issue_purpose or "").upper() == "AFD" and latest.review_code == ReviewCode.AP
+
+
+def _set_revision_status(revision: Revision, next_status: str) -> bool:
+    current = revision.status
+    if current == next_status:
+        return False
+    allowed_from = REVISION_STATUS_TRANSITIONS.get(next_status)
+    if allowed_from and current not in allowed_from:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Revision status transition is not allowed: {current} -> {next_status}",
+        )
+    revision.status = next_status
+    return True
 
 
 def _can_manage_owner_remark(
@@ -306,18 +328,18 @@ def _recompute_revision_contractor_status(db: Session, revision: Revision) -> No
         # Do not advance contractor workflow before CRS is actually sent.
         # When revision is still on owner side (e.g. UNDER_REVIEW), keep status untouched.
         if revision.status in {"OWNER_COMMENTS_SENT", "CONTRACTOR_REPLY_I", "CONTRACTOR_REPLY_A"}:
-            revision.status = "CONTRACTOR_REPLY_A"
+            _set_revision_status(revision, "CONTRACTOR_REPLY_A")
         return
     if any(item.contractor_status is None for item in published_comments):
-        revision.status = "OWNER_COMMENTS_SENT"
+        _set_revision_status(revision, "OWNER_COMMENTS_SENT")
         return
     if any(
         item.contractor_status == ContractorCommentStatus.I and item.status not in {CommentStatus.REJECTED, CommentStatus.RESOLVED}
         for item in published_comments
     ):
-        revision.status = "CONTRACTOR_REPLY_I"
+        _set_revision_status(revision, "CONTRACTOR_REPLY_I")
         return
-    revision.status = "CONTRACTOR_REPLY_A"
+    _set_revision_status(revision, "CONTRACTOR_REPLY_A")
 
 
 
@@ -812,6 +834,7 @@ def list_documents_registry(
                     status=item.status,
                     review_code=item.review_code,
                     contractor_status=item.contractor_status,
+                    is_published_to_contractor=item.is_published_to_contractor,
                     author_id=item.author_id,
                     created_at=item.created_at,
                     carry_finalized=item.carry_finalized,
@@ -992,7 +1015,7 @@ def upload_document_file(
 
     if revision is not None:
         revision.file_path = storage_path
-        revision.status = "UPLOADED_WAITING_TDO"
+        _set_revision_status(revision, "UPLOADED_WAITING_TDO")
 
         doc = db.query(Document).filter(Document.id == revision.document_id).first()
         if doc is not None:
@@ -1330,6 +1353,8 @@ def set_revision_review_code(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
     if payload.review_code != ReviewCode.AP:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only AP is supported")
+    if revision.review_code == ReviewCode.AP:
+        return revision
 
     document = db.query(Document).filter(Document.id == revision.document_id).first()
     mdr = db.query(MDRRecord).filter(MDRRecord.id == document.mdr_id).first() if document else None
@@ -1346,12 +1371,17 @@ def set_revision_review_code(
     ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only LR/Admin can set AP")
 
-    parent_comments = (
+    published_parent_comments = (
         db.query(Comment)
-        .filter(Comment.revision_id == revision.id, Comment.parent_id.is_(None))
+        .filter(
+            Comment.revision_id == revision.id,
+            Comment.parent_id.is_(None),
+            Comment.is_published_to_contractor.is_(True),
+            Comment.status != CommentStatus.REJECTED,
+        )
         .all()
     )
-    if any(item.status in {CommentStatus.OPEN, CommentStatus.IN_PROGRESS} for item in parent_comments):
+    if any(item.status in {CommentStatus.OPEN, CommentStatus.IN_PROGRESS} for item in published_parent_comments):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Resolve/reject all remarks before AP")
 
     latest_revision = (
@@ -1369,7 +1399,7 @@ def set_revision_review_code(
     revision.review_code = ReviewCode.AP
     revision.reviewed_at = datetime.utcnow()
     if revision.status in {"UNDER_REVIEW", "OWNER_COMMENTS_SENT", "CONTRACTOR_REPLY_I"}:
-        revision.status = "CONTRACTOR_REPLY_A"
+        _set_revision_status(revision, "CONTRACTOR_REPLY_A")
     receiver_code = _project_reference_value(
         db,
         project_id=project.id,
@@ -1378,6 +1408,7 @@ def set_revision_review_code(
     sender_code = (mdr.originator_code or "").strip().upper() or "CTR"
     auto_crs_number = _next_crs_number(
         db,
+        document_id=document.id,
         project_code=mdr.project_code,
         sender_company_code=sender_code,
         receiver_company_code=receiver_code,
@@ -1499,9 +1530,10 @@ def upsert_carry_decision(
             decided_by_id=current_user.id,
         )
     else:
-        existing.status = payload.status
-        existing.decided_by_id = current_user.id
-        existing.decided_at = datetime.utcnow()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Carry-over decision is already locked for this remark",
+        )
 
     matrix_role = _owner_matrix_role_for_document(
         db,
@@ -1725,7 +1757,7 @@ def make_tdo_decision(
             sender_company_code=sender_code,
             receiver_company_code=receiver_code,
         )
-        revision.status = "UNDER_REVIEW"
+        _set_revision_status(revision, "UNDER_REVIEW")
         revision.reviewed_at = datetime.utcnow()
         owner_review_days = (
             _setting_days(db, "review_sla_owner_dcc_incoming_days", 1)
@@ -1768,7 +1800,7 @@ def make_tdo_decision(
             Notification.is_read.is_(False),
         ).update({Notification.is_read: True}, synchronize_session=False)
     else:
-        revision.status = "CANCELLED_BY_TDO"
+        _set_revision_status(revision, "CANCELLED_BY_TDO")
         revision.trm_number = None
         revision.reviewed_at = None
         cancel_message = (
@@ -1880,7 +1912,7 @@ def make_tdo_bulk_decision(
                     receiver_company_code=shared_receiver_code,
                 )
             revision.trm_number = shared_trm_number
-            revision.status = "UNDER_REVIEW"
+            _set_revision_status(revision, "UNDER_REVIEW")
             revision.reviewed_at = datetime.utcnow()
             owner_review_days = (
                 _setting_days(db, "review_sla_owner_dcc_incoming_days", 1)
@@ -1923,7 +1955,7 @@ def make_tdo_bulk_decision(
                 Notification.is_read.is_(False),
             ).update({Notification.is_read: True}, synchronize_session=False)
         else:
-            revision.status = "CANCELLED_BY_TDO"
+            _set_revision_status(revision, "CANCELLED_BY_TDO")
             revision.trm_number = None
             revision.reviewed_at = None
             cancel_message = (
@@ -2170,7 +2202,7 @@ def send_crs_comments(
         if project is None:
             continue
 
-        revision.status = "OWNER_COMMENTS_SENT"
+        _set_revision_status(revision, "OWNER_COMMENTS_SENT")
         revision.review_deadline = (
             datetime.utcnow() + timedelta(days=_setting_days(db, "review_sla_contractor_consideration_days", 0.5))
         ).date()
@@ -2368,8 +2400,6 @@ def respond_comment(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot respond to own comment")
     if current_user.company_type == CompanyType.contractor and not parent.is_published_to_contractor:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Comment is not yet published to contractor")
-    if current_user.company_type == CompanyType.contractor and parent.contractor_status is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Contractor status already set for this comment")
     revision = db.query(Revision).filter(Revision.id == parent.revision_id).first()
     if revision is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
@@ -2393,9 +2423,23 @@ def respond_comment(
     if payload.backlog_status:
         parent.backlog_status = payload.backlog_status
     if current_user.company_type == CompanyType.contractor and payload.contractor_status is not None:
-        if parent.contractor_status is not None:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Contractor status already set for this remark")
-        parent.contractor_status = payload.contractor_status
+        # Allowed sequence:
+        # 1) first contractor answer: I or A
+        # 2) optional LR final confirmation after I (single iteration)
+        # 3) contractor can send only A as final acceptance
+        if parent.contractor_status is None:
+            parent.contractor_status = payload.contractor_status
+        elif (
+            parent.contractor_status == ContractorCommentStatus.I
+            and parent.backlog_status == "LR_FINAL_CONFIRM"
+            and payload.contractor_status == ContractorCommentStatus.A
+        ):
+            parent.contractor_status = ContractorCommentStatus.A
+        else:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Contractor status already finalized for this remark")
+
+        if parent.contractor_status == ContractorCommentStatus.A and parent.backlog_status == "LR_FINAL_CONFIRM":
+            parent.backlog_status = "IN_NEXT_REVISION"
 
     db.add(response)
     db.add(parent)
@@ -2508,6 +2552,8 @@ def publish_comment_to_contractor(
     mdr = db.query(MDRRecord).filter(MDRRecord.id == document.mdr_id).first()
     if mdr is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="MDR not found")
+    if comment.is_published_to_contractor:
+        return comment
     comment.is_published_to_contractor = True
     db.add(comment)
     target_author_id = revision.author_id or document.created_by_id
@@ -2551,7 +2597,7 @@ def owner_comment_decision(
     if payload.review_code is not None:
         comment.review_code = payload.review_code
 
-    if payload.action in {"PUBLISH", "WITHDRAW", "UPDATE"} and not _can_manage_owner_remark(
+    if payload.action in {"PUBLISH", "WITHDRAW", "UPDATE", "FINAL_CONFIRM"} and not _can_manage_owner_remark(
         db,
         current_user=current_user,
         project_id=project.id,
@@ -2564,6 +2610,9 @@ def owner_comment_decision(
         )
 
     if payload.action == "PUBLISH":
+        if comment.is_published_to_contractor and comment.contractor_status == ContractorCommentStatus.A:
+            db.refresh(comment)
+            return comment
         comment.is_published_to_contractor = True
         comment.contractor_status = ContractorCommentStatus.A
         target_author_id = revision.author_id or document.created_by_id
@@ -2584,6 +2633,9 @@ def owner_comment_decision(
             event_types=["TDO_SENT_TO_OWNER", "OWNER_COMMENT_CREATED", "NEW_COMMENT"],
         )
     elif payload.action == "REJECT":
+        if comment.status == CommentStatus.REJECTED and comment.backlog_status == "REJECTED":
+            db.refresh(comment)
+            return comment
         comment.status = CommentStatus.REJECTED
         comment.backlog_status = "REJECTED"
         comment.resolved_at = datetime.utcnow()
@@ -2598,6 +2650,9 @@ def owner_comment_decision(
                 )
             )
     elif payload.action == "WITHDRAW":
+        if comment.status == CommentStatus.REJECTED and comment.backlog_status == "REJECTED":
+            db.refresh(comment)
+            return comment
         comment.status = CommentStatus.REJECTED
         comment.backlog_status = "REJECTED"
         comment.resolved_at = datetime.utcnow()
@@ -2629,6 +2684,26 @@ def owner_comment_decision(
                     status=comment.status,
                 )
             )
+    elif payload.action == "FINAL_CONFIRM":
+        if comment.contractor_status != ContractorCommentStatus.I:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Final confirmation is available only after contractor status I")
+        if comment.backlog_status == "LR_FINAL_CONFIRM":
+            db.refresh(comment)
+            return comment
+        note = (payload.note or "").strip()
+        if len(note) < 3:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Comment for contractor is required")
+        comment.backlog_status = "LR_FINAL_CONFIRM"
+        comment.status = CommentStatus.IN_PROGRESS
+        db.add(
+            Comment(
+                revision_id=comment.revision_id,
+                parent_id=comment.id,
+                author_id=current_user.id,
+                text=f"[LR_FINAL_CONFIRM] {note}",
+                status=CommentStatus.IN_PROGRESS,
+            )
+        )
     prev_status = revision.status
     _recompute_revision_contractor_status(db, revision)
     db.add(revision)
@@ -2686,7 +2761,7 @@ def publish_revision_comments_to_contractor(
         db.add(comment)
 
     if comments:
-        revision.status = "OWNER_COMMENTS_SENT"
+        _set_revision_status(revision, "OWNER_COMMENTS_SENT")
         db.add(revision)
         target_author_id = revision.author_id or document.created_by_id
         db.add(
