@@ -2,7 +2,7 @@ import { Alert, Button, Card, Descriptions, Modal, Space, Steps, Switch, Table, 
 import { UploadOutlined } from "@ant-design/icons";
 import { useEffect, useMemo, useState } from "react";
 
-import { addCommentToCrs, createComment, downloadRevisionAttachmentsArchive, getRevisionCard, listCarryDecisions, ownerCommentDecision, setCarryDecision, uploadRevisionPdf } from "../api";
+import { addCommentToCrs, createComment, downloadRevisionAttachmentsArchive, getRevisionCard, listCarryDecisions, ownerCommentDecision, setCarryDecision, setRevisionReviewCode, uploadRevisionPdf } from "../api";
 import ProcessHint from "../components/ProcessHint";
 import RevisionPdfAnnotator from "../components/RevisionPdfAnnotator";
 import type { CarryDecisionItem, CommentItem, RevisionCard, User } from "../types";
@@ -85,18 +85,44 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
   const selectedCarryRemarks = useMemo<CommentItem[]>(
     () =>
       selectedHistoryIndex > 0
-        ? filteredHistory
-            .slice(0, selectedHistoryIndex)
-            .flatMap((h) => h.comments)
-            .filter((comment) => comment.parent_id === null && comment.status === "RESOLVED" && !comment.carry_finalized)
+        ? filteredHistory[selectedHistoryIndex - 1].comments
+            .filter(
+              (comment) =>
+                comment.parent_id === null &&
+                comment.status === "RESOLVED" &&
+                !comment.carry_finalized &&
+                !(carryDecisionsByRevision[selectedRevisionId] ?? []).some((item) => item.source_comment_id === comment.id),
+            )
         : [],
-    [filteredHistory, selectedHistoryIndex],
+    [filteredHistory, selectedHistoryIndex, carryDecisionsByRevision, selectedRevisionId],
   );
 
   const canOwnerCreateRemarks = currentUser.company_type !== "owner" || Boolean(card?.can_current_user_raise_comments);
   const canManageCarryOver = currentUser.role === "admin" || currentUser.company_type === "owner";
   const selectedCarryDecidedIds = (carryDecisionsByRevision[selectedRevisionId] ?? []).map((item) => item.source_comment_id);
   const canCommentOnSelectedRevision = isOwnerCommentingAllowedStatus(selectedRevision?.status);
+  const isSelectedRevisionClosedForPdfUpdate =
+    selectedRevision?.status === "CONTRACTOR_REPLY_A" || selectedRevision?.status === "SUBMITTED";
+  const canSetApByRole =
+    currentUser.role === "admin" ||
+    (currentUser.company_type === "owner" &&
+      currentUser.permissions.can_publish_comments &&
+      (card?.current_user_matrix_role === "LR" || card?.current_user_matrix_role === "R"));
+  const activePublishedRemarksCount = selectedRevisionComments.filter(
+    (comment) =>
+      comment.parent_id === null &&
+      comment.is_published_to_contractor &&
+      comment.status !== "REJECTED" &&
+      (comment.status === "OPEN" || comment.status === "IN_PROGRESS"),
+  ).length;
+  const carryOpenCount = selectedCarryRemarks.length;
+  const canSetApForSelectedRevision =
+    Boolean(selectedRevision) &&
+    selectedRevision?.id === latestRevisionId &&
+    selectedRevision?.review_code !== "AP" &&
+    canSetApByRole &&
+    activePublishedRemarksCount === 0 &&
+    carryOpenCount === 0;
   const getRevisionRemarksStatus = (revisionId: number, comments: CommentItem[]): string => {
     const revisionReviewCode = (card?.revisions.find((rev) => rev.id === revisionId)?.review_code as string | null | undefined) ?? null;
     if (revisionReviewCode) return revisionReviewCode;
@@ -149,19 +175,8 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
 
   useEffect(() => {
     if (!selectedRevisionId || !canManageCarryOver) return;
-    const selectedIdx = filteredHistory.findIndex((item) => item.revision_id === selectedRevisionId);
-    if (selectedIdx < 0) return;
-    const targetRevisionIds = filteredHistory.slice(0, selectedIdx + 1).map((item) => item.revision_id);
-    Promise.all(targetRevisionIds.map(async (id) => listCarryDecisions(id).catch(() => [] as CarryDecisionItem[])))
-      .then((groups) => {
-        const all = groups.flat();
-        const latestBySource = new Map<number, CarryDecisionItem>();
-        const ordered = [...all].sort((a, b) => {
-          if (a.decided_at === b.decided_at) return a.id - b.id;
-          return a.decided_at < b.decided_at ? -1 : 1;
-        });
-        for (const item of ordered) latestBySource.set(item.source_comment_id, item);
-        const merged = Array.from(latestBySource.values());
+    listCarryDecisions(selectedRevisionId)
+      .then((merged) => {
         setCarryDecisionsByRevision((prev) => ({ ...prev, [selectedRevisionId]: merged }));
         const closed = merged.filter((item) => item.status === "CLOSED").map((item) => item.source_comment_id);
         setCarryClosedByRevision((prev) => ({ ...prev, [selectedRevisionId]: closed }));
@@ -200,16 +215,44 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
           </Button>
         </Tooltip>
         {currentUser.permissions.can_upload_files && (
-          <Tooltip title="Загрузить или заменить основной PDF выбранной ревизии">
+          <Tooltip title={isSelectedRevisionClosedForPdfUpdate ? "По этой ревизии цикл завершен. Создайте следующую ревизию для новой загрузки PDF." : "Загрузить или заменить основной PDF выбранной ревизии"}>
             <Button
               icon={<UploadOutlined />}
-              disabled={documentCompleted}
+              disabled={documentCompleted || isSelectedRevisionClosedForPdfUpdate}
               onClick={() => {
                 setUploadFile(null);
                 setUploadModalOpen(true);
               }}
             >
               PDF
+            </Button>
+          </Tooltip>
+        )}
+        {(selectedRevision?.id === latestRevisionId && selectedRevision?.review_code !== "AP" && canSetApByRole) && (
+          <Tooltip
+            title={
+              activePublishedRemarksCount > 0
+                ? `Нельзя поставить AP: активных замечаний ${activePublishedRemarksCount}`
+                : carryOpenCount > 0
+                ? `Нельзя поставить AP: в "Должны были устранить" осталось ${carryOpenCount}`
+                : "Все замечания закрыты/отклонены, можно поставить AP"
+            }
+          >
+            <Button
+              disabled={!canSetApForSelectedRevision}
+              onClick={async () => {
+                if (!selectedRevision) return;
+                try {
+                  await setRevisionReviewCode(selectedRevision.id, "AP");
+                  message.success("Для ревизии установлен статус AP");
+                  await loadCard();
+                } catch (error: unknown) {
+                  const text = error instanceof Error ? error.message : "Не удалось установить AP";
+                  message.error(text);
+                }
+              }}
+            >
+              Поставить AP
             </Button>
           </Tooltip>
         )}
@@ -232,6 +275,8 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
           <Descriptions.Item label="Название">{card?.document_title ?? "—"}</Descriptions.Item>
           <Descriptions.Item label="Категория">{card?.category ?? "—"}</Descriptions.Item>
           <Descriptions.Item label="Дисциплина">{card?.discipline_code ?? "—"}</Descriptions.Item>
+          <Descriptions.Item label="LR (ФИО)">{card?.lr_reviewer_name ?? "—"}</Descriptions.Item>
+          <Descriptions.Item label="Разработчик (ФИО)">{card?.developer_name ?? "—"}</Descriptions.Item>
           <Descriptions.Item label="Текущий статус процесса">
             {(selectedRevision ?? lastRevision) ? (
               <Space direction="vertical" size={2}>
@@ -391,7 +436,10 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
           locale={{ emptyText: "По этой ревизии пока нет комментариев." }}
           expandable={{
             expandedRowRender: (row) => {
-              const canManageFromCard = currentUser.permissions.can_publish_comments && !documentCompleted;
+              const canManageFromCard =
+                currentUser.permissions.can_publish_comments &&
+                (currentUser.role === "admin" || card?.current_user_matrix_role === "LR") &&
+                !documentCompleted;
               const isLatestRow = latestRevisionId !== null && row.revision_id === latestRevisionId;
               const rowComments =
                 showOnlyUnsentCrs && currentUser.permissions.can_publish_comments && row.revision_id === selectedRevisionId
@@ -411,13 +459,13 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
               const rowIndex = filteredHistory.findIndex((item) => item.revision_id === row.revision_id);
               const carryCandidates =
                 rowIndex > 0
-                  ? filteredHistory
-                      .slice(0, rowIndex)
-                      .flatMap((h) => h.comments)
-                      .filter((comment) => comment.parent_id === null && comment.status === "RESOLVED" && !comment.carry_finalized)
+                  ? filteredHistory[rowIndex - 1].comments.filter(
+                      (comment) => comment.parent_id === null && comment.status === "RESOLVED" && !comment.carry_finalized,
+                    )
                   : [];
               const carryClosedIds = carryClosedByRevision[row.revision_id] ?? [];
-              const carryOpen = carryCandidates.filter((item) => !carryClosedIds.includes(item.id));
+              const carryDecidedIds = new Set((carryDecisionsByRevision[row.revision_id] ?? []).map((item) => item.source_comment_id));
+              const carryOpen = carryCandidates.filter((item) => !carryDecidedIds.has(item.id));
               const carryDone = carryCandidates.filter((item) => carryClosedIds.includes(item.id));
               const renderCommentsTable = (items: CommentItem[]) => (
                 <Table
@@ -429,6 +477,8 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                   {
                     title: "Текст",
                     dataIndex: "text",
+                    width: 360,
+                    fixed: "left",
                     render: (value: string, comment: CommentItem) => (
                       <Button
                         type="link"
@@ -439,7 +489,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                           setPdfAnnotatorOpen(true);
                         }}
                       >
-                        <Typography.Text ellipsis={{ tooltip: value }} style={{ maxWidth: 390 }}>
+                        <Typography.Text ellipsis={{ tooltip: value }} style={{ maxWidth: 340 }}>
                           {value}
                         </Typography.Text>
                       </Button>
@@ -585,6 +635,31 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                                   Отклонить
                                 </Button>
                               )}
+                              {isLatestRow &&
+                                comment.parent_id === null &&
+                                comment.contractor_status === "I" &&
+                                comment.backlog_status !== "LR_FINAL_CONFIRM" && (
+                                <Button
+                                  size="small"
+                                  loading={busyCommentId === comment.id}
+                                  onClick={async () => {
+                                    try {
+                                      setBusyCommentId(comment.id);
+                                      message.loading({ content: "Финальное подтверждение...", key: `final_${comment.id}` });
+                                      await ownerCommentDecision(comment.id, { action: "FINAL_CONFIRM" });
+                                      message.success({ content: "LR финально подтвердил замечание", key: `final_${comment.id}` });
+                                      await loadCard();
+                                    } catch (error: unknown) {
+                                      const text = error instanceof Error ? error.message : "Не удалось финально подтвердить";
+                                      message.error({ content: text, key: `final_${comment.id}` });
+                                    } finally {
+                                      setBusyCommentId(null);
+                                    }
+                                  }}
+                                >
+                                  Финально подтвердить (LR)
+                                </Button>
+                              )}
                             </Space>
                           ),
                         },
@@ -592,7 +667,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                     : []),
                   ]}
                   tableLayout="fixed"
-                  scroll={{ x: 1100, y: 260 }}
+                  scroll={{ x: 1700, y: 260 }}
                 />
               );
               const tabItems = [
@@ -620,7 +695,16 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                                   filteredHistory.find((h) => h.comments.some((c) => c.id === item.id))?.revision_code ?? "—",
                               },
                               { title: "Код", key: "review_code", width: 90, render: (_, item) => item.review_code ?? "—" },
-                              { title: "Текст", dataIndex: "text" },
+                              {
+                                title: "Текст",
+                                dataIndex: "text",
+                                width: 360,
+                                render: (value: string) => (
+                                  <Typography.Text ellipsis={{ tooltip: value }} style={{ maxWidth: 330, whiteSpace: "nowrap" }}>
+                                    {value}
+                                  </Typography.Text>
+                                ),
+                              },
                               {
                                 title: "Автор",
                                 key: "author",
@@ -663,22 +747,26 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                                           message.info("Решение по замечанию уже зафиксировано");
                                           return;
                                         }
-                                        await setCarryDecision(row.revision_id, { source_comment_id: item.id, status: "OPEN" });
-                                        const exists = row.comments.some((c) => c.text === item.text && c.review_code === item.review_code);
-                                        if (!exists) {
-                                          await createComment({
-                                            revision_id: row.revision_id,
-                                            text: item.text,
-                                            status: "OPEN",
-                                            review_code: item.review_code ?? null,
-                                            page: item.page ?? null,
-                                            area_x: item.area_x ?? null,
-                                            area_y: item.area_y ?? null,
-                                            area_w: item.area_w ?? null,
-                                            area_h: item.area_h ?? null,
-                                          });
-                                          await loadCard();
-                                        }
+                                        const decision = await setCarryDecision(row.revision_id, { source_comment_id: item.id, status: "OPEN" });
+                                        setCarryDecisionsByRevision((prev) => ({
+                                          ...prev,
+                                          [row.revision_id]: [
+                                            decision,
+                                            ...(prev[row.revision_id] ?? []).filter((x) => x.source_comment_id !== decision.source_comment_id),
+                                          ],
+                                        }));
+                                        await createComment({
+                                          revision_id: row.revision_id,
+                                          text: item.text,
+                                          status: "OPEN",
+                                          review_code: item.review_code ?? null,
+                                          page: item.page ?? null,
+                                          area_x: item.area_x ?? null,
+                                          area_y: item.area_y ?? null,
+                                          area_w: item.area_w ?? null,
+                                          area_h: item.area_h ?? null,
+                                        });
+                                        await loadCard();
                                       }}
                                     >
                                       OPEN
@@ -718,7 +806,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                                 ),
                               },
                             ]}
-                            scroll={{ x: 980, y: 220 }}
+                            scroll={{ x: 1280, y: 220 }}
                             tableLayout="fixed"
                           />
                         ),
@@ -740,7 +828,16 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                                   filteredHistory.find((h) => h.comments.some((c) => c.id === item.id))?.revision_code ?? "—",
                               },
                               { title: "Код", key: "review_code", width: 90, render: (_, item) => item.review_code ?? "—" },
-                              { title: "Текст", dataIndex: "text" },
+                              {
+                                title: "Текст",
+                                dataIndex: "text",
+                                width: 360,
+                                render: (value: string) => (
+                                  <Typography.Text ellipsis={{ tooltip: value }} style={{ maxWidth: 330, whiteSpace: "nowrap" }}>
+                                    {value}
+                                  </Typography.Text>
+                                ),
+                              },
                               {
                                 title: "Автор",
                                 key: "author",
@@ -776,7 +873,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                                 render: () => <Typography.Text type="secondary">Зафиксировано</Typography.Text>,
                               },
                             ]}
-                            scroll={{ x: 980, y: 220 }}
+                            scroll={{ x: 1280, y: 220 }}
                             tableLayout="fixed"
                           />
                         ),
@@ -872,7 +969,10 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
         } : undefined}
         canCreateRemarks={(card?.can_current_user_raise_comments ?? true) && !documentCompleted}
         canCreateOwnerRemarks={canOwnerCreateRemarks && !documentCompleted}
-        canManageOwnerRemarks={currentUser.permissions.can_publish_comments}
+        canManageOwnerRemarks={
+          currentUser.permissions.can_publish_comments &&
+          (currentUser.role === "admin" || card?.current_user_matrix_role === "LR")
+        }
         noAccessHint="Вы не назначены рассматривающим (LR/R) по этому документу. Доступен только просмотр PDF и замечаний."
         focusCommentId={pdfFocusCommentId}
         onCreated={async () => {

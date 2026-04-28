@@ -660,6 +660,8 @@ class RevisionCardRead(BaseModel):
     actual_progress_percent: float = 0
     can_current_user_raise_comments: bool = True
     current_user_matrix_role: str | None = None
+    lr_reviewer_name: str | None = None
+    developer_name: str | None = None
     revisions: list[RevisionRead]
     history: list[RevisionCommentThreadRead]
 

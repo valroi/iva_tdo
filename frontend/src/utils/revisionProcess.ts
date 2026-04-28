@@ -3,10 +3,10 @@ import type { CommentItem } from "../types";
 export type RemarksSummaryCode = "RJ" | "CO" | "AN" | "NONE";
 
 function isEffectiveContractorRemark(item: CommentItem): boolean {
+  const isAccountedInOwnerFlow = item.is_published_to_contractor === true || item.in_crs === true;
   return (
     item.parent_id === null &&
-    item.is_published_to_contractor === true &&
-    item.contractor_status === "A" &&
+    isAccountedInOwnerFlow &&
     item.status !== "REJECTED" &&
     !!item.review_code
   );

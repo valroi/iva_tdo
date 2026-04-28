@@ -1,4 +1,4 @@
-import { Button, Card, Space, Table, Tabs, Tooltip, Typography, message } from "antd";
+import { Button, Card, Modal, Space, Table, Tabs, Tooltip, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useState } from "react";
 
@@ -58,6 +58,19 @@ export default function CrsPage(): JSX.Element {
                   await load();
                 } catch (error: unknown) {
                   const text = error instanceof Error ? error.message : "Ошибка отправки CRS";
+                  if (text.includes("CRS нельзя отправить") || text.includes("неотработанные замечания")) {
+                    Modal.error({
+                      title: "CRS не отправлен",
+                      content:
+                        "Нельзя отправить документ подрядчику: не отработаны все замечания по связанному TRM. " +
+                        "Сначала обработайте замечания (должны быть либо отклонены LR, либо добавлены в CRS), затем повторите отправку.",
+                    });
+                  } else if (text.includes("Only LR can add remarks to CRS and send CRS to contractor")) {
+                    Modal.warning({
+                      title: "Недостаточно прав",
+                      content: "Только LR по дисциплине документа может отправлять CRS подрядчику.",
+                    });
+                  }
                   message.error(text);
                 } finally {
                   setSending(false);

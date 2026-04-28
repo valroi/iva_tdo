@@ -366,7 +366,12 @@ export default function App(): JSX.Element {
                     if (item.event_type === "REVISION_UPLOADED_FOR_TDO" || item.event_type === "NEW_REVISION_FOR_TDO") {
                       setActiveSection(user?.company_type === "owner" ? "trm" : "tdo_queue");
                     } else if (item.event_type === "TDO_SENT_TO_OWNER") {
-                      setActiveSection("trm");
+                      if (item.revision_id) {
+                        setOpenedRevisionId(item.revision_id);
+                        setActiveSection("revision_card");
+                      } else {
+                        setActiveSection("trm");
+                      }
                     } else {
                       setOpenedRevisionId(item.revision_id ?? null);
                       setActiveSection(item.revision_id ? "revision_card" : "projects");

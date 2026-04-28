@@ -230,70 +230,6 @@ export default function ProjectsPage({
       .map((user) => ({ value: user.id, label: `${user.full_name} (${user.email})` }));
   }, [members, users]);
 
-  const projectColumns: ColumnsType<ProjectItem> = [
-    { title: "Код", dataIndex: "code", key: "code", width: 110, fixed: "left" },
-    { title: "Название", dataIndex: "name", key: "name", width: 220 },
-    { title: "Категория", dataIndex: "document_category", key: "document_category", width: 180 },
-    { title: "Создан", dataIndex: "created_at", key: "created_at", width: 190, render: (v) => formatDateTimeRu(v) },
-    { title: "Обновлен", dataIndex: "updated_at", key: "updated_at", width: 190, render: (v) => formatDateTimeRu(v) },
-    {
-      title: "Действие",
-      key: "action",
-      width: 230,
-      fixed: "right",
-      render: (_, row) => (
-        <Space>
-          <Button size="small" onClick={() => setSelectedProjectId(row.id)}>
-            Открыть
-          </Button>
-          <Button
-            size="small"
-            disabled={!isAdmin}
-            onClick={() => {
-              setSelectedProjectForEdit(row);
-              projectEditForm.setFieldsValue({
-                name: row.name,
-                document_category: row.document_category ?? undefined,
-                description: row.description ?? undefined,
-              });
-              setProjectEditOpen(true);
-            }}
-          >
-            Редактировать
-          </Button>
-          <Popconfirm
-            title="Удалить проект?"
-            description="Проект и все связанные данные будут удалены без восстановления"
-            onConfirm={async () => {
-              try {
-                await deleteProject(row.id, { purge: true, confirmCode: row.code });
-                message.success("Проект удален");
-                if (selectedProjectId === row.id) {
-                  setSelectedProjectId(null);
-                  setMembers([]);
-                  setReferences([]);
-                }
-                await onReload();
-              } catch (error) {
-                const text = error instanceof Error ? error.message : "Не удалось удалить проект";
-                message.error(text);
-              }
-            }}
-            disabled={!isAdmin && !currentUser.permissions.can_manage_projects}
-          >
-            <Button
-              size="small"
-              danger
-              disabled={!isAdmin && !currentUser.permissions.can_manage_projects}
-            >
-              Удалить
-            </Button>
-          </Popconfirm>
-        </Space>
-      ),
-    },
-  ];
-
   const roleLabelByValue: Record<ProjectMemberRole, string> = useMemo(
     () =>
       projectMemberRoleOptions.reduce<Record<ProjectMemberRole, string>>((acc, item) => {
@@ -426,14 +362,6 @@ export default function ProjectsPage({
   ];
 
   const selectedProject = projects.find((p) => p.id === selectedProjectId) ?? null;
-  const orderedProjects = useMemo(
-    () =>
-      [...projects].sort((a, b) => {
-        if (a.code === b.code) return a.name.localeCompare(b.name);
-        return a.code.localeCompare(b.code);
-      }),
-    [projects],
-  );
   const referenceTypeOptions = useMemo(
     () =>
       Array.from(new Set(references.map((ref) => ref.ref_type)))
@@ -736,16 +664,6 @@ export default function ProjectsPage({
           ]}
         />
       </Card>
-      <Card title="Список проектов" className="hrp-card" style={{ marginTop: 16 }}>
-        <Table
-          rowKey="id"
-          columns={projectColumns}
-          dataSource={orderedProjects}
-          pagination={false}
-          size="small"
-        />
-      </Card>
-
       <Modal
         open={cipherOpen}
         title={`Матрица шифрования: ${selectedProject?.code ?? "—"} / ${selectedProject?.document_category ?? "—"}`}

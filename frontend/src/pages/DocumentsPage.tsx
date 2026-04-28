@@ -43,6 +43,7 @@ import {
   getAuthHeaders,
   getRevisionPdfUrl,
   listNotifications,
+  listOwnerReviewQueue,
 } from "../api";
 import RevisionPdfAnnotator from "../components/RevisionPdfAnnotator";
 import ProcessHint from "../components/ProcessHint";
@@ -117,6 +118,7 @@ export default function DocumentsPage({
   const [allNotifications, setAllNotifications] = useState<
     { event_type: string; revision_id?: number | null; created_at: string; message?: string | null }[]
   >([]);
+  const [ownerCanPublishByRevision, setOwnerCanPublishByRevision] = useState<Record<number, boolean>>({});
   const [slaDays, setSlaDays] = useState<{ initial_days: number; owner_specialist_review_days: number } | null>(null);
 
   const openCommentContext = (row: CommentItem): void => {
@@ -183,6 +185,9 @@ export default function DocumentsPage({
   const ownerCommentLocked = isOwnerCommentLockedStatus(selectedRevision?.status);
   const contractorCanRespondNow = isContractorResponseAllowedStatus(selectedRevision?.status);
   const selectedDocumentCompleted = selectedDocument !== null && isDocumentCompleted(selectedDocument);
+  const canOwnerPublishToCrs =
+    currentUser.role === "admin" ||
+    (currentUser.permissions.can_publish_comments && Boolean(ownerCanPublishByRevision[selectedRevisionId ?? -1]));
   const selectedCarryDecidedIds =
     selectedRevisionId !== null
       ? (carryDecisionsByRevision[selectedRevisionId] ?? []).map((item) => item.source_comment_id)
@@ -459,6 +464,28 @@ export default function DocumentsPage({
         message.error(text);
       });
   }, [selectedRevisionId]);
+  useEffect(() => {
+    if (currentUser.company_type !== "owner" || !currentUser.permissions.can_publish_comments) {
+      setOwnerCanPublishByRevision({});
+      return;
+    }
+    let cancelled = false;
+    listOwnerReviewQueue()
+      .then((rows) => {
+        if (cancelled) return;
+        const mapped: Record<number, boolean> = {};
+        rows.forEach((row) => {
+          mapped[row.revision_id] = row.can_publish_to_contractor;
+        });
+        setOwnerCanPublishByRevision(mapped);
+      })
+      .catch(() => {
+        if (!cancelled) setOwnerCanPublishByRevision({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser.company_type, currentUser.permissions.can_publish_comments]);
 
   useEffect(() => {
     if (!revisions.length) {
@@ -495,26 +522,8 @@ export default function DocumentsPage({
 
   useEffect(() => {
     if (!selectedRevisionId || !canManageCarryOver || !selectedRevision) return;
-    const targetRevisionIds = revisions
-      .filter((rev) => isOlderRevision(rev, selectedRevision) || rev.id === selectedRevisionId)
-      .map((rev) => rev.id);
-    if (!targetRevisionIds.length) {
-      setCarryClosedByRevision((prev) => ({ ...prev, [selectedRevisionId]: [] }));
-      setCarryDecisionsByRevision((prev) => ({ ...prev, [selectedRevisionId]: [] }));
-      return;
-    }
-    Promise.all(targetRevisionIds.map(async (id) => listCarryDecisions(id).catch(() => [] as CarryDecisionItem[])))
-      .then((groups) => {
-        const all = groups.flat();
-        const latestBySource = new Map<number, CarryDecisionItem>();
-        const ordered = [...all].sort((a, b) => {
-          if (a.decided_at === b.decided_at) return a.id - b.id;
-          return a.decided_at < b.decided_at ? -1 : 1;
-        });
-        for (const item of ordered) {
-          latestBySource.set(item.source_comment_id, item);
-        }
-        const merged = Array.from(latestBySource.values());
+    listCarryDecisions(selectedRevisionId)
+      .then((merged) => {
         const closed = merged.filter((item) => item.status === "CLOSED").map((item) => item.source_comment_id);
         setCarryClosedByRevision((prev) => ({ ...prev, [selectedRevisionId]: closed }));
         setCarryDecisionsByRevision((prev) => ({ ...prev, [selectedRevisionId]: merged }));
@@ -548,29 +557,30 @@ export default function DocumentsPage({
       setPreviousRevisionRemarks([]);
       return;
     }
-    const previous = revisions.filter((item) => isOlderRevision(item, selectedRevision));
-    if (previous.length === 0) {
+    const previous = revisions
+      .filter((item) => isOlderRevision(item, selectedRevision))
+      .sort((a, b) => {
+        if (a.created_at === b.created_at) return b.id - a.id;
+        return a.created_at < b.created_at ? 1 : -1;
+      })[0];
+    if (!previous) {
       setPreviousRevisionRemarks([]);
       return;
     }
-    Promise.all(
-      previous.map(async (rev) => {
-        const items = await listComments(rev.id);
-        return items
+    listComments(previous.id)
+      .then((items) => {
+        const merged = items
           .filter((c) => c.parent_id === null && shouldCarryRemark(c.status) && !c.carry_finalized)
           .map((c) => ({
             id: c.id,
-            revision_id: rev.id,
-            revision_code: rev.revision_code,
+            revision_id: previous.id,
+            revision_code: previous.revision_code,
             status: c.status,
             review_code: c.review_code ?? null,
             text: c.text,
             created_at: c.created_at,
-          }));
-      }),
-    )
-      .then((rows) => {
-        const merged = rows.flat().sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+          }))
+          .sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
         setPreviousRevisionRemarks(merged);
       })
       .catch(() => setPreviousRevisionRemarks([]));
@@ -968,7 +978,7 @@ export default function DocumentsPage({
               Ответить
             </Button>
           )}
-          {currentUser.permissions.can_publish_comments &&
+          {canOwnerPublishToCrs &&
             isLatestSelected &&
             !selectedDocumentCompleted &&
             row.parent_id === null &&
@@ -992,7 +1002,7 @@ export default function DocumentsPage({
               Добавить в CRS
             </Button>
           )}
-          {currentUser.permissions.can_publish_comments &&
+          {canOwnerPublishToCrs &&
             isLatestSelected &&
             !selectedDocumentCompleted &&
             row.parent_id === null &&
@@ -1013,6 +1023,29 @@ export default function DocumentsPage({
               }}
             >
               Отклонить
+            </Button>
+          )}
+          {canOwnerPublishToCrs &&
+            isLatestSelected &&
+            !selectedDocumentCompleted &&
+            row.parent_id === null &&
+            row.contractor_status === "I" &&
+            row.backlog_status !== "LR_FINAL_CONFIRM" && (
+            <Button
+              size="small"
+              onClick={async () => {
+                if (!selectedRevisionId) return;
+                try {
+                  await ownerCommentDecision(row.id, { action: "FINAL_CONFIRM" });
+                  message.success("LR финально подтвердил замечание");
+                  await reloadRevisionContext(selectedRevisionId);
+                } catch (error: unknown) {
+                  const text = error instanceof Error ? error.message : "Не удалось финально подтвердить";
+                  message.error(text);
+                }
+              }}
+            >
+              Финально подтвердить (LR)
             </Button>
           )}
         </Space>
@@ -1364,14 +1397,16 @@ export default function DocumentsPage({
                   items={[
                       {
                         key: "carry_open",
-                        label: `Должны были устранить (${previousRevisionRemarks.filter((r) => r.status === "RESOLVED" && !(carryClosedByRevision[selectedRevisionId] ?? []).includes(r.id)).length})`,
+                        label: `Должны были устранить (${previousRevisionRemarks.filter((r) => r.status === "RESOLVED" && !(carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => x.source_comment_id === r.id)).length})`,
                         children: (
                           <Table<PreviousRevisionRemark>
                             rowKey={(row) => `carry_open_${row.revision_id}_${row.id}`}
                             size="small"
                             pagination={false}
                             dataSource={previousRevisionRemarks.filter(
-                              (row) => row.status === "RESOLVED" && !(carryClosedByRevision[selectedRevisionId] ?? []).includes(row.id),
+                              (row) =>
+                                row.status === "RESOLVED" &&
+                                !(carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => x.source_comment_id === row.id),
                             )}
                             columns={[
                               { title: "Из ревизии", dataIndex: "revision_code", width: 100 },
@@ -1412,22 +1447,26 @@ export default function DocumentsPage({
                                           message.info("Решение по замечанию уже зафиксировано");
                                           return;
                                         }
-                                        await setCarryDecision(selectedRevisionId, { source_comment_id: row.id, status: "OPEN" });
-                                        const exists = comments.some((c) => c.text === row.text && c.review_code === row.review_code);
-                                        if (!exists) {
-                                          await createComment({
-                                            revision_id: selectedRevisionId,
-                                            text: row.text,
-                                            status: "OPEN",
-                                            review_code: (row.review_code as "AN" | "CO" | "RJ" | null) ?? null,
-                                            page: null,
-                                            area_x: null,
-                                            area_y: null,
-                                            area_w: null,
-                                            area_h: null,
-                                          });
-                                          setComments(await listComments(selectedRevisionId));
-                                        }
+                                        const decision = await setCarryDecision(selectedRevisionId, { source_comment_id: row.id, status: "OPEN" });
+                                        setCarryDecisionsByRevision((prev) => ({
+                                          ...prev,
+                                          [selectedRevisionId]: [
+                                            decision,
+                                            ...(prev[selectedRevisionId] ?? []).filter((x) => x.source_comment_id !== decision.source_comment_id),
+                                          ],
+                                        }));
+                                        await createComment({
+                                          revision_id: selectedRevisionId,
+                                          text: row.text,
+                                          status: "OPEN",
+                                          review_code: (row.review_code as "AN" | "CO" | "RJ" | null) ?? null,
+                                          page: null,
+                                          area_x: null,
+                                          area_y: null,
+                                          area_w: null,
+                                          area_h: null,
+                                        });
+                                        setComments(await listComments(selectedRevisionId));
                                         message.success("Замечание добавлено в текущую ревизию как OPEN");
                                       }}
                                     >
@@ -1560,7 +1599,15 @@ export default function DocumentsPage({
         }}
         mode={currentUser.company_type === "contractor" ? "contractor_review" : "owner_create"}
         comments={comments}
-        carryOverRemarks={canManageCarryOver ? previousRevisionRemarks.filter((row) => row.status === "RESOLVED") : []}
+        carryOverRemarks={
+          canManageCarryOver
+            ? previousRevisionRemarks.filter(
+                (row) =>
+                  row.status === "RESOLVED" &&
+                  !(carryDecisionsByRevision[selectedRevisionId ?? -1] ?? []).some((x) => x.source_comment_id === row.id),
+              )
+            : []
+        }
         carryClosedIds={canManageCarryOver && selectedRevisionId ? (carryClosedByRevision[selectedRevisionId] ?? []) : []}
         carryDecidedIds={canManageCarryOver ? selectedCarryDecidedIds : []}
         onCarryClose={canManageCarryOver ? (id) => {
@@ -1589,7 +1636,14 @@ export default function DocumentsPage({
         onCarryOpen={canManageCarryOver ? async (item) => {
           if (!selectedRevisionId) return;
           if ((carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => x.source_comment_id === item.id)) return;
-          await setCarryDecision(selectedRevisionId, { source_comment_id: item.id, status: "OPEN" });
+          const decision = await setCarryDecision(selectedRevisionId, { source_comment_id: item.id, status: "OPEN" });
+          setCarryDecisionsByRevision((prev) => ({
+            ...prev,
+            [selectedRevisionId]: [
+              decision,
+              ...(prev[selectedRevisionId] ?? []).filter((x) => x.source_comment_id !== decision.source_comment_id),
+            ],
+          }));
           await createComment({
             revision_id: selectedRevisionId,
             text: item.text,
@@ -1604,7 +1658,7 @@ export default function DocumentsPage({
           setComments(await listComments(selectedRevisionId));
         } : undefined}
         focusCommentId={pdfFocusCommentId}
-        canManageOwnerRemarks={currentUser.permissions.can_publish_comments}
+        canManageOwnerRemarks={canOwnerPublishToCrs}
         onCreated={async () => {
           if (selectedRevisionId) {
             const items = await listComments(selectedRevisionId);

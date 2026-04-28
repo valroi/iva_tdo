@@ -243,6 +243,8 @@ export interface RevisionCard {
   actual_progress_percent?: number;
   can_current_user_raise_comments: boolean;
   current_user_matrix_role: string | null;
+  lr_reviewer_name?: string | null;
+  developer_name?: string | null;
   revisions: Revision[];
   history: RevisionCommentThread[];
 }

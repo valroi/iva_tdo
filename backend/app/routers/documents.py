@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
 import tempfile
@@ -195,12 +196,38 @@ def _owner_matrix_role_for_document(
     )
     if doc_type:
         query = query.filter(ReviewMatrixMember.doc_type == doc_type)
-    row = query.order_by(ReviewMatrixMember.level.asc()).first()
-    if row is None:
+    rows = query.all()
+    if not rows:
         return None
-    if row.level == 1 and row.state == "LR":
+    lr_row = next((item for item in rows if item.level == 1 and item.state == "LR"), None)
+    if lr_row is not None:
         return "LR"
+    row = sorted(rows, key=lambda item: (item.level, 0 if item.state == "LR" else 1))[0]
     return "R"
+
+
+def _ensure_lr_can_publish_for_revision(db: Session, *, current_user: User, revision: Revision) -> tuple[Document, MDRRecord, Project]:
+    document = db.query(Document).filter(Document.id == revision.document_id).first()
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    mdr = db.query(MDRRecord).filter(MDRRecord.id == document.mdr_id).first()
+    if mdr is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="MDR not found")
+    project = db.query(Project).filter(Project.code == mdr.project_code).first()
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    if not _is_lr_for_document(
+        db,
+        current_user=current_user,
+        project_id=project.id,
+        discipline_code=mdr.discipline_code,
+        doc_type=mdr.doc_type,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only LR can add remarks to CRS and send CRS to contractor",
+        )
+    return document, mdr, project
 
 
 def _is_contractor_developer_for_project(
@@ -2054,6 +2081,21 @@ def list_crs_queue(
     rows = query.all()
     result: list[CsrQueueItem] = []
     for comment, revision, document in rows:
+        if current_user.role.value != "admin":
+            mdr = db.query(MDRRecord).filter(MDRRecord.id == document.mdr_id).first()
+            if mdr is None:
+                continue
+            project = db.query(Project).filter(Project.code == mdr.project_code).first()
+            if project is None:
+                continue
+            if not _is_lr_for_document(
+                db,
+                current_user=current_user,
+                project_id=project.id,
+                discipline_code=mdr.discipline_code,
+                doc_type=mdr.doc_type,
+            ):
+                continue
         result.append(
             CsrQueueItem(
                 comment_id=comment.id,
@@ -2086,15 +2128,7 @@ def add_comment_to_crs(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
     if not _owner_can_access_revision(current_user, revision):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
-    document = db.query(Document).filter(Document.id == revision.document_id).first()
-    if document is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
-    mdr = db.query(MDRRecord).filter(MDRRecord.id == document.mdr_id).first()
-    if mdr is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="MDR not found")
-    project = db.query(Project).filter(Project.code == mdr.project_code).first()
-    if project is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    document, mdr, project = _ensure_lr_can_publish_for_revision(db, current_user=current_user, revision=revision)
     if not _can_manage_owner_remark(
         db,
         current_user=current_user,
@@ -2155,18 +2189,47 @@ def send_crs_comments(
     if not comments:
         return PublishCommentsResult(revision_id=0, published_count=0)
 
-    crs_number_by_document: dict[int, str] = {}
-    revisions_touched: set[int] = set()
+    touched_trm_numbers: set[str] = set()
+    comment_context: list[tuple[Comment, Revision, Document, MDRRecord]] = []
+    unresolved_by_revision: dict[tuple[str, str], int] = defaultdict(int)
     for comment in comments:
         revision = db.query(Revision).filter(Revision.id == comment.revision_id).first()
         if revision is None:
             continue
-        document = db.query(Document).filter(Document.id == revision.document_id).first()
-        if document is None:
-            continue
-        mdr = db.query(MDRRecord).filter(MDRRecord.id == document.mdr_id).first()
-        if mdr is None:
-            continue
+        document, mdr, _project = _ensure_lr_can_publish_for_revision(db, current_user=current_user, revision=revision)
+        comment_context.append((comment, revision, document, mdr))
+        if revision.trm_number:
+            touched_trm_numbers.add(revision.trm_number)
+
+    if touched_trm_numbers:
+        pending_rows = (
+            db.query(Comment, Revision, Document)
+            .join(Revision, Revision.id == Comment.revision_id)
+            .join(Document, Document.id == Revision.document_id)
+            .filter(
+                Comment.parent_id.is_(None),
+                Revision.trm_number.in_(list(touched_trm_numbers)),
+                Comment.in_crs.is_(False),
+                Comment.status != CommentStatus.REJECTED,
+            )
+            .all()
+        )
+        for _pending_comment, pending_revision, pending_document in pending_rows:
+            unresolved_by_revision[(pending_document.document_num, pending_revision.revision_code)] += 1
+    if unresolved_by_revision:
+        details = "; ".join(
+            f"{document_num} / rev {revision_code} - {count} неотработанных"
+            for (document_num, revision_code), count in sorted(unresolved_by_revision.items())
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"CRS нельзя отправить: есть неотработанные замечания по TRM ({details}). "
+            "Отработанные замечания: только отклоненные LR или добавленные в CRS.",
+        )
+
+    crs_number_by_document: dict[int, str] = {}
+    revisions_touched: set[int] = set()
+    for comment, revision, document, mdr in comment_context:
         author = db.query(User).filter(User.id == (revision.author_id or document.created_by_id)).first()
         sender_code = (current_user.company_code or "IVA").strip().upper() or "IVA"
         receiver_code = (author.company_code if author else None) or "SHP"
@@ -2692,16 +2755,19 @@ def owner_comment_decision(
             return comment
         note = (payload.note or "").strip()
         if len(note) < 3:
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Comment for contractor is required")
+            note = "LR финально подтвердил замечание. Исполнение обязательно."
         comment.backlog_status = "LR_FINAL_CONFIRM"
-        comment.status = CommentStatus.IN_PROGRESS
+        comment.status = CommentStatus.RESOLVED
+        comment.resolved_at = datetime.utcnow()
+        comment.contractor_status = ContractorCommentStatus.A
+        comment.is_published_to_contractor = True
         db.add(
             Comment(
                 revision_id=comment.revision_id,
                 parent_id=comment.id,
                 author_id=current_user.id,
                 text=f"[LR_FINAL_CONFIRM] {note}",
-                status=CommentStatus.IN_PROGRESS,
+                status=CommentStatus.RESOLVED,
             )
         )
     prev_status = revision.status
@@ -2814,6 +2880,8 @@ def get_revision_card(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
     matrix_role: str | None = None
+    lr_reviewer_name: str | None = None
+    developer_name: str | None = None
     can_owner_raise_comments = True
     if current_user.company_type == CompanyType.owner and current_user.role.value != "admin":
         can_owner_raise_comments = False
@@ -2837,6 +2905,28 @@ def get_revision_card(
         .order_by(Revision.created_at.asc(), Revision.id.asc())
         .all()
     )
+    developer_user = db.query(User).filter(User.id == (revision.author_id or document.created_by_id)).first()
+    developer_name = developer_user.full_name if developer_user and developer_user.full_name else (developer_user.email if developer_user else None)
+    lr_rows = (
+        db.query(ReviewMatrixMember, User)
+        .join(User, User.id == ReviewMatrixMember.user_id)
+        .filter(
+            ReviewMatrixMember.project_id == project.id,
+            ReviewMatrixMember.discipline_code == mdr.discipline_code,
+            ReviewMatrixMember.level == 1,
+            ReviewMatrixMember.state == "LR",
+        )
+        .order_by(ReviewMatrixMember.id.asc())
+        .all()
+    )
+    if lr_rows:
+        unique_lr_names: list[str] = []
+        for _matrix, lr_user in lr_rows:
+            label = (lr_user.full_name or lr_user.email or "").strip()
+            if label and label not in unique_lr_names:
+                unique_lr_names.append(label)
+        if unique_lr_names:
+            lr_reviewer_name = ", ".join(unique_lr_names)
     history: list[RevisionCommentThreadRead] = []
     for item in revisions:
         comments_query = (
@@ -2930,6 +3020,8 @@ def get_revision_card(
         actual_progress_percent=actual_progress,
         can_current_user_raise_comments=can_owner_raise_comments,
         current_user_matrix_role=matrix_role,
+        lr_reviewer_name=lr_reviewer_name,
+        developer_name=developer_name,
         revisions=[RevisionRead.model_validate(item, from_attributes=True) for item in revisions],
         history=history,
     )
