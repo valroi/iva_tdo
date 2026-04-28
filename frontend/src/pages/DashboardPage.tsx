@@ -200,10 +200,13 @@ export default function DashboardPage({
     {
       title: "Задача",
       key: "message",
+      width: 360,
       render: (_, row) => (
-        <Space direction="vertical" size={2}>
+        <Space direction="vertical" size={2} style={{ width: "100%" }}>
           <Typography.Text strong>{eventTitleMap[row.event_type] ?? "Уведомление по процессу"}</Typography.Text>
-          <Typography.Text>{row.message}</Typography.Text>
+          <Typography.Text style={{ whiteSpace: "normal", wordBreak: "break-word", lineHeight: 1.3 }}>
+            {row.message}
+          </Typography.Text>
         </Space>
       ),
     },
@@ -322,6 +325,7 @@ export default function DashboardPage({
           dataSource={myTasks}
           pagination={false}
           size="small"
+          scroll={{ x: 1300 }}
           rowKey="id"
           onRow={(record) => ({ onDoubleClick: () => openByNotification(record) })}
         />
