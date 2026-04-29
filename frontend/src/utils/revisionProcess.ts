@@ -73,3 +73,7 @@ export function getDisplayRevisionCode(current: RevisionCodeCarrier, all?: Revis
   }
   return "00";
 }
+
+export function getCleanRemarkText(value: string | null | undefined): string {
+  return String(value ?? "").replace(/^\[(REMARK|QUESTION)\]\s*/i, "").trim();
+}

@@ -8,7 +8,7 @@ import RevisionPdfAnnotator from "../components/RevisionPdfAnnotator";
 import type { CarryDecisionItem, CommentItem, RevisionCard, User } from "../types";
 import { formatDateTimeRu } from "../utils/datetime";
 import { ContractorReuploadPdfTag, RevisionStatusCell, contractorNeedsPdfReupload } from "../utils/revisionHints";
-import { getDisplayRevisionCode, getRemarksSummaryLabel } from "../utils/revisionProcess";
+import { getCleanRemarkText, getDisplayRevisionCode, getRemarksSummaryLabel } from "../utils/revisionProcess";
 import { PROCESS_STEPS, getProcessCurrentStep, isOwnerCommentingAllowedStatus } from "../utils/workflowProgress";
 
 interface Props {
@@ -490,7 +490,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                         }}
                       >
                         <Typography.Text ellipsis={{ tooltip: value }} style={{ maxWidth: 340 }}>
-                          {value}
+                          {getCleanRemarkText(value)}
                         </Typography.Text>
                       </Button>
                     ),
@@ -614,6 +614,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                               )}
                               {isLatestRow &&
                                 !comment.is_published_to_contractor &&
+                                !comment.in_crs &&
                                 comment.contractor_status === null &&
                                 (comment.status === "OPEN" || comment.status === "IN_PROGRESS") && (
                                 <Button
@@ -759,7 +760,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                                 width: 360,
                                 render: (value: string) => (
                                   <Typography.Text ellipsis={{ tooltip: value }} style={{ maxWidth: 330, whiteSpace: "nowrap" }}>
-                                    {value}
+                                    {getCleanRemarkText(value)}
                                   </Typography.Text>
                                 ),
                               },
@@ -892,7 +893,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                                 width: 360,
                                 render: (value: string) => (
                                   <Typography.Text ellipsis={{ tooltip: value }} style={{ maxWidth: 330, whiteSpace: "nowrap" }}>
-                                    {value}
+                                    {getCleanRemarkText(value)}
                                   </Typography.Text>
                                 ),
                               },

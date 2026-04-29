@@ -1,4 +1,4 @@
-import { Button, Card, Select, Space, Table, Tag, Tooltip, Typography, message } from "antd";
+import { Button, Card, Input, Select, Space, Table, Tag, Tooltip, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
 
@@ -24,6 +24,7 @@ interface Filters {
   project_code?: string;
   category?: string;
   discipline_code?: string;
+  document_title?: string;
   release_status?: string;
   revision_status?: string;
   comments_scope?: "ANY" | "OPEN" | "NONE";
@@ -75,7 +76,28 @@ export default function DocumentsRegistryPage({ currentUser, onOpenRevision, pre
     { title: "Проект", dataIndex: "project_code", width: 90 },
     { title: "Категория", dataIndex: "category", width: 110 },
     { title: "Дисциплина", dataIndex: "discipline_code", width: 100 },
-    { title: "Документ", dataIndex: "document_num", width: 250, ellipsis: true },
+    {
+      title: "Документ",
+      dataIndex: "document_num",
+      width: 250,
+      ellipsis: true,
+      render: (value: string, row) => (
+        <Button
+          type="link"
+          style={{ padding: 0 }}
+          onClick={() => {
+            const latestRevisionId = row.revisions[0]?.id;
+            if (!latestRevisionId) {
+              message.info("Для документа пока нет ревизий");
+              return;
+            }
+            onOpenRevision({ revision_id: latestRevisionId });
+          }}
+        >
+          {value}
+        </Button>
+      ),
+    },
     { title: "Название", dataIndex: "document_title", width: 190, ellipsis: true },
     { title: "Последняя ревизия", dataIndex: "latest_revision_code", width: 120, render: (v) => v ?? "—" },
     {
@@ -217,6 +239,18 @@ export default function DocumentsRegistryPage({ currentUser, onOpenRevision, pre
             options={disciplineOptions}
             onChange={(value) => setFilters((prev) => ({ ...prev, discipline_code: value ?? undefined }))}
           />
+          <Input
+            allowClear
+            placeholder="Название документа"
+            style={{ width: 220 }}
+            value={filters.document_title}
+            onChange={(event) =>
+              setFilters((prev) => ({
+                ...prev,
+                document_title: event.target.value.trim() ? event.target.value : undefined,
+              }))
+            }
+          />
           <Select
             allowClear
             placeholder="Статус выпуска"
@@ -226,7 +260,7 @@ export default function DocumentsRegistryPage({ currentUser, onOpenRevision, pre
           />
           <Select
             allowClear
-            placeholder="Статус ревизии"
+            placeholder="Шаг воркфлоу"
             style={{ width: 180 }}
             options={["REVISION_CREATED", "UPLOADED_WAITING_TDO", "UNDER_REVIEW", "CANCELLED_BY_TDO", "SUBMITTED"].map((value) => ({ value, label: value }))}
             onChange={(value) => setFilters((prev) => ({ ...prev, revision_status: value ?? undefined }))}

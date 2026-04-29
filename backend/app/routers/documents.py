@@ -790,6 +790,7 @@ def list_documents_registry(
     project_code: str | None = Query(default=None),
     category: str | None = Query(default=None),
     discipline_code: str | None = Query(default=None),
+    document_title: str | None = Query(default=None),
     release_status: str | None = Query(default=None),
     revision_status: str | None = Query(default=None),
     comments_scope: str | None = Query(default=None, pattern="^(ANY|OPEN|NONE)$"),
@@ -835,6 +836,8 @@ def list_documents_registry(
         if category and mdr.category != category:
             continue
         if discipline_code and mdr.discipline_code != discipline_code:
+            continue
+        if document_title and document_title.strip().lower() not in (doc.title or "").lower():
             continue
         if release_status and (latest.review_code.value if latest and latest.review_code else None) != release_status:
             continue
@@ -2064,7 +2067,7 @@ def list_crs_queue(
         db.query(Comment, Revision, Document)
         .join(Revision, Revision.id == Comment.revision_id)
         .join(Document, Document.id == Revision.document_id)
-        .filter(Comment.parent_id.is_(None), Comment.in_crs.is_(True))
+        .filter(Comment.parent_id.is_(None), Comment.in_crs.is_(True), Comment.status != CommentStatus.REJECTED)
         .order_by(Comment.created_at.desc())
     )
     if current_user.role.value != "admin":
@@ -2708,6 +2711,8 @@ def owner_comment_decision(
             event_types=["TDO_SENT_TO_OWNER", "OWNER_COMMENT_CREATED", "NEW_COMMENT"],
         )
     elif payload.action == "REJECT":
+        if comment.in_crs:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Remark already added to CRS and cannot be rejected")
         if comment.status == CommentStatus.REJECTED and comment.backlog_status == "REJECTED":
             db.refresh(comment)
             return comment
@@ -2725,6 +2730,8 @@ def owner_comment_decision(
                 )
             )
     elif payload.action == "WITHDRAW":
+        if comment.in_crs:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Remark already added to CRS and cannot be withdrawn")
         if comment.status == CommentStatus.REJECTED and comment.backlog_status == "REJECTED":
             db.refresh(comment)
             return comment

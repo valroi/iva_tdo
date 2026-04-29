@@ -20,7 +20,7 @@ import {
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { UploadOutlined } from "@ant-design/icons";
+import { DownloadOutlined, UploadOutlined } from "@ant-design/icons";
 import { useEffect, useMemo, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 
@@ -55,7 +55,7 @@ import {
   RevisionStatusCell,
   contractorNeedsPdfReupload,
 } from "../utils/revisionHints";
-import { getDisplayRevisionCode, getRemarksSummaryLabel } from "../utils/revisionProcess";
+import { getCleanRemarkText, getDisplayRevisionCode, getRemarksSummaryLabel } from "../utils/revisionProcess";
 import {
   PROCESS_STEPS,
   getProcessCurrentStep,
@@ -756,6 +756,7 @@ export default function DocumentsPage({
           </Button>
           <Button
             size="small"
+            icon={<DownloadOutlined />}
             onClick={async (event) => {
               event.stopPropagation();
               try {
@@ -912,7 +913,7 @@ export default function DocumentsPage({
       render: (value: string, row) => (
         <Button type="link" style={{ padding: 0 }} onClick={() => openCommentContext(row)}>
           <Typography.Text ellipsis={{ tooltip: value }} style={{ maxWidth: 220 }}>
-            {value}
+            {getCleanRemarkText(value)}
           </Typography.Text>
         </Button>
       ),
@@ -1009,6 +1010,7 @@ export default function DocumentsPage({
             !selectedDocumentCompleted &&
             row.parent_id === null &&
             !row.is_published_to_contractor &&
+            !row.in_crs &&
             row.contractor_status === null &&
             (row.status === "OPEN" || row.status === "IN_PROGRESS") && (
             <Button
@@ -1467,7 +1469,7 @@ export default function DocumentsPage({
                             columns={[
                               { title: "Из ревизии", dataIndex: "revision_code", width: 100 },
                               { title: "Код", dataIndex: "review_code", width: 90, render: (v) => v ?? "—" },
-                              { title: "Текст", dataIndex: "text" },
+                              { title: "Текст", dataIndex: "text", render: (value: string) => getCleanRemarkText(value) },
                               {
                                 title: "Подтвердил",
                                 width: 170,
@@ -1581,7 +1583,7 @@ export default function DocumentsPage({
                             columns={[
                               { title: "Из ревизии", dataIndex: "revision_code", width: 100 },
                               { title: "Код", dataIndex: "review_code", width: 90, render: (v) => v ?? "—" },
-                              { title: "Текст", dataIndex: "text" },
+                              { title: "Текст", dataIndex: "text", render: (value: string) => getCleanRemarkText(value) },
                               {
                                 title: "Подтвердил",
                                 width: 170,

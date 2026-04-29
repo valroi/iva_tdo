@@ -162,6 +162,30 @@ export default function RevisionPdfAnnotator({
     setDragStart(null);
   };
 
+  const normalizeRemarkText = (value: string | null | undefined): string =>
+    String(value ?? "")
+      .replace(/^\[(REMARK|QUESTION)\]\s*/i, "")
+      .trim()
+      .toLowerCase();
+
+  const hasDuplicateRemark = (item: PendingRemark): boolean => {
+    const normalized = normalizeRemarkText(item.text);
+    const duplicateInPending = pendingRemarks.some(
+      (pending) =>
+        normalizeRemarkText(pending.text) === normalized &&
+        pending.review_code === item.review_code &&
+        pending.page === item.page,
+    );
+    if (duplicateInPending) return true;
+    return comments.some(
+      (existing) =>
+        existing.parent_id === null &&
+        normalizeRemarkText(existing.text) === normalized &&
+        (existing.review_code ?? null) === item.review_code &&
+        (existing.page ?? null) === item.page,
+    );
+  };
+
   const pushPendingFromForm = async (): Promise<PendingRemark | null> => {
     const values = await form.validateFields();
     return {
@@ -178,6 +202,10 @@ export default function RevisionPdfAnnotator({
     try {
       const next = await pushPendingFromForm();
       if (!next) return;
+      if (hasDuplicateRemark(next)) {
+        message.warning("Такое замечание уже существует для этой ревизии");
+        return;
+      }
       setPendingRemarks((prev) => [...prev, next]);
       form.setFieldsValue({ text: "" });
       setSelection(null);
@@ -215,16 +243,10 @@ export default function RevisionPdfAnnotator({
     setSubmitting(true);
     try {
       const toSend: PendingRemark[] = [...pendingRemarks];
-      try {
-        const extra = await pushPendingFromForm();
-        toSend.push(extra);
-      } catch {
-        if (toSend.length === 0) {
-          message.warning("Заполни форму или добавь замечание кнопкой «Сохранить комментарий»");
-          return;
-        }
+      if (toSend.length === 0) {
+        message.warning("Сначала добавь замечание в список кнопкой «Добавить во временный список»");
+        return;
       }
-      if (toSend.length === 0) return;
       for (const item of toSend) {
         await postOneRemark(item);
       }
@@ -255,12 +277,6 @@ export default function RevisionPdfAnnotator({
       setSelection({ x: item.area_x, y: item.area_y, w: item.area_w, h: item.area_h });
     } else {
       setSelection(null);
-    }
-    if (mode === "owner_create" && canManageOwnerRemarks) {
-      form.setFieldsValue({
-        review_code: item.review_code ?? undefined,
-        text: item.text?.replace(/^\[(REMARK|QUESTION)\]\s*/i, "") ?? "",
-      });
     }
   };
 
@@ -340,7 +356,7 @@ export default function RevisionPdfAnnotator({
           <Space style={{ justifyContent: "flex-end", width: "100%" }}>
             <Button onClick={onClose}>Отмена</Button>
             <Button onClick={() => void addToPendingList()} disabled={!revisionId}>
-              Сохранить комментарий
+              Добавить во временный список
             </Button>
             <Button type="primary" loading={submitting} onClick={() => void submitAll()} disabled={!revisionId}>
               {pendingRemarks.length > 0 ? `Сохранить и закрыть (${pendingRemarks.length})` : "Сохранить и закрыть"}
@@ -366,7 +382,7 @@ export default function RevisionPdfAnnotator({
           )}
           <Typography.Text type="secondary">
             {mode === "owner_create"
-              ? "Выдели область (по желанию), заполни поля и нажми «Сохранить комментарий», затем «Сохранить и закрыть». Либо заполни форму и сразу «Сохранить и закрыть»."
+              ? "Выдели область (по желанию), заполни поля и нажми «Добавить во временный список». Когда список готов, нажми «Сохранить и закрыть»."
               : "Выбери замечание из списка ниже, чтобы перейти к области в PDF."}
           </Typography.Text>
           {comments.filter((item) => item.parent_id === null).length > 0 && (
@@ -499,7 +515,10 @@ export default function RevisionPdfAnnotator({
                             Добавить в CRS
                           </Button>
                         )}
-                        {!active.is_published_to_contractor && active.contractor_status === null && active.status !== "REJECTED" && (
+                        {!active.is_published_to_contractor &&
+                          !active.in_crs &&
+                          active.contractor_status === null &&
+                          active.status !== "REJECTED" && (
                           <Button
                             size="small"
                             danger

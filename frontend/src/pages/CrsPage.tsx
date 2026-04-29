@@ -6,7 +6,7 @@ import { listCrsQueue, sendCrsComments } from "../api";
 import ProcessHint from "../components/ProcessHint";
 import type { CsrQueueItem } from "../types";
 import { formatDateTimeRu } from "../utils/datetime";
-import { getDisplayRevisionCode } from "../utils/revisionProcess";
+import { getCleanRemarkText, getDisplayRevisionCode } from "../utils/revisionProcess";
 
 export default function CrsPage(): JSX.Element {
   const [items, setItems] = useState<CsrQueueItem[]>([]);
@@ -31,13 +31,13 @@ export default function CrsPage(): JSX.Element {
     { title: "CRS", dataIndex: "crs_number", width: 220, render: (v: string | null | undefined) => v ?? "—" },
     { title: "Документ", dataIndex: "document_num", width: 220 },
     { title: "Ревизия", width: 90, render: (_, row) => getDisplayRevisionCode(row) },
-    { title: "Замечание", dataIndex: "comment_text", ellipsis: true },
+    { title: "Замечание", dataIndex: "comment_text", ellipsis: true, render: (value: string) => getCleanRemarkText(value) },
     { title: "Статус замечания", dataIndex: "comment_status", width: 160 },
     { title: "Отправлено подрядчику", dataIndex: "crs_sent_at", width: 190, render: (v: string | null) => formatDateTimeRu(v) },
   ];
 
-  const unsentRows = items.filter((item) => !item.crs_sent_at && item.comment_status !== "REJECTED");
-  const archiveRows = items.filter((item) => item.crs_sent_at || item.comment_status === "REJECTED");
+  const unsentRows = items.filter((item) => !item.crs_sent_at);
+  const archiveRows = items.filter((item) => item.crs_sent_at);
 
   return (
     <div>
@@ -91,7 +91,7 @@ export default function CrsPage(): JSX.Element {
         steps={[
           "Во вкладке «К отправке» выберите замечания, которые нужно отправить подрядчику.",
           "Нажмите «Отправить выбранные подрядчику», чтобы зафиксировать передачу.",
-          "Отправленные и отклоненные замечания переходят в архив.",
+          "В архив попадают только отправленные подрядчику замечания.",
         ]}
       />
       <Card>
