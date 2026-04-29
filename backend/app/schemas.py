@@ -367,7 +367,7 @@ class CommentResponse(BaseModel):
 
 
 class CommentOwnerDecision(BaseModel):
-    action: str = Field(pattern="^(PUBLISH|REJECT|WITHDRAW|UPDATE|FINAL_CONFIRM)$")
+    action: str = Field(pattern="^(PUBLISH|REJECT|WITHDRAW|UPDATE|FINAL_CONFIRM|REOPEN)$")
     review_code: ReviewCode | None = None
     note: str | None = None
     text: str | None = None

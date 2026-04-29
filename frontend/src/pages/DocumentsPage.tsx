@@ -38,6 +38,7 @@ import {
   setRevisionReviewCode,
   setCarryDecision,
   downloadRevisionAttachmentsArchive,
+  deleteOwnerComment,
   uploadRevisionAttachment,
   uploadRevisionPdf,
   getAuthHeaders,
@@ -984,6 +985,7 @@ export default function DocumentsPage({
             row.parent_id === null &&
             (row.status === "OPEN" || row.status === "IN_PROGRESS") &&
             !row.is_published_to_contractor &&
+            row.contractor_status === null &&
             !row.in_crs && (
             <Button
               size="small"
@@ -1006,6 +1008,8 @@ export default function DocumentsPage({
             isLatestSelected &&
             !selectedDocumentCompleted &&
             row.parent_id === null &&
+            !row.is_published_to_contractor &&
+            row.contractor_status === null &&
             (row.status === "OPEN" || row.status === "IN_PROGRESS") && (
             <Button
               size="small"
@@ -1023,6 +1027,58 @@ export default function DocumentsPage({
               }}
             >
               Отклонить
+            </Button>
+          )}
+          {currentUser.permissions.can_publish_comments &&
+            currentUser.company_type === "owner" &&
+            isLatestSelected &&
+            !selectedDocumentCompleted &&
+            row.parent_id === null &&
+            !row.is_published_to_contractor &&
+            !row.in_crs &&
+            row.contractor_status === null &&
+            row.status === "REJECTED" && (
+            <Button
+              size="small"
+              onClick={async () => {
+                if (!selectedRevisionId) return;
+                try {
+                  await ownerCommentDecision(row.id, { action: "REOPEN", note: "Возврат в работу" });
+                  message.success("Замечание возвращено в работу");
+                  await reloadRevisionContext(selectedRevisionId);
+                } catch (error: unknown) {
+                  const text = error instanceof Error ? error.message : "Не удалось вернуть замечание";
+                  message.error(text);
+                }
+              }}
+            >
+              Вернуть в работу
+            </Button>
+          )}
+          {currentUser.permissions.can_publish_comments &&
+            currentUser.company_type === "owner" &&
+            isLatestSelected &&
+            !selectedDocumentCompleted &&
+            row.parent_id === null &&
+            !row.is_published_to_contractor &&
+            !row.in_crs &&
+            row.contractor_status === null && (
+            <Button
+              size="small"
+              danger
+              onClick={async () => {
+                if (!selectedRevisionId) return;
+                try {
+                  await deleteOwnerComment(row.id);
+                  message.success("Замечание удалено");
+                  await reloadRevisionContext(selectedRevisionId);
+                } catch (error: unknown) {
+                  const text = error instanceof Error ? error.message : "Не удалось удалить замечание";
+                  message.error(text);
+                }
+              }}
+            >
+              Удалить
             </Button>
           )}
           {canOwnerPublishToCrs &&
@@ -1599,6 +1655,7 @@ export default function DocumentsPage({
         }}
         mode={currentUser.company_type === "contractor" ? "contractor_review" : "owner_create"}
         comments={comments}
+        canCreateOwnerRemarks={!ownerCommentLocked}
         carryOverRemarks={
           canManageCarryOver
             ? previousRevisionRemarks.filter(

@@ -55,5 +55,5 @@ export function isContractorResponseAllowedStatus(status: string | null | undefi
 }
 
 export function isOwnerCommentingAllowedStatus(status: string | null | undefined): boolean {
-  return status === "UNDER_REVIEW" || status === "OWNER_COMMENTS_SENT";
+  return status === "UNDER_REVIEW";
 }

@@ -40,7 +40,6 @@ interface PendingRemark {
   page: number;
   selection: Rect | null;
   review_code: string;
-  kind: "question" | "remark";
   text: string;
 }
 interface CarryRemark {
@@ -132,7 +131,7 @@ export default function RevisionPdfAnnotator({
     if (open) {
       setPendingRemarks([]);
       form.resetFields();
-      form.setFieldsValue({ kind: "remark" });
+      form.setFieldsValue({});
     }
   }, [open, form]);
 
@@ -170,7 +169,6 @@ export default function RevisionPdfAnnotator({
       page: pageNumber,
       selection: selection ? { ...selection } : null,
       review_code: values.review_code as string,
-      kind: values.kind as "question" | "remark",
       text: (values.text as string).trim(),
     };
   };
@@ -195,10 +193,9 @@ export default function RevisionPdfAnnotator({
 
   const postOneRemark = async (item: PendingRemark): Promise<void> => {
     if (!revisionId) return;
-    const prefix = item.kind === "question" ? "[QUESTION]" : "[REMARK]";
     await createComment({
       revision_id: revisionId,
-      text: `${prefix} ${item.text}`.trim(),
+      text: `[REMARK] ${item.text}`.trim(),
       status: "OPEN",
       review_code: item.review_code,
       page: item.page,
@@ -223,7 +220,7 @@ export default function RevisionPdfAnnotator({
         toSend.push(extra);
       } catch {
         if (toSend.length === 0) {
-          message.warning("Заполни форму или добавь замечания в список кнопкой «В список»");
+          message.warning("Заполни форму или добавь замечание кнопкой «Сохранить комментарий»");
           return;
         }
       }
@@ -234,7 +231,7 @@ export default function RevisionPdfAnnotator({
       message.success(toSend.length === 1 ? "Комментарий добавлен" : `Добавлено замечаний: ${toSend.length}`);
       setPendingRemarks([]);
       form.resetFields();
-      form.setFieldsValue({ kind: "remark" });
+      form.setFieldsValue({});
       setSelection(null);
       await onCreated();
       onClose();
@@ -262,7 +259,6 @@ export default function RevisionPdfAnnotator({
     if (mode === "owner_create" && canManageOwnerRemarks) {
       form.setFieldsValue({
         review_code: item.review_code ?? undefined,
-        kind: "remark",
         text: item.text?.replace(/^\[(REMARK|QUESTION)\]\s*/i, "") ?? "",
       });
     }
@@ -314,26 +310,6 @@ export default function RevisionPdfAnnotator({
     message.success(`Статус подрядчика установлен: ${status}`);
     await onCreated();
   };
-  const updateActiveRemark = async (): Promise<void> => {
-    if (!activeCommentId) {
-      message.warning("Сначала выбери замечание");
-      return;
-    }
-    const active = comments.find((item) => item.id === activeCommentId && item.parent_id === null);
-    if (!active) {
-      message.warning("Можно редактировать только исходное замечание");
-      return;
-    }
-    const values = await form.validateFields(["review_code", "text"]);
-    await ownerCommentDecision(activeCommentId, {
-      action: "UPDATE",
-      review_code: values.review_code,
-      text: String(values.text ?? "").trim(),
-      note: "Правка LR/R в просмотрщике PDF",
-    });
-    message.success("Замечание обновлено");
-    await onCreated();
-  };
   const contractorPendingParentComments = useMemo(
     () =>
       comments.filter(
@@ -363,16 +339,11 @@ export default function RevisionPdfAnnotator({
         mode === "owner_create" && canCreateInOwnerMode ? (
           <Space style={{ justifyContent: "flex-end", width: "100%" }}>
             <Button onClick={onClose}>Отмена</Button>
-            {canManageOwnerRemarks && (
-              <Button onClick={() => void updateActiveRemark()} disabled={!activeCommentId}>
-                Отредактировать
-              </Button>
-            )}
             <Button onClick={() => void addToPendingList()} disabled={!revisionId}>
-              В список
+              Сохранить комментарий
             </Button>
             <Button type="primary" loading={submitting} onClick={() => void submitAll()} disabled={!revisionId}>
-              {pendingRemarks.length > 0 ? `Сохранить всё (${pendingRemarks.length})` : "Сохранить"}
+              {pendingRemarks.length > 0 ? `Сохранить и закрыть (${pendingRemarks.length})` : "Сохранить и закрыть"}
             </Button>
           </Space>
         ) : mode === "owner_create" ? (
@@ -395,7 +366,7 @@ export default function RevisionPdfAnnotator({
           )}
           <Typography.Text type="secondary">
             {mode === "owner_create"
-              ? "Выдели область (по желанию), заполни поля и нажми «В список», чтобы накопить несколько замечаний, затем «Сохранить всё». Либо заполни форму и сразу «Сохранить» — уйдёт одно замечание."
+              ? "Выдели область (по желанию), заполни поля и нажми «Сохранить комментарий», затем «Сохранить и закрыть». Либо заполни форму и сразу «Сохранить и закрыть»."
               : "Выбери замечание из списка ниже, чтобы перейти к области в PDF."}
           </Typography.Text>
           {comments.filter((item) => item.parent_id === null).length > 0 && (
@@ -513,7 +484,10 @@ export default function RevisionPdfAnnotator({
                     if (!active) return null;
                     return (
                       <>
-                        {!active.is_published_to_contractor && !active.in_crs && (
+                        {!active.is_published_to_contractor &&
+                          !active.in_crs &&
+                          active.contractor_status === null &&
+                          active.status !== "REJECTED" && (
                           <Button
                             size="small"
                             onClick={async () => {
@@ -525,7 +499,7 @@ export default function RevisionPdfAnnotator({
                             Добавить в CRS
                           </Button>
                         )}
-                        {active.status !== "REJECTED" && (
+                        {!active.is_published_to_contractor && active.contractor_status === null && active.status !== "REJECTED" && (
                           <Button
                             size="small"
                             danger
@@ -542,12 +516,7 @@ export default function RevisionPdfAnnotator({
                           <Button
                             size="small"
                             onClick={async () => {
-                              const note = window.prompt("Комментарий подрядчику (финальное подтверждение замечания):", "");
-                              if (!note || note.trim().length < 3) {
-                                message.warning("Нужен комментарий минимум 3 символа");
-                                return;
-                              }
-                              await ownerCommentDecision(active.id, { action: "FINAL_CONFIRM", note: note.trim() });
+                              await ownerCommentDecision(active.id, { action: "FINAL_CONFIRM" });
                               message.success("LR финально подтвердил замечание, подрядчику доступен только статус A");
                               await onCreated();
                             }}
@@ -571,7 +540,7 @@ export default function RevisionPdfAnnotator({
                       {pendingRemarks.map((item) => (
                         <Space key={item.id} wrap style={{ width: "100%", justifyContent: "space-between" }}>
                           <Typography.Text ellipsis style={{ maxWidth: 640 }}>
-                            стр. {item.page} · {item.review_code} · {item.kind === "question" ? "Вопрос" : "Замечание"} · {item.text}
+                            стр. {item.page} · {item.review_code} · Замечание · {item.text}
                           </Typography.Text>
                           <Button size="small" danger type="link" onClick={() => removePending(item.id)}>
                             Убрать
@@ -583,7 +552,7 @@ export default function RevisionPdfAnnotator({
                 />
               )}
               {canCreateInOwnerMode && (
-                <Form form={form} layout="vertical" initialValues={{ kind: "remark" }}>
+                <Form form={form} layout="vertical">
                   <Form.Item name="review_code" label="Статус замечания (RJ/CO/AN)" rules={[{ required: true }]}>
                     <Select
                       options={[
@@ -593,16 +562,8 @@ export default function RevisionPdfAnnotator({
                       ]}
                     />
                   </Form.Item>
-                  <Form.Item name="kind" label="Тип сообщения" rules={[{ required: true }]}>
-                    <Select
-                      options={[
-                        { value: "question", label: "Вопрос" },
-                        { value: "remark", label: "Замечание" },
-                      ]}
-                    />
-                  </Form.Item>
                   <Form.Item name="text" label="Текст" rules={[{ required: true }]}>
-                    <Input.TextArea rows={3} placeholder="Опиши вопрос или замечание..." />
+                    <Input.TextArea rows={3} placeholder="Опиши замечание..." />
                   </Form.Item>
                 </Form>
               )}

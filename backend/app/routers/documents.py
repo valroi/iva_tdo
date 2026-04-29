@@ -2141,6 +2141,10 @@ def add_comment_to_crs(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Remark already published to contractor")
     if comment.in_crs:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Remark already added to CRS")
+    if comment.contractor_status is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Remark already has contractor response and cannot be added to CRS")
+    if comment.status == CommentStatus.REJECTED:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Rejected remark cannot be added to CRS")
     sender_code = (current_user.company_code or "IVA").strip().upper() or "IVA"
     target_author = db.query(User).filter(User.id == (revision.author_id or document.created_by_id)).first()
     receiver_code = (target_author.company_code if target_author else None) or "SHP"
@@ -2657,10 +2661,7 @@ def owner_comment_decision(
     project = db.query(Project).filter(Project.code == mdr.project_code).first()
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-    if payload.review_code is not None:
-        comment.review_code = payload.review_code
-
-    if payload.action in {"PUBLISH", "WITHDRAW", "UPDATE", "FINAL_CONFIRM"} and not _can_manage_owner_remark(
+    if payload.action in {"PUBLISH", "WITHDRAW", "UPDATE", "FINAL_CONFIRM", "REJECT", "REOPEN"} and not _can_manage_owner_remark(
         db,
         current_user=current_user,
         project_id=project.id,
@@ -2670,6 +2671,17 @@ def owner_comment_decision(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No permissions to manage this remark",
+        )
+
+    if comment.is_published_to_contractor and payload.action in {"UPDATE", "WITHDRAW", "REJECT", "PUBLISH", "REOPEN"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Remark is already sent to contractor and cannot be changed by LR/R",
+        )
+    if comment.contractor_status is not None and payload.action in {"UPDATE", "REJECT", "WITHDRAW", "REOPEN", "PUBLISH"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Remark already has contractor response and cannot be changed",
         )
 
     if payload.action == "PUBLISH":
@@ -2747,6 +2759,23 @@ def owner_comment_decision(
                     status=comment.status,
                 )
             )
+    elif payload.action == "REOPEN":
+        if comment.status != CommentStatus.REJECTED and comment.backlog_status != "REJECTED":
+            db.refresh(comment)
+            return comment
+        comment.status = CommentStatus.OPEN
+        comment.backlog_status = None
+        comment.resolved_at = None
+        if payload.note:
+            db.add(
+                Comment(
+                    revision_id=comment.revision_id,
+                    parent_id=comment.id,
+                    author_id=current_user.id,
+                    text=f"[LR_REOPEN] {payload.note}",
+                    status=CommentStatus.OPEN,
+                )
+            )
     elif payload.action == "FINAL_CONFIRM":
         if comment.contractor_status != ContractorCommentStatus.I:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Final confirmation is available only after contractor status I")
@@ -2785,6 +2814,51 @@ def owner_comment_decision(
     db.commit()
     db.refresh(comment)
     return comment
+
+
+@router.delete("/comments/{comment_id}")
+def delete_owner_comment(
+    comment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permissions("can_publish_comments")),
+):
+    comment = db.query(Comment).filter(Comment.id == comment_id, Comment.parent_id.is_(None)).first()
+    if comment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found")
+    revision = db.query(Revision).filter(Revision.id == comment.revision_id).first()
+    if revision is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
+    document = db.query(Document).filter(Document.id == revision.document_id).first()
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    mdr = db.query(MDRRecord).filter(MDRRecord.id == document.mdr_id).first()
+    if mdr is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="MDR not found")
+    project = db.query(Project).filter(Project.code == mdr.project_code).first()
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    if not _can_manage_owner_remark(
+        db,
+        current_user=current_user,
+        project_id=project.id,
+        discipline_code=mdr.discipline_code,
+        comment_author_id=comment.author_id,
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No permissions to manage this remark")
+    if comment.is_published_to_contractor or comment.in_crs or comment.contractor_status is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete remark after CRS/publication/contractor response",
+        )
+
+    child_rows = db.query(Comment).filter(Comment.parent_id == comment.id).all()
+    for child in child_rows:
+        db.delete(child)
+    db.delete(comment)
+    _recompute_revision_contractor_status(db, revision)
+    db.add(revision)
+    db.commit()
+    return {"ok": True}
 
 
 @router.post("/revisions/{revision_id}/comments/publish-all", response_model=PublishCommentsResult)

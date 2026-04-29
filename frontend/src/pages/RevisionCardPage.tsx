@@ -2,7 +2,7 @@ import { Alert, Button, Card, Descriptions, Modal, Space, Steps, Switch, Table, 
 import { UploadOutlined } from "@ant-design/icons";
 import { useEffect, useMemo, useState } from "react";
 
-import { addCommentToCrs, createComment, downloadRevisionAttachmentsArchive, getRevisionCard, listCarryDecisions, ownerCommentDecision, setCarryDecision, setRevisionReviewCode, uploadRevisionPdf } from "../api";
+import { addCommentToCrs, createComment, deleteOwnerComment, downloadRevisionAttachmentsArchive, getRevisionCard, listCarryDecisions, ownerCommentDecision, setCarryDecision, setRevisionReviewCode, uploadRevisionPdf } from "../api";
 import ProcessHint from "../components/ProcessHint";
 import RevisionPdfAnnotator from "../components/RevisionPdfAnnotator";
 import type { CarryDecisionItem, CommentItem, RevisionCard, User } from "../types";
@@ -438,7 +438,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
             expandedRowRender: (row) => {
               const canManageFromCard =
                 currentUser.permissions.can_publish_comments &&
-                (currentUser.role === "admin" || card?.current_user_matrix_role === "LR") &&
+                (currentUser.role === "admin" || card?.current_user_matrix_role === "LR" || card?.current_user_matrix_role === "R") &&
                 !documentCompleted;
               const isLatestRow = latestRevisionId !== null && row.revision_id === latestRevisionId;
               const rowComments =
@@ -589,6 +589,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                                 (comment.status === "OPEN" || comment.status === "IN_PROGRESS") &&
                                 comment.parent_id === null &&
                                 !comment.is_published_to_contractor &&
+                                comment.contractor_status === null &&
                                 !comment.in_crs && (
                                 <Button
                                   size="small"
@@ -611,7 +612,10 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                                   Добавить в CRS
                                 </Button>
                               )}
-                              {isLatestRow && (comment.status === "OPEN" || comment.status === "IN_PROGRESS") && (
+                              {isLatestRow &&
+                                !comment.is_published_to_contractor &&
+                                comment.contractor_status === null &&
+                                (comment.status === "OPEN" || comment.status === "IN_PROGRESS") && (
                                 <Button
                                   size="small"
                                   danger
@@ -633,6 +637,60 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                                   }}
                                 >
                                   Отклонить
+                                </Button>
+                              )}
+                              {isLatestRow &&
+                                comment.parent_id === null &&
+                                !comment.is_published_to_contractor &&
+                                !comment.in_crs &&
+                                comment.contractor_status === null &&
+                                comment.status === "REJECTED" && (
+                                <Button
+                                  size="small"
+                                  loading={busyCommentId === comment.id}
+                                  onClick={async () => {
+                                    try {
+                                      setBusyCommentId(comment.id);
+                                      message.loading({ content: "Возврат замечания в работу...", key: `reopen_${comment.id}` });
+                                      await ownerCommentDecision(comment.id, { action: "REOPEN", note: "Возврат в работу" });
+                                      message.success({ content: "Замечание возвращено в работу", key: `reopen_${comment.id}` });
+                                      await loadCard();
+                                    } catch (error: unknown) {
+                                      const text = error instanceof Error ? error.message : "Не удалось вернуть замечание";
+                                      message.error({ content: text, key: `reopen_${comment.id}` });
+                                    } finally {
+                                      setBusyCommentId(null);
+                                    }
+                                  }}
+                                >
+                                  Вернуть в работу
+                                </Button>
+                              )}
+                              {isLatestRow &&
+                                comment.parent_id === null &&
+                                !comment.is_published_to_contractor &&
+                                !comment.in_crs &&
+                                comment.contractor_status === null && (
+                                <Button
+                                  size="small"
+                                  danger
+                                  loading={busyCommentId === comment.id}
+                                  onClick={async () => {
+                                    try {
+                                      setBusyCommentId(comment.id);
+                                      message.loading({ content: "Удаление замечания...", key: `delete_${comment.id}` });
+                                      await deleteOwnerComment(comment.id);
+                                      message.success({ content: "Замечание удалено", key: `delete_${comment.id}` });
+                                      await loadCard();
+                                    } catch (error: unknown) {
+                                      const text = error instanceof Error ? error.message : "Не удалось удалить замечание";
+                                      message.error({ content: text, key: `delete_${comment.id}` });
+                                    } finally {
+                                      setBusyCommentId(null);
+                                    }
+                                  }}
+                                >
+                                  Удалить
                                 </Button>
                               )}
                               {isLatestRow &&
@@ -968,7 +1026,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
           await loadCard();
         } : undefined}
         canCreateRemarks={(card?.can_current_user_raise_comments ?? true) && !documentCompleted}
-        canCreateOwnerRemarks={canOwnerCreateRemarks && !documentCompleted}
+        canCreateOwnerRemarks={canOwnerCreateRemarks && canCommentOnSelectedRevision && !documentCompleted}
         canManageOwnerRemarks={
           currentUser.permissions.can_publish_comments &&
           (currentUser.role === "admin" || card?.current_user_matrix_role === "LR")
