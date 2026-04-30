@@ -182,10 +182,18 @@ export default function DocumentsPage({
       return a.created_at < b.created_at ? 1 : -1;
     })[0];
   }, [revisions]);
+  const latestEffectiveReviewCode = useMemo(
+    () => getRemarksSummaryLabel(latestRevisionComments, latestRevision?.review_code ?? null),
+    [latestRevisionComments, latestRevision?.review_code],
+  );
   const isLatestSelected = selectedRevisionId !== null && latestRevision?.id === selectedRevisionId;
   const ownerCommentLocked = isOwnerCommentLockedStatus(selectedRevision?.status);
   const contractorCanRespondNow = isContractorResponseAllowedStatus(selectedRevision?.status);
-  const selectedDocumentCompleted = selectedDocument !== null && isDocumentCompleted(selectedDocument);
+  const selectedDocumentCompleted = useMemo(() => {
+    if (selectedDocument && isDocumentCompleted(selectedDocument)) return true;
+    if (!latestRevision) return false;
+    return (latestRevision.issue_purpose ?? "").toUpperCase() === "AFD" && latestRevision.review_code === "AP";
+  }, [selectedDocument, latestRevision]);
   const canOwnerPublishToCrs =
     currentUser.role === "admin" ||
     (currentUser.permissions.can_publish_comments && Boolean(ownerCanPublishByRevision[selectedRevisionId ?? -1]));
@@ -383,6 +391,10 @@ export default function DocumentsPage({
 
   const applyAutoRevision = (issuePurpose: string | undefined) => {
     if (!issuePurpose) return;
+    if (latestRevision && latestEffectiveReviewCode === "RJ") {
+      revForm.setFieldValue("revision_code", latestRevision.revision_code);
+      return;
+    }
     const normalized = issuePurpose.toUpperCase();
     if (normalized === "IFR") {
       revForm.setFieldValue("revision_code", computeNextAlphabeticRevision());
@@ -1126,6 +1138,15 @@ export default function DocumentsPage({
     }
     try {
       const values = await revForm.validateFields();
+      if (
+        latestRevision &&
+        latestEffectiveReviewCode === "RJ" &&
+        (values.revision_code !== latestRevision.revision_code ||
+          String(values.issue_purpose ?? "").toUpperCase() !== String(latestRevision.issue_purpose ?? "").toUpperCase())
+      ) {
+        message.error("После кода RJ документ должен перевыпускаться в той же ревизии и с той же целью выпуска");
+        return;
+      }
       await createRevision({ ...values, document_id: selectedDocumentId });
       setRevModalOpen(false);
       revForm.resetFields();

@@ -83,7 +83,8 @@ def default_permissions_for_role(role: UserRole) -> dict[str, bool]:
 def get_effective_permissions(user: User) -> dict[str, bool]:
     defaults = default_permissions_for_role(user.role)
     custom = user.permissions or {}
-    return {key: bool(custom.get(key, defaults[key])) for key in PERMISSION_KEYS}
+    # Respect explicit False values in stored custom permissions.
+    return {key: bool(custom[key]) if key in custom else bool(defaults[key]) for key in PERMISSION_KEYS}
 
 
 def has_permission(user: User, permission: str) -> bool:
