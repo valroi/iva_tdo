@@ -7,7 +7,7 @@ import ProcessHint from "../components/ProcessHint";
 import RevisionPdfAnnotator from "../components/RevisionPdfAnnotator";
 import type { CarryDecisionItem, CommentItem, RevisionCard, User } from "../types";
 import { formatDateTimeRu } from "../utils/datetime";
-import { ContractorReuploadPdfTag, RevisionStatusCell, contractorNeedsPdfReupload } from "../utils/revisionHints";
+import { ContractorReuploadPdfTag, RevisionStatusCell, contractorNeedsPdfReupload, getRuStatusLabel } from "../utils/revisionHints";
 import { getCleanRemarkText, getDisplayRevisionCode, getRemarksSummaryLabel } from "../utils/revisionProcess";
 import { PROCESS_STEPS, getProcessCurrentStep, isOwnerCommentingAllowedStatus } from "../utils/workflowProgress";
 
@@ -213,7 +213,23 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
         <Typography.Title level={4} style={{ margin: 0 }}>
           Карточка документа
         </Typography.Title>
-        <Tooltip title="Открыть PDF выбранной ревизии для просмотра и комментариев">
+        <Tooltip
+          title={
+            !selectedRevision?.file_path
+              ? "PDF ещё не загружен для этой ревизии"
+              : documentCompleted
+              ? "Документ финально согласован (AFD + AP) — редактирование закрыто"
+              : !canOwnerCreateRemarks
+              ? "Вы не назначены рассматривающим (LR/R) по этому документу"
+              : currentUser.company_type === "owner" && !canCommentOnSelectedRevision
+              ? "Замечания можно добавлять только при статусе «На рассмотрении заказчиком»"
+              : !currentUser.permissions.can_raise_comments && currentUser.company_type !== "contractor"
+              ? "Нет прав для создания замечаний"
+              : currentUser.company_type === "contractor"
+              ? "Открыть PDF для просмотра"
+              : "Открыть PDF и добавить замечания"
+          }
+        >
           <Button
             type="primary"
             onClick={() => {
@@ -297,7 +313,8 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
           <Descriptions.Item label="Текущий статус процесса">
             {(selectedRevision ?? lastRevision) ? (
               <Space direction="vertical" size={2}>
-                <Typography.Text>{(selectedRevision ?? lastRevision)?.status}</Typography.Text>
+                <Typography.Text strong>{getRuStatusLabel((selectedRevision ?? lastRevision)?.status ?? "")}</Typography.Text>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>{(selectedRevision ?? lastRevision)?.status}</Typography.Text>
                 <Space size={6}>
                   <Typography.Text type="secondary">Код замечаний:</Typography.Text>
                   <Tag color={currentProcessStatus === "AP" ? "success" : "default"}>{currentProcessStatus}</Tag>
@@ -334,6 +351,24 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
             style={{ marginTop: 10 }}
             message="Вы не назначены рассматривающим (LR/R) по этому документу"
             description="Доступен только просмотр документа и согласованных замечаний."
+          />
+        )}
+        {currentUser.company_type === "contractor" && (selectedRevision ?? lastRevision)?.status === "UNDER_REVIEW" && (
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginTop: 10 }}
+            message="Ревизия на рассмотрении заказчиком"
+            description="Заказчик проверяет ревизию и формирует замечания. Действия со стороны подрядчика станут доступны после получения CRS."
+          />
+        )}
+        {currentUser.company_type === "contractor" && (selectedRevision ?? lastRevision)?.status === "CONTRACTOR_REPLY_A" && (
+          <Alert
+            type="success"
+            showIcon
+            style={{ marginTop: 10 }}
+            message="Цикл ревизии завершён"
+            description="Все замечания отработаны. Создайте следующую ревизию, если документ требует перевыпуска."
           />
         )}
       </Card>
@@ -384,6 +419,17 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
               width: 220,
               render: (_, row) => (
                 <Space wrap size={[8, 8]}>
+                  <Tooltip
+                    title={
+                      !row.file_path
+                        ? "PDF ещё не загружен"
+                        : !canOwnerCreateRemarks
+                        ? "Вы не назначены рассматривающим по этому документу"
+                        : currentUser.company_type === "owner" && !(row.status === "UNDER_REVIEW" || row.status === "OWNER_COMMENTS_SENT")
+                        ? `Замечания доступны только при статусе «На рассмотрении» или «Замечания отправлены». Текущий: ${getRuStatusLabel(row.status)}`
+                        : undefined
+                    }
+                  >
                   <Button
                     size="small"
                     onClick={() => {
@@ -399,6 +445,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                   >
                     {currentUser.company_type === "contractor" ? "Открыть" : "Комментировать"}
                   </Button>
+                  </Tooltip>
                   <Button
                     size="small"
                     onClick={async () => {
@@ -832,8 +879,10 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                                 width: 220,
                                 render: (_, item) => (
                                   <Space>
+                                    <Tooltip title={isRMatrixReviewer ? "Зафиксировать рекомендацию: по вашему мнению замечание НЕ устранено. LR примет итоговое решение." : "Замечание не устранено — вернуть в работу текущей ревизии"}>
                                     <Button
                                       size="small"
+                                      danger={!isRMatrixReviewer}
                                       disabled={!isLatestRow || (carryDecisionsByRevision[row.revision_id] ?? []).some((x) => (x.status === "OPEN" || x.status === "CLOSED") && x.source_comment_id === item.id)}
                                       onClick={async () => {
                                         if ((carryDecisionsByRevision[row.revision_id] ?? []).some((x) => (x.status === "OPEN" || x.status === "CLOSED") && x.source_comment_id === item.id)) {
@@ -869,16 +918,18 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                                               area_w: item.area_w ?? null,
                                               area_h: item.area_h ?? null,
                                             });
-                                            message.success("Решение LR: замечание возвращено в OPEN текущей ревизии");
+                                            message.success("Решение LR: замечание возвращено в работу текущей ревизии");
                                           }
                                         } else {
-                                          message.success("Рекомендация R сохранена: автор считает, что замечание не устранено");
+                                          message.success("Рекомендация R сохранена: замечание не устранено");
                                         }
                                         await loadCard();
                                       }}
                                     >
-                                      {isRMatrixReviewer ? "Автор считает НЕ устранено" : "OPEN"}
+                                      {isRMatrixReviewer ? "Не устранено (R)" : "Не устранено (вернуть)"}
                                     </Button>
+                                    </Tooltip>
+                                    <Tooltip title={isRMatrixReviewer ? "Зафиксировать рекомендацию: по вашему мнению замечание УСТРАНЕНО. LR примет итоговое решение." : "Замечание устранено — подтвердить и закрыть"}>
                                     <Button
                                       size="small"
                                       disabled={!isLatestRow || (carryDecisionsByRevision[row.revision_id] ?? []).some((x) => (x.status === "OPEN" || x.status === "CLOSED") && x.source_comment_id === item.id)}
@@ -902,18 +953,19 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                                             }));
                                             message.success(
                                               isRMatrixReviewer
-                                                ? "Рекомендация R сохранена: автор считает, что замечание устранено"
-                                                : "Замечание переведено в 'Было устранено'",
+                                                ? "Рекомендация R сохранена: замечание устранено"
+                                                : "Подтверждено: замечание устранено",
                                             );
                                           })
                                           .catch((error: unknown) => {
-                                            const text = error instanceof Error ? error.message : "Не удалось сохранить CLOSED";
+                                            const text = error instanceof Error ? error.message : "Не удалось сохранить решение";
                                             message.error(text);
                                           });
                                       }}
                                     >
-                                      {isRMatrixReviewer ? "Автор считает УСТРАНЕНО" : "CLOSED"}
+                                      {isRMatrixReviewer ? "Устранено (R)" : "Устранено ✓"}
                                     </Button>
+                                    </Tooltip>
                                   </Space>
                                 ),
                               },

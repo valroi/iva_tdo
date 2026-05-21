@@ -647,14 +647,14 @@ export default function RevisionPdfAnnotator({
                                     await onCreated();
                                   }}
                                 >
-                                  {carryActionMode === "recommendation" ? "Автор считает НЕ устранено" : "OPEN"}
+                                  {carryActionMode === "recommendation" ? "Не устранено (R)" : "Не устранено (вернуть)"}
                                 </Button>
                                 <Button
                                   size="small"
                                   disabled={carryDecidedIds.includes(item.id)}
                                   onClick={() => onCarryClose?.(item.id)}
                                 >
-                                  {carryActionMode === "recommendation" ? "Автор считает УСТРАНЕНО" : "CLOSED"}
+                                  {carryActionMode === "recommendation" ? "Устранено (R)" : "Устранено ✓"}
                                 </Button>
                               </Space>
                             </Space>

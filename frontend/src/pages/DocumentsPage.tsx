@@ -67,6 +67,7 @@ import {
   ContractorReuploadPdfTag,
   RevisionStatusCell,
   contractorNeedsPdfReupload,
+  getRuStatusLabel,
 } from "../utils/revisionHints";
 import { getCleanRemarkText, getDisplayRevisionCode, getRemarksSummaryLabel } from "../utils/revisionProcess";
 import {
@@ -1376,13 +1377,27 @@ export default function DocumentsPage({
           </Tooltip>
         )}
         {currentUser.permissions.can_raise_comments && (
-          <Tooltip title="Открыть PDF и добавить замечание в текущую ревизию">
-            <Button
-              onClick={() => setPdfAnnotatorOpen(true)}
-              disabled={!selectedRevisionId || ownerCommentLocked || selectedDocumentCompleted || !selectedRevision?.file_path}
-            >
-              + Вопрос/замечание
-            </Button>
+          <Tooltip
+            title={
+              !selectedRevisionId
+                ? "Выберите ревизию в таблице"
+                : !selectedRevision?.file_path
+                ? "PDF ещё не загружен"
+                : ownerCommentLocked
+                ? "Замечания заблокированы — CRS уже отправлен подрядчику"
+                : selectedDocumentCompleted
+                ? "Документ финально согласован — редактирование закрыто"
+                : "Открыть PDF и добавить замечание к выбранной ревизии"
+            }
+          >
+            <span>
+              <Button
+                onClick={() => setPdfAnnotatorOpen(true)}
+                disabled={!selectedRevisionId || ownerCommentLocked || selectedDocumentCompleted || !selectedRevision?.file_path}
+              >
+                + Вопрос/замечание
+              </Button>
+            </span>
           </Tooltip>
         )}
       </Space>
@@ -1497,7 +1512,10 @@ export default function DocumentsPage({
                   <div style={{ marginTop: 12 }}>
                     <Space direction="vertical" size={2}>
                       <Typography.Text type="secondary">Workflow ревизии:</Typography.Text>
-                      <Typography.Text type="secondary">Последний статус по документу: {latestRevision?.status ?? "—"}</Typography.Text>
+                      <Typography.Text type="secondary">
+                        Статус: <Typography.Text strong>{getRuStatusLabel(latestRevision?.status ?? "")}</Typography.Text>
+                        {latestRevision?.status && <Typography.Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>({latestRevision.status})</Typography.Text>}
+                      </Typography.Text>
                       <Space size={6}>
                         <Typography.Text type="secondary">Код замечаний (по выбранной ревизии):</Typography.Text>
                         {(() => {
@@ -1523,8 +1541,26 @@ export default function DocumentsPage({
                       <Alert
                         style={{ marginTop: 10 }}
                         type="info"
-                        message={`Review Code: ${selectedRevision.review_code}`}
+                        message={`Код замечаний: ${selectedRevision.review_code}`}
                         description={reviewCodeHelp[selectedRevision.review_code] ?? "—"}
+                      />
+                    )}
+                    {currentUser.company_type === "contractor" && latestRevision?.status === "UNDER_REVIEW" && (
+                      <Alert
+                        style={{ marginTop: 10 }}
+                        type="info"
+                        showIcon
+                        message="Ревизия на рассмотрении заказчиком"
+                        description="Заказчик проверяет ревизию и формирует замечания. Действия подрядчика станут доступны после получения CRS."
+                      />
+                    )}
+                    {currentUser.company_type === "contractor" && latestRevision?.status === "CONTRACTOR_REPLY_A" && (
+                      <Alert
+                        style={{ marginTop: 10 }}
+                        type="success"
+                        showIcon
+                        message="Цикл ревизии завершён"
+                        description="Все замечания отработаны. Создайте следующую ревизию для перевыпуска документа."
                       />
                     )}
                   </div>
@@ -1679,8 +1715,10 @@ export default function DocumentsPage({
                                 width: 220,
                                 render: (_, row) => (
                                   <Space>
+                                    <Tooltip title={isRMatrixReviewer ? "Рекомендация: замечание НЕ устранено. LR примет итоговое решение." : "Замечание не устранено — вернуть в работу"}>
                                     <Button
                                       size="small"
+                                      danger={!isRMatrixReviewer}
                                       disabled={(carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => (x.status === "OPEN" || x.status === "CLOSED") && x.source_comment_id === row.id)}
                                       onClick={async () => {
                                         if (!selectedRevisionId) return;
@@ -1717,17 +1755,19 @@ export default function DocumentsPage({
                                               area_w: row.area_w ?? null,
                                               area_h: row.area_h ?? null,
                                             });
-                                            message.success("Решение LR: замечание возвращено в OPEN текущей ревизии");
+                                            message.success("Решение LR: замечание возвращено в работу текущей ревизии");
                                             const items = await listComments(selectedRevisionId);
                                             setComments(items);
                                           }
                                         } else {
-                                          message.success("Рекомендация R сохранена: автор считает, что замечание не устранено");
+                                          message.success("Рекомендация R сохранена: замечание не устранено");
                                         }
                                       }}
                                     >
-                                      {isRMatrixReviewer ? "Автор считает НЕ устранено" : "OPEN"}
+                                      {isRMatrixReviewer ? "Не устранено (R)" : "Не устранено (вернуть)"}
                                     </Button>
+                                    </Tooltip>
+                                    <Tooltip title={isRMatrixReviewer ? "Рекомендация: замечание УСТРАНЕНО. LR примет итоговое решение." : "Замечание устранено — подтвердить"}>
                                     <Button
                                       size="small"
                                       disabled={(carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => (x.status === "OPEN" || x.status === "CLOSED") && x.source_comment_id === row.id)}
@@ -1750,18 +1790,19 @@ export default function DocumentsPage({
                                             }));
                                             message.success(
                                               isRMatrixReviewer
-                                                ? "Рекомендация R сохранена: автор считает, что замечание устранено"
-                                                : "Замечание переведено в 'Было устранено'",
+                                                ? "Рекомендация R сохранена: замечание устранено"
+                                                : "Подтверждено: замечание устранено",
                                             );
                                           })
                                           .catch((error: unknown) => {
-                                            const text = error instanceof Error ? error.message : "Не удалось сохранить CLOSED";
+                                            const text = error instanceof Error ? error.message : "Не удалось сохранить решение";
                                             message.error(text);
                                           });
                                       }}
                                     >
-                                      {isRMatrixReviewer ? "Автор считает УСТРАНЕНО" : "CLOSED"}
+                                      {isRMatrixReviewer ? "Устранено (R)" : "Устранено ✓"}
                                     </Button>
+                                    </Tooltip>
                                   </Space>
                                 ),
                               },
