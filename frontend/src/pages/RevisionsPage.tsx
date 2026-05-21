@@ -1,4 +1,4 @@
-import { Button, Card, Space, Table, Tooltip, Typography, message } from "antd";
+import { Button, Card, Space, Table, Tooltip, Typography, App } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useState } from "react";
 
@@ -15,6 +15,7 @@ interface Props {
 }
 
 export default function RevisionsPage({ currentUser, onOpenRevision }: Props): JSX.Element {
+  const { message } = App.useApp();
   const [items, setItems] = useState<RevisionOverviewItem[]>([]);
 
   const load = async () => {

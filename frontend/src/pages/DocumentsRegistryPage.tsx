@@ -1,4 +1,4 @@
-import { Button, Card, Input, Select, Space, Table, Tag, Tooltip, Typography, message } from "antd";
+import { Button, Card, Input, Select, Space, Table, Tag, Tooltip, Typography, App } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
 
@@ -32,6 +32,7 @@ interface Filters {
 }
 
 export default function DocumentsRegistryPage({ currentUser, onOpenRevision, presetFilters, onPresetConsumed }: Props): JSX.Element {
+  const { message } = App.useApp();
   const [rows, setRows] = useState<DocumentRegistryItem[]>([]);
   const [filters, setFilters] = useState<Filters>({ comments_scope: "ANY" });
   const [loading, setLoading] = useState(false);

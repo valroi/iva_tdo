@@ -1,4 +1,4 @@
-import { Alert, Button, Form, Input, Modal, Select, Space, Tabs, Tag, Typography, message } from "antd";
+import { Alert, Button, Form, Input, Modal, Select, Space, Tabs, Tag, Typography, App } from "antd";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 
@@ -77,6 +77,7 @@ export default function RevisionPdfAnnotator({
   carryActionMode = "final",
   carryRHints = {},
 }: Props): JSX.Element {
+  const { message } = App.useApp();
   const canCreateInOwnerMode = canCreateRemarks && canCreateOwnerRemarks;
   const [numPages, setNumPages] = useState(1);
   const [pageNumber, setPageNumber] = useState(1);

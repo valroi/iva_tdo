@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Descriptions, Modal, Space, Steps, Switch, Table, Tabs, Tag, Tooltip, Typography, Upload, message } from "antd";
+import { Alert, App, Button, Card, Descriptions, Modal, Space, Steps, Switch, Table, Tabs, Tag, Tooltip, Typography, Upload } from "antd";
 import { UploadOutlined } from "@ant-design/icons";
 import { useEffect, useMemo, useState } from "react";
 
@@ -18,6 +18,7 @@ interface Props {
 }
 
 export default function RevisionCardPage({ revisionId, currentUser, onBack }: Props): JSX.Element {
+  const { message } = App.useApp();
   const [card, setCard] = useState<RevisionCard | null>(null);
   const [selectedRevisionId, setSelectedRevisionId] = useState<number>(revisionId);
   const [pdfAnnotatorOpen, setPdfAnnotatorOpen] = useState(false);

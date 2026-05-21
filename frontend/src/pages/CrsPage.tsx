@@ -1,4 +1,4 @@
-import { Button, Card, Modal, Space, Table, Tabs, Tooltip, Typography, message } from "antd";
+import { Button, Card, Modal, Space, Table, Tabs, Tooltip, Typography, App } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useState } from "react";
 
@@ -9,6 +9,7 @@ import { formatDateTimeRu } from "../utils/datetime";
 import { getCleanRemarkText, getDisplayRevisionCode } from "../utils/revisionProcess";
 
 export default function CrsPage(): JSX.Element {
+  const { message } = App.useApp();
   const [items, setItems] = useState<CsrQueueItem[]>([]);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [sending, setSending] = useState(false);
