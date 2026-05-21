@@ -277,7 +277,7 @@ def create_user(
         company_code=(payload.company_code or _default_company_code(payload.company_type)).upper()[:3],
         company_type=payload.company_type,
         role=payload.role,
-        permissions=(payload.permissions or default_permissions_for_role(payload.role)),
+        permissions=(payload.permissions or default_permissions_for_role(payload.role, payload.company_type)),
         is_active=True,
     )
     db.add(user)
@@ -448,7 +448,7 @@ def approve_registration_request(
         company_code=_default_company_code(target_company_type),
         company_type=target_company_type,
         role=target_role,
-        permissions=default_permissions_for_role(target_role),
+        permissions=default_permissions_for_role(target_role, target_company_type),
         is_active=payload.is_active,
     )
 
@@ -521,7 +521,7 @@ def update_user_role(
         user.company_type = CompanyType.admin
 
     user.role = payload.role
-    user.permissions = default_permissions_for_role(payload.role)
+    user.permissions = default_permissions_for_role(payload.role, user.company_type)
     db.add(user)
     db.commit()
     db.refresh(user)

@@ -1,4 +1,4 @@
-import { Alert, Button, Form, Input, Modal, Select, Space, Tabs, Typography, message } from "antd";
+import { Alert, Button, Form, Input, Modal, Select, Space, Tabs, Tag, Typography, App } from "antd";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 
@@ -26,6 +26,9 @@ interface Props {
   onCarryOpen?: (item: CarryRemark) => Promise<void>;
   onCarryClose?: (id: number) => void;
   onCarryReopen?: (id: number) => void;
+  carryActionMode?: "final" | "recommendation";
+  /** Latest R recommendation per source remark id (from carry-over decisions). */
+  carryRHints?: Partial<Record<number, "R_OPEN" | "R_CLOSED">>;
 }
 
 interface Rect {
@@ -71,7 +74,10 @@ export default function RevisionPdfAnnotator({
   onCarryOpen,
   onCarryClose,
   onCarryReopen,
+  carryActionMode = "final",
+  carryRHints = {},
 }: Props): JSX.Element {
+  const { message } = App.useApp();
   const canCreateInOwnerMode = canCreateRemarks && canCreateOwnerRemarks;
   const [numPages, setNumPages] = useState(1);
   const [pageNumber, setPageNumber] = useState(1);
@@ -596,10 +602,17 @@ export default function RevisionPdfAnnotator({
                         <Space direction="vertical" style={{ width: "100%" }} size={8}>
                           {carryOpenRemarks.map((item) => (
                             <Space key={item.id} wrap style={{ width: "100%", justifyContent: "space-between" }}>
-                              <Typography.Text style={{ maxWidth: 640 }}>
-                                {item.review_code ?? "—"} · стр. {item.page ?? "—"} ·{" "}
-                                {(item.text ?? "").replace(/^\[(REMARK|QUESTION)\]\s*/i, "")}
-                              </Typography.Text>
+                              <Space direction="vertical" size={2} style={{ maxWidth: 640 }}>
+                                <Typography.Text style={{ maxWidth: 640 }}>
+                                  {item.review_code ?? "—"} · стр. {item.page ?? "—"} ·{" "}
+                                  {(item.text ?? "").replace(/^\[(REMARK|QUESTION)\]\s*/i, "")}
+                                </Typography.Text>
+                                {carryRHints[item.id] === "R_CLOSED" ? (
+                                  <Tag color="green">Автор считает устранено</Tag>
+                                ) : carryRHints[item.id] === "R_OPEN" ? (
+                                  <Tag color="red">Автор считает не устранено</Tag>
+                                ) : null}
+                              </Space>
                               <Space>
                                 <Button
                                   size="small"
@@ -635,14 +648,14 @@ export default function RevisionPdfAnnotator({
                                     await onCreated();
                                   }}
                                 >
-                                  OPEN
+                                  {carryActionMode === "recommendation" ? "Не устранено (R)" : "Не устранено (вернуть)"}
                                 </Button>
                                 <Button
                                   size="small"
                                   disabled={carryDecidedIds.includes(item.id)}
                                   onClick={() => onCarryClose?.(item.id)}
                                 >
-                                  CLOSED
+                                  {carryActionMode === "recommendation" ? "Устранено (R)" : "Устранено ✓"}
                                 </Button>
                               </Space>
                             </Space>
@@ -657,10 +670,17 @@ export default function RevisionPdfAnnotator({
                         <Space direction="vertical" style={{ width: "100%" }} size={8}>
                           {carryDoneRemarks.map((item) => (
                             <Space key={item.id} wrap style={{ width: "100%", justifyContent: "space-between" }}>
-                              <Typography.Text style={{ maxWidth: 640 }}>
-                                {item.review_code ?? "—"} · стр. {item.page ?? "—"} ·{" "}
-                                {(item.text ?? "").replace(/^\[(REMARK|QUESTION)\]\s*/i, "")}
-                              </Typography.Text>
+                              <Space direction="vertical" size={2} style={{ maxWidth: 640 }}>
+                                <Typography.Text style={{ maxWidth: 640 }}>
+                                  {item.review_code ?? "—"} · стр. {item.page ?? "—"} ·{" "}
+                                  {(item.text ?? "").replace(/^\[(REMARK|QUESTION)\]\s*/i, "")}
+                                </Typography.Text>
+                                {carryRHints[item.id] === "R_CLOSED" ? (
+                                  <Tag color="green">Автор считает устранено</Tag>
+                                ) : carryRHints[item.id] === "R_OPEN" ? (
+                                  <Tag color="red">Автор считает не устранено</Tag>
+                                ) : null}
+                              </Space>
                               <Button
                                 size="small"
                                 disabled={carryDecidedIds.includes(item.id)}

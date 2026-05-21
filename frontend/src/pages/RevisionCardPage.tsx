@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Descriptions, Modal, Space, Steps, Switch, Table, Tabs, Tag, Tooltip, Typography, Upload, message } from "antd";
+import { Alert, App, Button, Card, Descriptions, Modal, Space, Steps, Switch, Table, Tabs, Tag, Tooltip, Typography, Upload } from "antd";
 import { UploadOutlined } from "@ant-design/icons";
 import { useEffect, useMemo, useState } from "react";
 
@@ -7,7 +7,7 @@ import ProcessHint from "../components/ProcessHint";
 import RevisionPdfAnnotator from "../components/RevisionPdfAnnotator";
 import type { CarryDecisionItem, CommentItem, RevisionCard, User } from "../types";
 import { formatDateTimeRu } from "../utils/datetime";
-import { ContractorReuploadPdfTag, RevisionStatusCell, contractorNeedsPdfReupload } from "../utils/revisionHints";
+import { ContractorReuploadPdfTag, RevisionStatusCell, contractorNeedsPdfReupload, getRuStatusLabel } from "../utils/revisionHints";
 import { getCleanRemarkText, getDisplayRevisionCode, getRemarksSummaryLabel } from "../utils/revisionProcess";
 import { PROCESS_STEPS, getProcessCurrentStep, isOwnerCommentingAllowedStatus } from "../utils/workflowProgress";
 
@@ -18,6 +18,7 @@ interface Props {
 }
 
 export default function RevisionCardPage({ revisionId, currentUser, onBack }: Props): JSX.Element {
+  const { message } = App.useApp();
   const [card, setCard] = useState<RevisionCard | null>(null);
   const [selectedRevisionId, setSelectedRevisionId] = useState<number>(revisionId);
   const [pdfAnnotatorOpen, setPdfAnnotatorOpen] = useState(false);
@@ -91,7 +92,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                 comment.parent_id === null &&
                 comment.status === "RESOLVED" &&
                 !comment.carry_finalized &&
-                !(carryDecisionsByRevision[selectedRevisionId] ?? []).some((item) => item.source_comment_id === comment.id),
+                !(carryDecisionsByRevision[selectedRevisionId] ?? []).some((item) => (item.status === "OPEN" || item.status === "CLOSED") && item.source_comment_id === comment.id),
             )
         : [],
     [filteredHistory, selectedHistoryIndex, carryDecisionsByRevision, selectedRevisionId],
@@ -99,7 +100,24 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
 
   const canOwnerCreateRemarks = currentUser.company_type !== "owner" || Boolean(card?.can_current_user_raise_comments);
   const canManageCarryOver = currentUser.role === "admin" || currentUser.company_type === "owner";
-  const selectedCarryDecidedIds = (carryDecisionsByRevision[selectedRevisionId] ?? []).map((item) => item.source_comment_id);
+  const selectedCarryDecidedIds = (carryDecisionsByRevision[selectedRevisionId] ?? [])
+    .filter((item) => item.status === "OPEN" || item.status === "CLOSED")
+    .map((item) => item.source_comment_id);
+  const isRMatrixReviewer = card?.current_user_matrix_role === "R" && currentUser.role !== "admin";
+  const carryActionMode = isRMatrixReviewer ? "recommendation" : "final";
+  const getCarrySuggestion = (revisionId: number, sourceCommentId: number) =>
+    (carryDecisionsByRevision[revisionId] ?? []).find(
+      (item) => item.source_comment_id === sourceCommentId && (item.status === "R_OPEN" || item.status === "R_CLOSED"),
+    );
+  const carryRHintsBySourceId = useMemo(() => {
+    const out: Partial<Record<number, "R_OPEN" | "R_CLOSED">> = {};
+    for (const item of carryDecisionsByRevision[selectedRevisionId] ?? []) {
+      if (item.status === "R_OPEN" || item.status === "R_CLOSED") {
+        out[item.source_comment_id] = item.status;
+      }
+    }
+    return out;
+  }, [carryDecisionsByRevision, selectedRevisionId]);
   const canCommentOnSelectedRevision = isOwnerCommentingAllowedStatus(selectedRevision?.status);
   const isSelectedRevisionClosedForPdfUpdate =
     selectedRevision?.status === "CONTRACTOR_REPLY_A" || selectedRevision?.status === "SUBMITTED";
@@ -196,7 +214,23 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
         <Typography.Title level={4} style={{ margin: 0 }}>
           Карточка документа
         </Typography.Title>
-        <Tooltip title="Открыть PDF выбранной ревизии для просмотра и комментариев">
+        <Tooltip
+          title={
+            !selectedRevision?.file_path
+              ? "PDF ещё не загружен для этой ревизии"
+              : documentCompleted
+              ? "Документ финально согласован (AFD + AP) — редактирование закрыто"
+              : !canOwnerCreateRemarks
+              ? "Вы не назначены рассматривающим (LR/R) по этому документу"
+              : currentUser.company_type === "owner" && !canCommentOnSelectedRevision
+              ? "Замечания можно добавлять только при статусе «На рассмотрении заказчиком»"
+              : !currentUser.permissions.can_raise_comments && currentUser.company_type !== "contractor"
+              ? "Нет прав для создания замечаний"
+              : currentUser.company_type === "contractor"
+              ? "Открыть PDF для просмотра"
+              : "Открыть PDF и добавить замечания"
+          }
+        >
           <Button
             type="primary"
             onClick={() => {
@@ -230,13 +264,14 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
         )}
         {(selectedRevision?.id === latestRevisionId && selectedRevision?.review_code !== "AP" && canSetApByRole) && (
           <Tooltip
-            title={
-              activePublishedRemarksCount > 0
-                ? `Нельзя поставить AP: активных замечаний ${activePublishedRemarksCount}`
-                : carryOpenCount > 0
-                ? `Нельзя поставить AP: в "Должны были устранить" осталось ${carryOpenCount}`
-                : "Все замечания закрыты/отклонены, можно поставить AP"
-            }
+            title={(() => {
+              const blocks: string[] = [];
+              if (activePublishedRemarksCount > 0) blocks.push(`${activePublishedRemarksCount} активных замечаний не закрыто`);
+              if (carryOpenCount > 0) blocks.push(`${carryOpenCount} пункт(а) в «Должны были устранить» без решения`);
+              return blocks.length > 0
+                ? `Нельзя поставить AP: ${blocks.join("; ")}`
+                : "Все замечания закрыты/отклонены — можно поставить AP";
+            })()}
           >
             <Button
               disabled={!canSetApForSelectedRevision}
@@ -280,7 +315,8 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
           <Descriptions.Item label="Текущий статус процесса">
             {(selectedRevision ?? lastRevision) ? (
               <Space direction="vertical" size={2}>
-                <Typography.Text>{(selectedRevision ?? lastRevision)?.status}</Typography.Text>
+                <Typography.Text strong>{getRuStatusLabel((selectedRevision ?? lastRevision)?.status ?? "")}</Typography.Text>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>{(selectedRevision ?? lastRevision)?.status}</Typography.Text>
                 <Space size={6}>
                   <Typography.Text type="secondary">Код замечаний:</Typography.Text>
                   <Tag color={currentProcessStatus === "AP" ? "success" : "default"}>{currentProcessStatus}</Tag>
@@ -317,6 +353,24 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
             style={{ marginTop: 10 }}
             message="Вы не назначены рассматривающим (LR/R) по этому документу"
             description="Доступен только просмотр документа и согласованных замечаний."
+          />
+        )}
+        {currentUser.company_type === "contractor" && (selectedRevision ?? lastRevision)?.status === "UNDER_REVIEW" && (
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginTop: 10 }}
+            message="Ревизия на рассмотрении заказчиком"
+            description="Заказчик проверяет ревизию и формирует замечания. Действия со стороны подрядчика станут доступны после получения CRS."
+          />
+        )}
+        {currentUser.company_type === "contractor" && (selectedRevision ?? lastRevision)?.status === "CONTRACTOR_REPLY_A" && (
+          <Alert
+            type="success"
+            showIcon
+            style={{ marginTop: 10 }}
+            message="Цикл ревизии завершён"
+            description="Все замечания отработаны. Создайте следующую ревизию, если документ требует перевыпуска."
           />
         )}
       </Card>
@@ -367,6 +421,17 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
               width: 220,
               render: (_, row) => (
                 <Space wrap size={[8, 8]}>
+                  <Tooltip
+                    title={
+                      !row.file_path
+                        ? "PDF ещё не загружен"
+                        : !canOwnerCreateRemarks
+                        ? "Вы не назначены рассматривающим по этому документу"
+                        : currentUser.company_type === "owner" && !(row.status === "UNDER_REVIEW" || row.status === "OWNER_COMMENTS_SENT")
+                        ? `Замечания доступны только при статусе «На рассмотрении» или «Замечания отправлены». Текущий: ${getRuStatusLabel(row.status)}`
+                        : undefined
+                    }
+                  >
                   <Button
                     size="small"
                     onClick={() => {
@@ -382,6 +447,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                   >
                     {currentUser.company_type === "contractor" ? "Открыть" : "Комментировать"}
                   </Button>
+                  </Tooltip>
                   <Button
                     size="small"
                     onClick={async () => {
@@ -464,7 +530,11 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                     )
                   : [];
               const carryClosedIds = carryClosedByRevision[row.revision_id] ?? [];
-              const carryDecidedIds = new Set((carryDecisionsByRevision[row.revision_id] ?? []).map((item) => item.source_comment_id));
+              const carryDecidedIds = new Set(
+                (carryDecisionsByRevision[row.revision_id] ?? [])
+                  .filter((item) => item.status === "OPEN" || item.status === "CLOSED")
+                  .map((item) => item.source_comment_id),
+              );
               const carryOpen = carryCandidates.filter((item) => !carryDecidedIds.has(item.id));
               const carryDone = carryCandidates.filter((item) => carryClosedIds.includes(item.id));
               const renderCommentsTable = (items: CommentItem[]) => (
@@ -778,10 +848,23 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                                 },
                               },
                               {
+                                title: "Подсказка R",
+                                width: 210,
+                                render: (_, item) => {
+                                  const d = getCarrySuggestion(row.revision_id, item.id);
+                                  if (!d) return "—";
+                                  return d.status === "R_CLOSED" ? (
+                                    <Tag color="green">Автор считает устранено</Tag>
+                                  ) : (
+                                    <Tag color="red">Автор считает не устранено</Tag>
+                                  );
+                                },
+                              },
+                              {
                                 title: "Кем подтверждено",
                                 width: 180,
                                 render: (_, item) => {
-                                  const d = (carryDecisionsByRevision[row.revision_id] ?? []).find((x) => x.source_comment_id === item.id);
+                                  const d = (carryDecisionsByRevision[row.revision_id] ?? []).find((x) => (x.status === "OPEN" || x.status === "CLOSED") && x.source_comment_id === item.id);
                                   return d?.decided_by_name ?? d?.decided_by_email ?? "—";
                                 },
                               },
@@ -789,7 +872,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                                 title: "Когда подтверждено",
                                 width: 170,
                                 render: (_, item) => {
-                                  const d = (carryDecisionsByRevision[row.revision_id] ?? []).find((x) => x.source_comment_id === item.id);
+                                  const d = (carryDecisionsByRevision[row.revision_id] ?? []).find((x) => (x.status === "OPEN" || x.status === "CLOSED") && x.source_comment_id === item.id);
                                   return d ? formatDateTimeRu(d.decided_at) : "—";
                                 },
                               },
@@ -798,11 +881,13 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                                 width: 220,
                                 render: (_, item) => (
                                   <Space>
+                                    <Tooltip title={isRMatrixReviewer ? "Зафиксировать рекомендацию: по вашему мнению замечание НЕ устранено. LR примет итоговое решение." : "Замечание не устранено — вернуть в работу текущей ревизии"}>
                                     <Button
                                       size="small"
-                                      disabled={!isLatestRow || (carryDecisionsByRevision[row.revision_id] ?? []).some((x) => x.source_comment_id === item.id)}
+                                      danger={!isRMatrixReviewer}
+                                      disabled={!isLatestRow || (carryDecisionsByRevision[row.revision_id] ?? []).some((x) => (x.status === "OPEN" || x.status === "CLOSED") && x.source_comment_id === item.id)}
                                       onClick={async () => {
-                                        if ((carryDecisionsByRevision[row.revision_id] ?? []).some((x) => x.source_comment_id === item.id)) {
+                                        if ((carryDecisionsByRevision[row.revision_id] ?? []).some((x) => (x.status === "OPEN" || x.status === "CLOSED") && x.source_comment_id === item.id)) {
                                           message.info("Решение по замечанию уже зафиксировано");
                                           return;
                                         }
@@ -814,27 +899,44 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                                             ...(prev[row.revision_id] ?? []).filter((x) => x.source_comment_id !== decision.source_comment_id),
                                           ],
                                         }));
-                                        await createComment({
-                                          revision_id: row.revision_id,
-                                          text: item.text,
-                                          status: "OPEN",
-                                          review_code: item.review_code ?? null,
-                                          page: item.page ?? null,
-                                          area_x: item.area_x ?? null,
-                                          area_y: item.area_y ?? null,
-                                          area_w: item.area_w ?? null,
-                                          area_h: item.area_h ?? null,
-                                        });
+                                        if (!isRMatrixReviewer) {
+                                          const exists = rowComments.some(
+                                            (c) =>
+                                              c.parent_id === null &&
+                                              c.text === item.text &&
+                                              (c.review_code ?? null) === (item.review_code ?? null),
+                                          );
+                                          if (exists) {
+                                            message.info("Такое замечание уже есть в текущей ревизии");
+                                          } else {
+                                            await createComment({
+                                              revision_id: row.revision_id,
+                                              text: item.text,
+                                              status: "OPEN",
+                                              review_code: item.review_code ?? null,
+                                              page: item.page ?? null,
+                                              area_x: item.area_x ?? null,
+                                              area_y: item.area_y ?? null,
+                                              area_w: item.area_w ?? null,
+                                              area_h: item.area_h ?? null,
+                                            });
+                                            message.success("Решение LR: замечание возвращено в работу текущей ревизии");
+                                          }
+                                        } else {
+                                          message.success("Рекомендация R сохранена: замечание не устранено");
+                                        }
                                         await loadCard();
                                       }}
                                     >
-                                      OPEN
+                                      {isRMatrixReviewer ? "Не устранено (R)" : "Не устранено (вернуть)"}
                                     </Button>
+                                    </Tooltip>
+                                    <Tooltip title={isRMatrixReviewer ? "Зафиксировать рекомендацию: по вашему мнению замечание УСТРАНЕНО. LR примет итоговое решение." : "Замечание устранено — подтвердить и закрыть"}>
                                     <Button
                                       size="small"
-                                      disabled={!isLatestRow || (carryDecisionsByRevision[row.revision_id] ?? []).some((x) => x.source_comment_id === item.id)}
+                                      disabled={!isLatestRow || (carryDecisionsByRevision[row.revision_id] ?? []).some((x) => (x.status === "OPEN" || x.status === "CLOSED") && x.source_comment_id === item.id)}
                                       onClick={() => {
-                                        if ((carryDecisionsByRevision[row.revision_id] ?? []).some((x) => x.source_comment_id === item.id)) {
+                                        if ((carryDecisionsByRevision[row.revision_id] ?? []).some((x) => (x.status === "OPEN" || x.status === "CLOSED") && x.source_comment_id === item.id)) {
                                           message.info("Решение по замечанию уже зафиксировано");
                                           return;
                                         }
@@ -851,16 +953,21 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                                                 ...(prev[row.revision_id] ?? []).filter((x) => x.source_comment_id !== decision.source_comment_id),
                                               ],
                                             }));
-                                            message.success("Замечание переведено в 'Было устранено'");
+                                            message.success(
+                                              isRMatrixReviewer
+                                                ? "Рекомендация R сохранена: замечание устранено"
+                                                : "Подтверждено: замечание устранено",
+                                            );
                                           })
                                           .catch((error: unknown) => {
-                                            const text = error instanceof Error ? error.message : "Не удалось сохранить CLOSED";
+                                            const text = error instanceof Error ? error.message : "Не удалось сохранить решение";
                                             message.error(text);
                                           });
                                       }}
                                     >
-                                      CLOSED
+                                      {isRMatrixReviewer ? "Устранено (R)" : "Устранено ✓"}
                                     </Button>
+                                    </Tooltip>
                                   </Space>
                                 ),
                               },
@@ -911,10 +1018,23 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                                 },
                               },
                               {
+                                title: "Подсказка R",
+                                width: 210,
+                                render: (_, item) => {
+                                  const d = getCarrySuggestion(row.revision_id, item.id);
+                                  if (!d) return "—";
+                                  return d.status === "R_CLOSED" ? (
+                                    <Tag color="green">Автор считает устранено</Tag>
+                                  ) : (
+                                    <Tag color="red">Автор считает не устранено</Tag>
+                                  );
+                                },
+                              },
+                              {
                                 title: "Кем подтверждено",
                                 width: 180,
                                 render: (_, item) => {
-                                  const d = (carryDecisionsByRevision[row.revision_id] ?? []).find((x) => x.source_comment_id === item.id);
+                                  const d = (carryDecisionsByRevision[row.revision_id] ?? []).find((x) => (x.status === "OPEN" || x.status === "CLOSED") && x.source_comment_id === item.id);
                                   return d?.decided_by_name ?? d?.decided_by_email ?? "—";
                                 },
                               },
@@ -922,7 +1042,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                                 title: "Когда подтверждено",
                                 width: 170,
                                 render: (_, item) => {
-                                  const d = (carryDecisionsByRevision[row.revision_id] ?? []).find((x) => x.source_comment_id === item.id);
+                                  const d = (carryDecisionsByRevision[row.revision_id] ?? []).find((x) => (x.status === "OPEN" || x.status === "CLOSED") && x.source_comment_id === item.id);
                                   return d ? formatDateTimeRu(d.decided_at) : "—";
                                 },
                               },
@@ -982,7 +1102,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
         carryClosedIds={canManageCarryOver ? (carryClosedByRevision[selectedRevisionId] ?? []) : []}
         carryDecidedIds={canManageCarryOver ? selectedCarryDecidedIds : []}
         onCarryClose={canManageCarryOver ? (id) => {
-          if ((carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => x.source_comment_id === id)) return;
+          if ((carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => (x.status === "OPEN" || x.status === "CLOSED") && x.source_comment_id === id)) return;
           void setCarryDecision(selectedRevisionId, { source_comment_id: id, status: "CLOSED" })
             .then((decision) => {
               setCarryClosedByRevision((prev) => {
@@ -1005,35 +1125,62 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
         onCarryReopen={canManageCarryOver ? (id) => {
           message.info("Решение уже зафиксировано и не может быть изменено");
         } : undefined}
-        onCarryOpen={canManageCarryOver ? async (item) => {
-          if (!selectedRevisionId) return;
-          if ((carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => x.source_comment_id === item.id)) return;
-          await setCarryDecision(selectedRevisionId, { source_comment_id: item.id, status: "OPEN" });
-          const exists = selectedRevisionComments.some(
-            (c) => c.parent_id === null && c.text === item.text && (c.review_code ?? null) === (item.review_code ?? null),
-          );
-          if (exists) return;
-          await createComment({
-            revision_id: selectedRevisionId,
-            text: item.text,
-            status: "OPEN",
-            review_code: item.review_code ?? null,
-            page: item.page ?? null,
-            area_x: item.area_x ?? null,
-            area_y: item.area_y ?? null,
-            area_w: item.area_w ?? null,
-            area_h: item.area_h ?? null,
-          });
-          await loadCard();
-        } : undefined}
+        onCarryOpen={
+          canManageCarryOver
+            ? async (item) => {
+                if (!selectedRevisionId) return;
+                if ((carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => (x.status === "OPEN" || x.status === "CLOSED") && x.source_comment_id === item.id)) return;
+                const decision = await setCarryDecision(selectedRevisionId, { source_comment_id: item.id, status: "OPEN" });
+                setCarryDecisionsByRevision((prev) => ({
+                  ...prev,
+                  [selectedRevisionId]: [
+                    decision,
+                    ...(prev[selectedRevisionId] ?? []).filter((x) => x.source_comment_id !== decision.source_comment_id),
+                  ],
+                }));
+                if (isRMatrixReviewer) {
+                  message.success("Рекомендация R сохранена: автор считает, что замечание не устранено");
+                  await loadCard();
+                  return;
+                }
+                const exists = selectedRevisionComments.some(
+                  (c) =>
+                    c.parent_id === null &&
+                    c.text === item.text &&
+                    (c.review_code ?? null) === (item.review_code ?? null),
+                );
+                if (exists) {
+                  message.info("Такое замечание уже есть в текущей ревизии");
+                  await loadCard();
+                  return;
+                }
+                await createComment({
+                  revision_id: selectedRevisionId,
+                  text: item.text,
+                  status: "OPEN",
+                  review_code: item.review_code ?? null,
+                  page: item.page ?? null,
+                  area_x: item.area_x ?? null,
+                  area_y: item.area_y ?? null,
+                  area_w: item.area_w ?? null,
+                  area_h: item.area_h ?? null,
+                });
+                message.success("Решение LR: замечание возвращено в OPEN текущей ревизии");
+                await loadCard();
+              }
+            : undefined
+        }
         canCreateRemarks={(card?.can_current_user_raise_comments ?? true) && !documentCompleted}
         canCreateOwnerRemarks={canOwnerCreateRemarks && canCommentOnSelectedRevision && !documentCompleted}
         canManageOwnerRemarks={
-          currentUser.permissions.can_publish_comments &&
-          (currentUser.role === "admin" || card?.current_user_matrix_role === "LR")
+          currentUser.role === "admin" ||
+          card?.current_user_matrix_role === "LR" ||
+          card?.current_user_matrix_role === "R"
         }
         noAccessHint="Вы не назначены рассматривающим (LR/R) по этому документу. Доступен только просмотр PDF и замечаний."
         focusCommentId={pdfFocusCommentId}
+        carryActionMode={carryActionMode}
+        carryRHints={carryRHintsBySourceId}
         onCreated={async () => {
           await loadCard();
         }}

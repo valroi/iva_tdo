@@ -106,7 +106,7 @@ export interface CarryDecisionItem {
   id: number;
   target_revision_id: number;
   source_comment_id: number;
-  status: "OPEN" | "CLOSED";
+  status: "OPEN" | "CLOSED" | "R_OPEN" | "R_CLOSED";
   decided_by_id: number;
   decided_by_name?: string | null;
   decided_by_email?: string | null;

@@ -1,4 +1,4 @@
-import { Button, Card, Space, Table, Tooltip, Typography, message } from "antd";
+import { Button, Card, Space, Table, Tooltip, Typography, App } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
 
@@ -33,6 +33,7 @@ interface OwnerTrmRow {
 }
 
 export default function TrmPage({ currentUser, onOpenRevision }: Props): JSX.Element {
+  const { message } = App.useApp();
   const [items, setItems] = useState<RevisionOverviewItem[]>([]);
   const [ownerItems, setOwnerItems] = useState<TdoQueueItem[]>([]);
 

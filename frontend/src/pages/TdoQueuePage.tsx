@@ -1,4 +1,4 @@
-import { Button, Card, Modal, Space, Table, Tooltip, Typography, message } from "antd";
+import { Button, Card, Modal, Space, Table, Tooltip, Typography, App } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useState } from "react";
 
@@ -15,6 +15,7 @@ interface Props {
 }
 
 export default function TdoQueuePage({ currentUser, onReload, onOpenRevision }: Props): JSX.Element {
+  const { message } = App.useApp();
   const [items, setItems] = useState<TdoQueueItem[]>([]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<Array<string | number>>([]);
   const [cancelOpen, setCancelOpen] = useState(false);

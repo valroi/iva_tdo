@@ -25,6 +25,8 @@ export function getRemarksSummaryCode(comments: CommentItem[]): RemarksSummaryCo
 }
 
 export function getRemarksSummaryLabel(comments: CommentItem[], fallbackReviewCode?: string | null): string {
+  // AP is a final LR override — always take precedence over comment-level codes
+  if (fallbackReviewCode === "AP") return "AP";
   const code = getRemarksSummaryCode(comments);
   if (code !== "NONE") return code;
   const parentCodes = new Set(

@@ -28,9 +28,12 @@ import {
   addCommentToCrs,
   createComment,
   createRevision,
+  type AdminReviewSlaSettings,
   getAdminReviewSlaSettings,
+  getRevisionCard,
   listComments,
   listCarryDecisions,
+  listProjectReferences,
   listRevisionAttachments,
   listRevisions,
   ownerCommentDecision,
@@ -48,12 +51,23 @@ import {
 } from "../api";
 import RevisionPdfAnnotator from "../components/RevisionPdfAnnotator";
 import ProcessHint from "../components/ProcessHint";
-import type { CarryDecisionItem, CommentItem, DocumentAttachmentItem, DocumentItem, MDRRecord, ProjectMember, Revision, User } from "../types";
+import type {
+  CarryDecisionItem,
+  CommentItem,
+  DocumentAttachmentItem,
+  DocumentItem,
+  MDRRecord,
+  ProjectMember,
+  Revision,
+  RevisionCard,
+  User,
+} from "../types";
 import { formatDateTimeRu } from "../utils/datetime";
 import {
   ContractorReuploadPdfTag,
   RevisionStatusCell,
   contractorNeedsPdfReupload,
+  getRuStatusLabel,
 } from "../utils/revisionHints";
 import { getCleanRemarkText, getDisplayRevisionCode, getRemarksSummaryLabel } from "../utils/revisionProcess";
 import {
@@ -120,7 +134,9 @@ export default function DocumentsPage({
     { event_type: string; revision_id?: number | null; created_at: string; message?: string | null }[]
   >([]);
   const [ownerCanPublishByRevision, setOwnerCanPublishByRevision] = useState<Record<number, boolean>>({});
-  const [slaDays, setSlaDays] = useState<{ initial_days: number; owner_specialist_review_days: number } | null>(null);
+  const [adminSla, setAdminSla] = useState<AdminReviewSlaSettings | null>(null);
+  const [slaByCode, setSlaByCode] = useState<Map<string, number>>(new Map());
+  const [docMatrixRole, setDocMatrixRole] = useState<string | null>(null);
 
   const openCommentContext = (row: CommentItem): void => {
     if (currentUser.company_type === "contractor") {
@@ -164,6 +180,11 @@ export default function DocumentsPage({
     () => mdr.find((item) => item.id === (selectedDocument?.mdr_id ?? -1)) ?? null,
     [mdr, selectedDocument],
   );
+  const projectIdForSla = useMemo(() => {
+    const ids = Array.from(new Set(projectMembers.map((m) => m.project_id).filter((id) => Number.isFinite(id))));
+    if (ids.length === 1) return ids[0] ?? null;
+    return projectMembers[0]?.project_id ?? null;
+  }, [projectMembers]);
   const currentCategory = (selectedMdr?.category ?? "").toUpperCase();
   const currentMemberRole = useMemo(
     () => projectMembers.find((m) => m.user_id === currentUser.id)?.member_role ?? null,
@@ -194,13 +215,72 @@ export default function DocumentsPage({
     if (!latestRevision) return false;
     return (latestRevision.issue_purpose ?? "").toUpperCase() === "AFD" && latestRevision.review_code === "AP";
   }, [selectedDocument, latestRevision]);
+  // A new revision cannot be created while the latest one is still moving
+  // through the cycle (waiting for TDO, under owner review, comments sent,
+  // contractor reply in progress). The backend rejects it with a 409; we
+  // mirror that here so the action is blocked in the UI instead of erroring.
+  const latestRevisionInProgress = useMemo(() => {
+    const blockingStatuses = [
+      "REVISION_CREATED",
+      "UPLOADED_WAITING_TDO",
+      "UNDER_REVIEW",
+      "SUBMITTED",
+      "OWNER_COMMENTS_SENT",
+      "CONTRACTOR_REPLY_I",
+    ];
+    return Boolean(latestRevision && blockingStatuses.includes(latestRevision.status));
+  }, [latestRevision]);
   const canOwnerPublishToCrs =
     currentUser.role === "admin" ||
     (currentUser.permissions.can_publish_comments && Boolean(ownerCanPublishByRevision[selectedRevisionId ?? -1]));
   const selectedCarryDecidedIds =
     selectedRevisionId !== null
-      ? (carryDecisionsByRevision[selectedRevisionId] ?? []).map((item) => item.source_comment_id)
+      ? (carryDecisionsByRevision[selectedRevisionId] ?? [])
+          .filter((item) => item.status === "OPEN" || item.status === "CLOSED")
+          .map((item) => item.source_comment_id)
       : [];
+  const isRMatrixReviewer =
+    currentUser.company_type === "owner" &&
+    currentUser.role !== "admin" &&
+    docMatrixRole === "R";
+  const carryActionMode = isRMatrixReviewer ? "recommendation" : "final";
+  const getCarrySuggestion = (revisionId: number, sourceCommentId: number) =>
+    (carryDecisionsByRevision[revisionId] ?? []).find(
+      (item) => item.source_comment_id === sourceCommentId && (item.status === "R_OPEN" || item.status === "R_CLOSED"),
+    );
+  const carryRHintsBySourceId = useMemo(() => {
+    const out: Partial<Record<number, "R_OPEN" | "R_CLOSED">> = {};
+    if (!selectedRevisionId) return out;
+    for (const item of carryDecisionsByRevision[selectedRevisionId] ?? []) {
+      if (item.status === "R_OPEN" || item.status === "R_CLOSED") {
+        out[item.source_comment_id] = item.status;
+      }
+    }
+    return out;
+  }, [carryDecisionsByRevision, selectedRevisionId]);
+  const resolveCycleDays = useMemo(() => {
+    return (issueRaw: string | null | undefined): number => {
+      const issue = (issueRaw ?? "").toUpperCase();
+      const category = (selectedMdr?.category ?? "*").toUpperCase();
+      const phase: "INITIAL" | "NEXT" = revisions.length <= 1 ? "INITIAL" : "NEXT";
+      const candidates = [
+        `${category}:${issue}:${phase}`,
+        `*:${issue}:${phase}`,
+        `${category}:*:${phase}`,
+        `*:*:${phase}`,
+      ];
+      for (const key of candidates) {
+        const value = slaByCode.get(key);
+        if (value && value > 0) return value;
+      }
+      if (phase === "INITIAL") {
+        if (issue === "IFA" || issue === "IFR") return 20;
+        return adminSla?.initial_days ?? 14;
+      }
+      if (issue === "IFA" || issue === "IFR") return adminSla?.next_days ?? 7;
+      return adminSla?.next_days ?? 14;
+    };
+  }, [adminSla?.initial_days, adminSla?.next_days, revisions.length, selectedMdr?.category, slaByCode]);
   const formatDateRu = (value: string | null | undefined): string => {
     if (!value) return "—";
     const dt = new Date(value);
@@ -267,24 +347,31 @@ export default function DocumentsPage({
     const revB = revisions.find((rev) => rev.revision_code.toUpperCase() === "B" && rev.issue_purpose.toUpperCase() === "IFR") ?? null;
     const rev00 = revisions.find((rev) => rev.revision_code === "00" && rev.issue_purpose.toUpperCase() === "IFD") ?? null;
     const planStart = selectedMdr?.planned_dev_start ?? null;
-    const initialDays = slaDays?.initial_days ?? 14;
-    const ownerReviewDays = slaDays?.owner_specialist_review_days ?? 8;
+    const ownerReviewDays = adminSla?.owner_specialist_review_days ?? 8;
+    const contractorConsiderDays = adminSla?.contractor_consideration_days ?? 2;
+    const ownerUnderReviewDays = adminSla?.owner_lr_approval_days ?? 10;
     const plan70 = planStart ?? "—";
     const plan75 = plan70 !== "—" ? addDays(plan70, ownerReviewDays) : "—";
-    const plan80 = plan75 !== "—" ? addDays(plan75, initialDays) : "—";
+    const plan80 = plan75 !== "—" ? addDays(plan75, resolveCycleDays(revA?.issue_purpose ?? "IFR")) : "—";
     const plan85 = plan80 !== "—" ? addDays(plan80, ownerReviewDays) : "—";
-    const plan90 = plan85 !== "—" ? addDays(plan85, initialDays) : "—";
+    const plan90 = plan85 !== "—" ? addDays(plan85, resolveCycleDays(revB?.issue_purpose ?? "IFR")) : "—";
     const plan100 = plan90 !== "—" ? addDays(plan90, ownerReviewDays) : "—";
     const cycles85 = revisions.filter((rev) => rev.review_code && rev.review_code !== "AP").length;
     const latestReviewCode = [...revisions].reverse().find((rev) => rev.review_code)?.review_code ?? null;
+    const contractorFixDaysByCode =
+      latestReviewCode === "AN"
+        ? adminSla?.contractor_an_issue_days ?? 5
+        : latestReviewCode === "CO" || latestReviewCode === "RJ"
+          ? adminSla?.contractor_co_rj_issue_days ?? 8
+          : adminSla?.contractor_ap_issue_days ?? 2;
     const latestCreated = revisions.length > 0 ? revisions[revisions.length - 1].created_at : null;
     const forecast100 =
       latestRevision?.status === "CONTRACTOR_REPLY_I"
-        ? addDays(latestCreated, 2)
+        ? addDays(latestCreated, contractorConsiderDays)
         : latestRevision?.status === "OWNER_COMMENTS_SENT"
-          ? addDays(latestCreated, 8)
+          ? addDays(latestCreated, contractorFixDaysByCode + ownerReviewDays)
           : latestRevision?.status === "UNDER_REVIEW"
-            ? addDays(latestCreated, 10)
+            ? addDays(latestCreated, ownerUnderReviewDays)
             : plan100;
     const factBySentToOwner = (rev: Revision | null): string => {
       if (!rev) return "—";
@@ -366,7 +453,16 @@ export default function DocumentsPage({
           : "—",
       },
     ];
-  }, [allNotifications, commentsByRevision, formatDateRu, latestRevision?.status, revisions, selectedMdr?.planned_dev_start, slaDays?.initial_days, slaDays?.owner_specialist_review_days]);
+  }, [
+    adminSla,
+    allNotifications,
+    commentsByRevision,
+    formatDateRu,
+    latestRevision?.status,
+    resolveCycleDays,
+    revisions,
+    selectedMdr?.planned_dev_start,
+  ]);
 
   const computeNextAlphabeticRevision = (): string => {
     const letters = revisions
@@ -409,14 +505,57 @@ export default function DocumentsPage({
 
   useEffect(() => {
     getAdminReviewSlaSettings()
-      .then((item) => {
-        setSlaDays({
-          initial_days: item.initial_days,
-          owner_specialist_review_days: item.owner_specialist_review_days,
-        });
-      })
-      .catch(() => setSlaDays(null));
+      .then((item) => setAdminSla(item))
+      .catch(() => setAdminSla(null));
   }, []);
+
+  useEffect(() => {
+    if (!projectIdForSla) {
+      setSlaByCode(new Map());
+      return;
+    }
+    let cancelled = false;
+    void listProjectReferences(projectIdForSla, "review_sla_days")
+      .then((refs) => {
+        if (cancelled) return;
+        const parsed = new Map<string, number>();
+        refs.forEach((ref) => {
+          const num = Number(ref.value);
+          if (ref.is_active && Number.isFinite(num) && num > 0) {
+            parsed.set(ref.code.toUpperCase(), num);
+          }
+        });
+        setSlaByCode(parsed);
+      })
+      .catch(() => {
+        if (!cancelled) setSlaByCode(new Map());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectIdForSla]);
+
+  useEffect(() => {
+    if (!selectedRevisionId) {
+      setDocMatrixRole(null);
+      return;
+    }
+    if (currentUser.company_type !== "owner") {
+      setDocMatrixRole(null);
+      return;
+    }
+    let cancelled = false;
+    void getRevisionCard(selectedRevisionId)
+      .then((card: RevisionCard) => {
+        if (!cancelled) setDocMatrixRole(card.current_user_matrix_role ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setDocMatrixRole(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser.company_type, selectedRevisionId]);
 
   useEffect(() => {
     if (documents.length === 0) {
@@ -850,15 +989,15 @@ export default function DocumentsPage({
               const apDisabled = !rowComments || activeCount > 0 || carryOpenCount > 0;
               return (
                 <Tooltip
-                  title={
-                    !rowComments
-                      ? "Проверяем замечания ревизии..."
-                      : activeCount > 0
-                      ? `Нельзя поставить AP: активных замечаний ${activeCount}`
-                      : carryOpenCount > 0
-                      ? `Нельзя поставить AP: в "Должны были устранить" осталось ${carryOpenCount}`
-                      : "Все замечания закрыты/отклонены, можно поставить AP"
-                  }
+                  title={(() => {
+                    if (!rowComments) return "Проверяем замечания ревизии...";
+                    const blocks: string[] = [];
+                    if (activeCount > 0) blocks.push(`${activeCount} активных замечаний не закрыто`);
+                    if (carryOpenCount > 0) blocks.push(`${carryOpenCount} пункт(а) в «Должны были устранить» без решения`);
+                    return blocks.length > 0
+                      ? `Нельзя поставить AP: ${blocks.join("; ")}`
+                      : "Все замечания закрыты/отклонены — можно поставить AP";
+                  })()}
                 >
                   <Button
                     size="small"
@@ -1220,20 +1359,45 @@ export default function DocumentsPage({
           Ревизии и комментарии
         </Typography.Title>
         {currentUser.permissions.can_upload_files && (
-          <Tooltip title="Создать новую ревизию для выбранного документа">
-            <Button onClick={() => setRevModalOpen(true)} disabled={!selectedDocumentId || selectedDocumentCompleted}>
-              + Ревизия
-            </Button>
+          <Tooltip
+            title={
+              latestRevisionInProgress
+                ? "Нельзя создать новую ревизию, пока предыдущая в работе (на рассмотрении / в ответе). Дождитесь завершения цикла."
+                : "Создать новую ревизию для выбранного документа"
+            }
+          >
+            <span>
+              <Button
+                onClick={() => setRevModalOpen(true)}
+                disabled={!selectedDocumentId || selectedDocumentCompleted || latestRevisionInProgress}
+              >
+                + Ревизия
+              </Button>
+            </span>
           </Tooltip>
         )}
         {currentUser.permissions.can_raise_comments && (
-          <Tooltip title="Открыть PDF и добавить замечание в текущую ревизию">
-            <Button
-              onClick={() => setPdfAnnotatorOpen(true)}
-              disabled={!selectedRevisionId || ownerCommentLocked || selectedDocumentCompleted || !selectedRevision?.file_path}
-            >
-              + Вопрос/замечание
-            </Button>
+          <Tooltip
+            title={
+              !selectedRevisionId
+                ? "Выберите ревизию в таблице"
+                : !selectedRevision?.file_path
+                ? "PDF ещё не загружен"
+                : ownerCommentLocked
+                ? "Замечания заблокированы — CRS уже отправлен подрядчику"
+                : selectedDocumentCompleted
+                ? "Документ финально согласован — редактирование закрыто"
+                : "Открыть PDF и добавить замечание к выбранной ревизии"
+            }
+          >
+            <span>
+              <Button
+                onClick={() => setPdfAnnotatorOpen(true)}
+                disabled={!selectedRevisionId || ownerCommentLocked || selectedDocumentCompleted || !selectedRevision?.file_path}
+              >
+                + Вопрос/замечание
+              </Button>
+            </span>
           </Tooltip>
         )}
       </Space>
@@ -1348,7 +1512,10 @@ export default function DocumentsPage({
                   <div style={{ marginTop: 12 }}>
                     <Space direction="vertical" size={2}>
                       <Typography.Text type="secondary">Workflow ревизии:</Typography.Text>
-                      <Typography.Text type="secondary">Последний статус по документу: {latestRevision?.status ?? "—"}</Typography.Text>
+                      <Typography.Text type="secondary">
+                        Статус: <Typography.Text strong>{getRuStatusLabel(latestRevision?.status ?? "")}</Typography.Text>
+                        {latestRevision?.status && <Typography.Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>({latestRevision.status})</Typography.Text>}
+                      </Typography.Text>
                       <Space size={6}>
                         <Typography.Text type="secondary">Код замечаний (по выбранной ревизии):</Typography.Text>
                         {(() => {
@@ -1374,8 +1541,26 @@ export default function DocumentsPage({
                       <Alert
                         style={{ marginTop: 10 }}
                         type="info"
-                        message={`Review Code: ${selectedRevision.review_code}`}
+                        message={`Код замечаний: ${selectedRevision.review_code}`}
                         description={reviewCodeHelp[selectedRevision.review_code] ?? "—"}
+                      />
+                    )}
+                    {currentUser.company_type === "contractor" && latestRevision?.status === "UNDER_REVIEW" && (
+                      <Alert
+                        style={{ marginTop: 10 }}
+                        type="info"
+                        showIcon
+                        message="Ревизия на рассмотрении заказчиком"
+                        description="Заказчик проверяет ревизию и формирует замечания. Действия подрядчика станут доступны после получения CRS."
+                      />
+                    )}
+                    {currentUser.company_type === "contractor" && latestRevision?.status === "CONTRACTOR_REPLY_A" && (
+                      <Alert
+                        style={{ marginTop: 10 }}
+                        type="success"
+                        showIcon
+                        message="Цикл ревизии завершён"
+                        description="Все замечания отработаны. Создайте следующую ревизию для перевыпуска документа."
                       />
                     )}
                   </div>
@@ -1476,7 +1661,7 @@ export default function DocumentsPage({
                   items={[
                       {
                         key: "carry_open",
-                        label: `Должны были устранить (${previousRevisionRemarks.filter((r) => r.status === "RESOLVED" && !(carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => x.source_comment_id === r.id)).length})`,
+                        label: `Должны были устранить (${previousRevisionRemarks.filter((r) => r.status === "RESOLVED" && !(carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => (x.status === "OPEN" || x.status === "CLOSED") && x.source_comment_id === r.id)).length})`,
                         children: (
                           <Table<PreviousRevisionRemark>
                             rowKey={(row) => `carry_open_${row.revision_id}_${row.id}`}
@@ -1485,17 +1670,30 @@ export default function DocumentsPage({
                             dataSource={previousRevisionRemarks.filter(
                               (row) =>
                                 row.status === "RESOLVED" &&
-                                !(carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => x.source_comment_id === row.id),
+                                !(carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => (x.status === "OPEN" || x.status === "CLOSED") && x.source_comment_id === row.id),
                             )}
                             columns={[
                               { title: "Из ревизии", dataIndex: "revision_code", width: 100 },
                               { title: "Код", dataIndex: "review_code", width: 90, render: (v) => v ?? "—" },
                               { title: "Текст", dataIndex: "text", render: (value: string) => getCleanRemarkText(value) },
                               {
+                                title: "Подсказка R",
+                                width: 210,
+                                render: (_: unknown, row) => {
+                                  const d = getCarrySuggestion(selectedRevisionId ?? -1, row.id);
+                                  if (!d) return "—";
+                                  return d.status === "R_CLOSED" ? (
+                                    <Tag color="green">Автор считает устранено</Tag>
+                                  ) : (
+                                    <Tag color="red">Автор считает не устранено</Tag>
+                                  );
+                                },
+                              },
+                              {
                                 title: "Подтвердил",
                                 width: 170,
                                 render: (_: unknown, row) => {
-                                  const d = (carryDecisionsByRevision[selectedRevisionId] ?? []).find((x) => x.source_comment_id === row.id);
+                                  const d = (carryDecisionsByRevision[selectedRevisionId] ?? []).find((x) => (x.status === "OPEN" || x.status === "CLOSED") && x.source_comment_id === row.id);
                                   const name = d?.decided_by_name ?? d?.decided_by_email ?? "—";
                                   return (
                                     <Typography.Text ellipsis={{ tooltip: name }} style={{ maxWidth: 150, whiteSpace: "nowrap" }}>
@@ -1508,7 +1706,7 @@ export default function DocumentsPage({
                                 title: "Дата подтверждения",
                                 width: 170,
                                 render: (_: unknown, row) => {
-                                  const d = (carryDecisionsByRevision[selectedRevisionId] ?? []).find((x) => x.source_comment_id === row.id);
+                                  const d = (carryDecisionsByRevision[selectedRevisionId] ?? []).find((x) => (x.status === "OPEN" || x.status === "CLOSED") && x.source_comment_id === row.id);
                                   return d ? formatDateTimeRu(d.decided_at) : "—";
                                 },
                               },
@@ -1517,12 +1715,14 @@ export default function DocumentsPage({
                                 width: 220,
                                 render: (_, row) => (
                                   <Space>
+                                    <Tooltip title={isRMatrixReviewer ? "Рекомендация: замечание НЕ устранено. LR примет итоговое решение." : "Замечание не устранено — вернуть в работу"}>
                                     <Button
                                       size="small"
-                                      disabled={(carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => x.source_comment_id === row.id)}
+                                      danger={!isRMatrixReviewer}
+                                      disabled={(carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => (x.status === "OPEN" || x.status === "CLOSED") && x.source_comment_id === row.id)}
                                       onClick={async () => {
                                         if (!selectedRevisionId) return;
-                                        if ((carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => x.source_comment_id === row.id)) {
+                                        if ((carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => (x.status === "OPEN" || x.status === "CLOSED") && x.source_comment_id === row.id)) {
                                           message.info("Решение по замечанию уже зафиксировано");
                                           return;
                                         }
@@ -1534,29 +1734,46 @@ export default function DocumentsPage({
                                             ...(prev[selectedRevisionId] ?? []).filter((x) => x.source_comment_id !== decision.source_comment_id),
                                           ],
                                         }));
-                                        await createComment({
-                                          revision_id: selectedRevisionId,
-                                          text: row.text,
-                                          status: "OPEN",
-                                          review_code: (row.review_code as "AN" | "CO" | "RJ" | null) ?? null,
-                                          page: null,
-                                          area_x: null,
-                                          area_y: null,
-                                          area_w: null,
-                                          area_h: null,
-                                        });
-                                        setComments(await listComments(selectedRevisionId));
-                                        message.success("Замечание добавлено в текущую ревизию как OPEN");
+                                        if (!isRMatrixReviewer) {
+                                          const exists = comments.some(
+                                            (c) =>
+                                              c.parent_id === null &&
+                                              c.text === row.text &&
+                                              (c.review_code ?? null) === (row.review_code ?? null),
+                                          );
+                                          if (exists) {
+                                            message.info("Такое замечание уже есть в текущей ревизии");
+                                          } else {
+                                            await createComment({
+                                              revision_id: selectedRevisionId,
+                                              text: row.text,
+                                              status: "OPEN",
+                                              review_code: row.review_code ?? null,
+                                              page: row.page ?? null,
+                                              area_x: row.area_x ?? null,
+                                              area_y: row.area_y ?? null,
+                                              area_w: row.area_w ?? null,
+                                              area_h: row.area_h ?? null,
+                                            });
+                                            message.success("Решение LR: замечание возвращено в работу текущей ревизии");
+                                            const items = await listComments(selectedRevisionId);
+                                            setComments(items);
+                                          }
+                                        } else {
+                                          message.success("Рекомендация R сохранена: замечание не устранено");
+                                        }
                                       }}
                                     >
-                                      OPEN
+                                      {isRMatrixReviewer ? "Не устранено (R)" : "Не устранено (вернуть)"}
                                     </Button>
+                                    </Tooltip>
+                                    <Tooltip title={isRMatrixReviewer ? "Рекомендация: замечание УСТРАНЕНО. LR примет итоговое решение." : "Замечание устранено — подтвердить"}>
                                     <Button
                                       size="small"
-                                      disabled={(carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => x.source_comment_id === row.id)}
+                                      disabled={(carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => (x.status === "OPEN" || x.status === "CLOSED") && x.source_comment_id === row.id)}
                                       onClick={() => {
                                         if (!selectedRevisionId) return;
-                                        if ((carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => x.source_comment_id === row.id)) {
+                                        if ((carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => (x.status === "OPEN" || x.status === "CLOSED") && x.source_comment_id === row.id)) {
                                           message.info("Решение по замечанию уже зафиксировано");
                                           return;
                                         }
@@ -1571,16 +1788,21 @@ export default function DocumentsPage({
                                                 ...(prev[selectedRevisionId] ?? []).filter((x) => x.source_comment_id !== decision.source_comment_id),
                                               ],
                                             }));
-                                            message.success("Замечание переведено в 'Было устранено'");
+                                            message.success(
+                                              isRMatrixReviewer
+                                                ? "Рекомендация R сохранена: замечание устранено"
+                                                : "Подтверждено: замечание устранено",
+                                            );
                                           })
                                           .catch((error: unknown) => {
-                                            const text = error instanceof Error ? error.message : "Не удалось сохранить CLOSED";
+                                            const text = error instanceof Error ? error.message : "Не удалось сохранить решение";
                                             message.error(text);
                                           });
                                       }}
                                     >
-                                      CLOSED
+                                      {isRMatrixReviewer ? "Устранено (R)" : "Устранено ✓"}
                                     </Button>
+                                    </Tooltip>
                                   </Space>
                                 ),
                               },
@@ -1606,10 +1828,23 @@ export default function DocumentsPage({
                               { title: "Код", dataIndex: "review_code", width: 90, render: (v) => v ?? "—" },
                               { title: "Текст", dataIndex: "text", render: (value: string) => getCleanRemarkText(value) },
                               {
+                                title: "Подсказка R",
+                                width: 210,
+                                render: (_: unknown, row) => {
+                                  const d = getCarrySuggestion(selectedRevisionId ?? -1, row.id);
+                                  if (!d) return "—";
+                                  return d.status === "R_CLOSED" ? (
+                                    <Tag color="green">Автор считает устранено</Tag>
+                                  ) : (
+                                    <Tag color="red">Автор считает не устранено</Tag>
+                                  );
+                                },
+                              },
+                              {
                                 title: "Подтвердил",
                                 width: 170,
                                 render: (_: unknown, row) => {
-                                  const d = (carryDecisionsByRevision[selectedRevisionId] ?? []).find((x) => x.source_comment_id === row.id);
+                                  const d = (carryDecisionsByRevision[selectedRevisionId] ?? []).find((x) => (x.status === "OPEN" || x.status === "CLOSED") && x.source_comment_id === row.id);
                                   const name = d?.decided_by_name ?? d?.decided_by_email ?? "—";
                                   return (
                                     <Typography.Text ellipsis={{ tooltip: name }} style={{ maxWidth: 150, whiteSpace: "nowrap" }}>
@@ -1622,7 +1857,7 @@ export default function DocumentsPage({
                                 title: "Дата подтверждения",
                                 width: 170,
                                 render: (_: unknown, row) => {
-                                  const d = (carryDecisionsByRevision[selectedRevisionId] ?? []).find((x) => x.source_comment_id === row.id);
+                                  const d = (carryDecisionsByRevision[selectedRevisionId] ?? []).find((x) => (x.status === "OPEN" || x.status === "CLOSED") && x.source_comment_id === row.id);
                                   return d ? formatDateTimeRu(d.decided_at) : "—";
                                 },
                               },
@@ -1684,7 +1919,7 @@ export default function DocumentsPage({
             ? previousRevisionRemarks.filter(
                 (row) =>
                   row.status === "RESOLVED" &&
-                  !(carryDecisionsByRevision[selectedRevisionId ?? -1] ?? []).some((x) => x.source_comment_id === row.id),
+                  !(carryDecisionsByRevision[selectedRevisionId ?? -1] ?? []).some((x) => (x.status === "OPEN" || x.status === "CLOSED") && x.source_comment_id === row.id),
               )
             : []
         }
@@ -1692,7 +1927,7 @@ export default function DocumentsPage({
         carryDecidedIds={canManageCarryOver ? selectedCarryDecidedIds : []}
         onCarryClose={canManageCarryOver ? (id) => {
           if (!selectedRevisionId) return;
-          if ((carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => x.source_comment_id === id)) return;
+          if ((carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => (x.status === "OPEN" || x.status === "CLOSED") && x.source_comment_id === id)) return;
           void setCarryDecision(selectedRevisionId, { source_comment_id: id, status: "CLOSED" })
             .then((decision) => {
               const next = Array.from(new Set([...(carryClosedByRevision[selectedRevisionId] ?? []), id]));
@@ -1713,32 +1948,54 @@ export default function DocumentsPage({
         onCarryReopen={canManageCarryOver ? (id) => {
           message.info("Решение уже зафиксировано и не может быть изменено");
         } : undefined}
-        onCarryOpen={canManageCarryOver ? async (item) => {
-          if (!selectedRevisionId) return;
-          if ((carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => x.source_comment_id === item.id)) return;
-          const decision = await setCarryDecision(selectedRevisionId, { source_comment_id: item.id, status: "OPEN" });
-          setCarryDecisionsByRevision((prev) => ({
-            ...prev,
-            [selectedRevisionId]: [
-              decision,
-              ...(prev[selectedRevisionId] ?? []).filter((x) => x.source_comment_id !== decision.source_comment_id),
-            ],
-          }));
-          await createComment({
-            revision_id: selectedRevisionId,
-            text: item.text,
-            status: "OPEN",
-            review_code: item.review_code ?? null,
-            page: item.page ?? null,
-            area_x: item.area_x ?? null,
-            area_y: item.area_y ?? null,
-            area_w: item.area_w ?? null,
-            area_h: item.area_h ?? null,
-          });
-          setComments(await listComments(selectedRevisionId));
-        } : undefined}
+        onCarryOpen={
+          canManageCarryOver
+            ? async (item) => {
+                if (!selectedRevisionId) return;
+                if ((carryDecisionsByRevision[selectedRevisionId] ?? []).some((x) => (x.status === "OPEN" || x.status === "CLOSED") && x.source_comment_id === item.id)) return;
+                const decision = await setCarryDecision(selectedRevisionId, { source_comment_id: item.id, status: "OPEN" });
+                setCarryDecisionsByRevision((prev) => ({
+                  ...prev,
+                  [selectedRevisionId]: [
+                    decision,
+                    ...(prev[selectedRevisionId] ?? []).filter((x) => x.source_comment_id !== decision.source_comment_id),
+                  ],
+                }));
+                if (isRMatrixReviewer) {
+                  message.success("Рекомендация R сохранена: автор считает, что замечание не устранено");
+                  return;
+                }
+                const exists = comments.some(
+                  (c) =>
+                    c.parent_id === null &&
+                    c.text === item.text &&
+                    (c.review_code ?? null) === (item.review_code ?? null),
+                );
+                if (exists) {
+                  message.info("Такое замечание уже есть в текущей ревизии");
+                  return;
+                }
+                await createComment({
+                  revision_id: selectedRevisionId,
+                  text: item.text,
+                  status: "OPEN",
+                  review_code: item.review_code ?? null,
+                  page: item.page ?? null,
+                  area_x: item.area_x ?? null,
+                  area_y: item.area_y ?? null,
+                  area_w: item.area_w ?? null,
+                  area_h: item.area_h ?? null,
+                });
+                message.success("Решение LR: замечание возвращено в OPEN текущей ревизии");
+                const items = await listComments(selectedRevisionId);
+                setComments(items);
+              }
+            : undefined
+        }
         focusCommentId={pdfFocusCommentId}
-        canManageOwnerRemarks={canOwnerPublishToCrs}
+        canManageOwnerRemarks={canManageCarryOver}
+        carryActionMode={carryActionMode}
+        carryRHints={carryRHintsBySourceId}
         onCreated={async () => {
           if (selectedRevisionId) {
             const items = await listComments(selectedRevisionId);

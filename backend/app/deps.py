@@ -60,24 +60,57 @@ def require_roles(*roles: UserRole):
     return _checker
 
 
-def default_permissions_for_role(role: UserRole) -> dict[str, bool]:
+def default_permissions_for_role(
+    role: UserRole,
+    company_type: "CompanyType | None" = None,
+) -> dict[str, bool]:
+    # Admin keeps full access.
     if role == UserRole.admin:
         return {key: True for key in PERMISSION_KEYS}
-    return {
-        "can_manage_users": False,
-        "can_manage_projects": False,
-        "can_edit_project_references": False,
-        "can_manage_review_matrix": False,
-        "can_view_reporting": False,
-        "can_create_mdr": True,
-        "can_upload_files": True,
-        "can_comment": True,
-        "can_raise_comments": True,
-        "can_respond_comments": True,
-        "can_publish_comments": False,
-        "can_edit_workflow_statuses": False,
-        "can_process_tdo_queue": False,
-    }
+
+    # Non-admin defaults are role-scoped by company type so that a freshly
+    # created user only gets the actions their side of the process performs.
+    # Everything starts False; we enable only the relevant keys.
+    perms = {key: False for key in PERMISSION_KEYS}
+
+    if company_type == CompanyType.contractor:
+        # Contractor side: create MDR/documents/revisions, upload PDFs and
+        # respond to owner remarks. Contractors never raise owner remarks
+        # or publish CRS. TDO-queue processing is granted explicitly by an
+        # admin to the project's TDO lead (also guarded server-side).
+        perms.update(
+            {
+                "can_create_mdr": True,
+                "can_upload_files": True,
+                "can_comment": True,
+                "can_respond_comments": True,
+            }
+        )
+    elif company_type == CompanyType.owner:
+        # Owner side: raise remarks on revisions. Publishing CRS / acting as
+        # LR is granted explicitly by an admin (and guarded by the review
+        # matrix). Owners do not create MDR, upload files or respond.
+        perms.update(
+            {
+                "can_comment": True,
+                "can_raise_comments": True,
+            }
+        )
+    elif company_type is None:
+        # Backward-compatible fallback when company type is unknown: keep the
+        # previous broad non-admin default so existing callers don't regress.
+        perms.update(
+            {
+                "can_create_mdr": True,
+                "can_upload_files": True,
+                "can_comment": True,
+                "can_raise_comments": True,
+                "can_respond_comments": True,
+            }
+        )
+    # Any other company type (e.g. a read-only viewer) stays fully read-only.
+
+    return perms
 
 
 def get_effective_permissions(user: User) -> dict[str, bool]:
