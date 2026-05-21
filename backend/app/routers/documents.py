@@ -1464,6 +1464,7 @@ def set_revision_review_code(
         event_types=[
             "TDO_SENT_TO_OWNER",
             "OWNER_COMMENT_CREATED",
+            "CARRY_OVER_DECISION",
             "NEW_COMMENT",
             "COMMENT_RESPONSE",
             "OWNER_COMMENT_PUBLISHED",
@@ -1544,27 +1545,6 @@ def upsert_carry_decision(
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
-    existing = (
-        db.query(CarryOverDecision)
-        .filter(
-            CarryOverDecision.target_revision_id == revision.id,
-            CarryOverDecision.source_comment_id == payload.source_comment_id,
-        )
-        .first()
-    )
-    if existing is None:
-        existing = CarryOverDecision(
-            target_revision_id=revision.id,
-            source_comment_id=payload.source_comment_id,
-            status=payload.status,
-            decided_by_id=current_user.id,
-        )
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Carry-over decision is already locked for this remark",
-        )
-
     matrix_role = _owner_matrix_role_for_document(
         db,
         current_user=current_user,
@@ -1572,39 +1552,109 @@ def upsert_carry_decision(
         discipline_code=mdr.discipline_code,
         doc_type=mdr.doc_type,
     )
-    if matrix_role == "LR":
-        if payload.status == "CLOSED":
+    if current_user.role.value != "admin" and matrix_role not in {"LR", "R"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No matrix assignment for carry-over decision")
+
+    effective_status = payload.status
+    if matrix_role == "R":
+        effective_status = "R_CLOSED" if payload.status == "CLOSED" else "R_OPEN"
+
+    existing_final = (
+        db.query(CarryOverDecision)
+        .filter(
+            CarryOverDecision.target_revision_id == revision.id,
+            CarryOverDecision.source_comment_id == payload.source_comment_id,
+            CarryOverDecision.status.in_(["OPEN", "CLOSED"]),
+        )
+        .first()
+    )
+    existing = None
+    if matrix_role == "R":
+        existing = (
+            db.query(CarryOverDecision)
+            .filter(
+                CarryOverDecision.target_revision_id == revision.id,
+                CarryOverDecision.source_comment_id == payload.source_comment_id,
+                CarryOverDecision.decided_by_id == current_user.id,
+                CarryOverDecision.status.in_(["R_OPEN", "R_CLOSED"]),
+            )
+            .first()
+        )
+        if existing is None:
+            existing = CarryOverDecision(
+                target_revision_id=revision.id,
+                source_comment_id=payload.source_comment_id,
+                status=effective_status,
+                decided_by_id=current_user.id,
+            )
+        else:
+            existing.status = effective_status
+            existing.decided_at = datetime.utcnow()
+    else:
+        if existing_final is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Carry-over decision is already locked for this remark",
+            )
+        existing = CarryOverDecision(
+            target_revision_id=revision.id,
+            source_comment_id=payload.source_comment_id,
+            status=effective_status,
+            decided_by_id=current_user.id,
+        )
+        if effective_status == "CLOSED":
             source.carry_finalized = True
-        elif payload.status == "OPEN":
+        elif effective_status == "OPEN":
             source.carry_finalized = False
         db.add(source)
+
     db.add(existing)
-    if payload.status == "CLOSED" and matrix_role == "R":
-        lr_members = (
-            db.query(ReviewMatrixMember)
-            .filter(
-                ReviewMatrixMember.project_id == project.id,
-                ReviewMatrixMember.discipline_code == mdr.discipline_code,
-                ReviewMatrixMember.level == 1,
-                ReviewMatrixMember.state == "LR",
-            )
-            .all()
+    recipients = (
+        db.query(ReviewMatrixMember)
+        .filter(
+            ReviewMatrixMember.project_id == project.id,
+            ReviewMatrixMember.discipline_code == mdr.discipline_code,
+            ReviewMatrixMember.level == 1,
+            ReviewMatrixMember.state.in_(["LR", "R"]),
         )
-        lr_user_ids = {item.user_id for item in lr_members if item.user_id != current_user.id}
-        for user_id in lr_user_ids:
-            db.add(
-                Notification(
-                    user_id=user_id,
-                    event_type="OWNER_COMMENT_CREATED",
-                    message=(
-                        f"R подтвердил устранение carry-over замечания по документу {document.document_num}, "
-                        f"ревизия {revision.revision_code}. Требуется финальная проверка LR."
-                    ),
-                    project_code=mdr.project_code,
-                    document_num=document.document_num,
-                    revision_id=revision.id,
-                )
+        .all()
+    )
+    recipient_ids = {item.user_id for item in recipients if item.user_id != current_user.id}
+    decision_label = {
+        "OPEN": "не устранено",
+        "CLOSED": "устранено",
+        "R_OPEN": "автор считает не устранено",
+        "R_CLOSED": "автор считает устранено",
+    }.get(effective_status, effective_status)
+    actor_name = current_user.full_name or current_user.email
+    for user_id in recipient_ids:
+        db.add(
+            Notification(
+                user_id=user_id,
+                event_type="CARRY_OVER_DECISION",
+                message=(
+                    f"Carry-over по документу {document.document_num}, ревизия {revision.revision_code}: "
+                    f"{decision_label}. Действие: {actor_name}."
+                ),
+                project_code=mdr.project_code,
+                document_num=document.document_num,
+                revision_id=revision.id,
             )
+        )
+    if matrix_role == "R":
+        db.add(
+            Notification(
+                user_id=current_user.id,
+                event_type="CARRY_OVER_DECISION",
+                message=(
+                    f"Записана рекомендация R по carry-over: {decision_label}. "
+                    f"Документ {document.document_num}, ревизия {revision.revision_code}."
+                ),
+                project_code=mdr.project_code,
+                document_num=document.document_num,
+                revision_id=revision.id,
+            )
+        )
     db.commit()
     db.refresh(existing)
     return _carry_decision_read(existing, current_user)
@@ -1628,9 +1678,43 @@ def create_revision(
         .order_by(Revision.created_at.desc(), Revision.id.desc())
         .first()
     )
+    latest_effective_review_code: ReviewCode | None = None
+    if latest is not None:
+        if latest.review_code is not None:
+            latest_effective_review_code = latest.review_code
+        else:
+            # Fallback to calculated "worst" code from published parent remarks.
+            parent_codes = (
+                db.query(Comment.review_code)
+                .filter(
+                    Comment.revision_id == latest.id,
+                    Comment.parent_id.is_(None),
+                    Comment.is_published_to_contractor.is_(True),
+                    Comment.status != CommentStatus.REJECTED,
+                    Comment.review_code.isnot(None),
+                )
+                .all()
+            )
+            code_values: set[str] = set()
+            for item in parent_codes:
+                raw = item[0]
+                if raw is None:
+                    continue
+                normalized = str(raw.value if hasattr(raw, "value") else raw).upper().strip()
+                if normalized.startswith("REVIEWCODE."):
+                    normalized = normalized.split(".", 1)[1]
+                code_values.add(normalized)
+            if "RJ" in code_values:
+                latest_effective_review_code = ReviewCode.RJ
+            elif "CO" in code_values:
+                latest_effective_review_code = ReviewCode.CO
+            elif "AN" in code_values:
+                latest_effective_review_code = ReviewCode.AN
+            elif "AP" in code_values:
+                latest_effective_review_code = ReviewCode.AP
     allow_same_code_after_rj = (
         latest is not None
-        and latest.review_code == ReviewCode.RJ
+        and latest_effective_review_code == ReviewCode.RJ
         and payload.revision_code == latest.revision_code
         and payload.issue_purpose.upper() == latest.issue_purpose.upper()
     )
@@ -1642,20 +1726,20 @@ def create_revision(
     if duplicate is not None and not allow_same_code_after_rj:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Revision code already exists for document")
 
-    if latest is not None and latest.review_code is not None:
+    if latest is not None and latest_effective_review_code is not None:
         prev_purpose = (latest.issue_purpose or "").upper()
         next_purpose = (payload.issue_purpose or "").upper()
-        if latest.review_code in {ReviewCode.AN, ReviewCode.CO} and prev_purpose != next_purpose:
+        if latest_effective_review_code in {ReviewCode.AN, ReviewCode.CO} and prev_purpose != next_purpose:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="For AN/CO review code, next revision must keep same issue purpose",
             )
-        if latest.review_code == ReviewCode.AP and prev_purpose == next_purpose:
+        if latest_effective_review_code == ReviewCode.AP and prev_purpose == next_purpose:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="For AP review code, next revision must change issue purpose",
             )
-        if latest.review_code == ReviewCode.RJ and not allow_same_code_after_rj:
+        if latest_effective_review_code == ReviewCode.RJ and not allow_same_code_after_rj:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="For RJ review code, document must be reissued with same revision code and issue purpose",
@@ -2303,7 +2387,7 @@ def send_crs_comments(
                 db,
                 user_id=member_id,
                 revision_id=revision.id,
-                event_types=["TDO_SENT_TO_OWNER", "OWNER_COMMENT_CREATED", "NEW_COMMENT", "COMMENT_RESPONSE"],
+                event_types=["TDO_SENT_TO_OWNER", "OWNER_COMMENT_CREATED", "CARRY_OVER_DECISION", "NEW_COMMENT", "COMMENT_RESPONSE"],
             )
             (
                 db.query(Notification)
@@ -2316,6 +2400,7 @@ def send_crs_comments(
                         [
                             "TDO_SENT_TO_OWNER",
                             "OWNER_COMMENT_CREATED",
+                            "CARRY_OVER_DECISION",
                             "NEW_COMMENT",
                             "COMMENT_RESPONSE",
                             "OWNER_COMMENT_PUBLISHED",
@@ -2335,6 +2420,7 @@ def send_crs_comments(
             event_types=[
                 "TDO_SENT_TO_OWNER",
                 "OWNER_COMMENT_CREATED",
+                "CARRY_OVER_DECISION",
                 "NEW_COMMENT",
                 "COMMENT_RESPONSE",
                 "OWNER_COMMENT_PUBLISHED",
@@ -2448,7 +2534,7 @@ def create_comment(
         db,
         user_id=current_user.id,
         revision_id=rev.id,
-        event_types=["TDO_SENT_TO_OWNER", "OWNER_COMMENT_CREATED", "NEW_COMMENT"],
+        event_types=["TDO_SENT_TO_OWNER", "OWNER_COMMENT_CREATED", "CARRY_OVER_DECISION", "NEW_COMMENT"],
     )
 
     db.commit()
@@ -2708,7 +2794,7 @@ def owner_comment_decision(
             db,
             user_id=current_user.id,
             revision_id=revision.id,
-            event_types=["TDO_SENT_TO_OWNER", "OWNER_COMMENT_CREATED", "NEW_COMMENT"],
+            event_types=["TDO_SENT_TO_OWNER", "OWNER_COMMENT_CREATED", "CARRY_OVER_DECISION", "NEW_COMMENT"],
         )
     elif payload.action == "REJECT":
         if comment.in_crs:
@@ -2815,7 +2901,7 @@ def owner_comment_decision(
             project_code=mdr.project_code,
             document_num=document.document_num,
             revision_id=revision.id,
-            event_types=["COMMENT_RESPONSE", "OWNER_COMMENT_CREATED", "NEW_COMMENT"],
+            event_types=["COMMENT_RESPONSE", "OWNER_COMMENT_CREATED", "CARRY_OVER_DECISION", "NEW_COMMENT"],
         )
     db.add(comment)
     db.commit()
@@ -2925,14 +3011,14 @@ def publish_revision_comments_to_contractor(
             db,
             user_id=current_user.id,
             revision_id=revision.id,
-            event_types=["TDO_SENT_TO_OWNER", "OWNER_COMMENT_CREATED", "NEW_COMMENT"],
+            event_types=["TDO_SENT_TO_OWNER", "OWNER_COMMENT_CREATED", "CARRY_OVER_DECISION", "NEW_COMMENT"],
         )
         _archive_document_notifications(
             db,
             project_code=mdr.project_code,
             document_num=document.document_num,
             revision_id=revision.id,
-            event_types=["TDO_SENT_TO_OWNER", "OWNER_COMMENT_CREATED", "NEW_COMMENT", "COMMENT_RESPONSE"],
+            event_types=["TDO_SENT_TO_OWNER", "OWNER_COMMENT_CREATED", "CARRY_OVER_DECISION", "NEW_COMMENT", "COMMENT_RESPONSE"],
         )
     db.commit()
     return PublishCommentsResult(revision_id=revision_id, published_count=len(comments))
