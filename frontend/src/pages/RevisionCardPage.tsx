@@ -263,13 +263,14 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
         )}
         {(selectedRevision?.id === latestRevisionId && selectedRevision?.review_code !== "AP" && canSetApByRole) && (
           <Tooltip
-            title={
-              activePublishedRemarksCount > 0
-                ? `Нельзя поставить AP: активных замечаний ${activePublishedRemarksCount}`
-                : carryOpenCount > 0
-                ? `Нельзя поставить AP: в "Должны были устранить" осталось ${carryOpenCount}`
-                : "Все замечания закрыты/отклонены, можно поставить AP"
-            }
+            title={(() => {
+              const blocks: string[] = [];
+              if (activePublishedRemarksCount > 0) blocks.push(`${activePublishedRemarksCount} активных замечаний не закрыто`);
+              if (carryOpenCount > 0) blocks.push(`${carryOpenCount} пункт(а) в «Должны были устранить» без решения`);
+              return blocks.length > 0
+                ? `Нельзя поставить AP: ${blocks.join("; ")}`
+                : "Все замечания закрыты/отклонены — можно поставить AP";
+            })()}
           >
             <Button
               disabled={!canSetApForSelectedRevision}

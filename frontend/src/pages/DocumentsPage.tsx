@@ -989,15 +989,15 @@ export default function DocumentsPage({
               const apDisabled = !rowComments || activeCount > 0 || carryOpenCount > 0;
               return (
                 <Tooltip
-                  title={
-                    !rowComments
-                      ? "Проверяем замечания ревизии..."
-                      : activeCount > 0
-                      ? `Нельзя поставить AP: активных замечаний ${activeCount}`
-                      : carryOpenCount > 0
-                      ? `Нельзя поставить AP: в "Должны были устранить" осталось ${carryOpenCount}`
-                      : "Все замечания закрыты/отклонены, можно поставить AP"
-                  }
+                  title={(() => {
+                    if (!rowComments) return "Проверяем замечания ревизии...";
+                    const blocks: string[] = [];
+                    if (activeCount > 0) blocks.push(`${activeCount} активных замечаний не закрыто`);
+                    if (carryOpenCount > 0) blocks.push(`${carryOpenCount} пункт(а) в «Должны были устранить» без решения`);
+                    return blocks.length > 0
+                      ? `Нельзя поставить AP: ${blocks.join("; ")}`
+                      : "Все замечания закрыты/отклонены — можно поставить AP";
+                  })()}
                 >
                   <Button
                     size="small"
