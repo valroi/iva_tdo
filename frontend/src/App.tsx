@@ -3,14 +3,11 @@ import {
   BellOutlined,
   BarChartOutlined,
   FileSearchOutlined,
-  FileTextOutlined,
-  FolderOutlined,
   HomeOutlined,
   LogoutOutlined,
   ProjectOutlined,
   QuestionCircleOutlined,
   SafetyOutlined,
-  TableOutlined,
   TeamOutlined,
   UnorderedListOutlined,
 } from "@ant-design/icons";
@@ -152,12 +149,12 @@ export default function App(): JSX.Element {
   );
 
   const menuItems = useMemo(() => {
+    // Документы и ревизии открываются внутри проекта (Проекты → вкладки),
+    // а также по кнопкам «Открыть» из «Обзора» и уведомлений — отдельных
+    // пунктов меню для них нет, чтобы не дублировать точки входа.
     const items = [
       { key: "dashboard", icon: <HomeOutlined />, label: "Обзор" },
       { key: "projects", icon: <ProjectOutlined />, label: "Проекты" },
-      { key: "documents_registry", icon: <FolderOutlined />, label: "Документы" },
-      { key: "revisions", icon: <FileTextOutlined />, label: "Ревизии" },
-      { key: "trm", icon: <TableOutlined />, label: "TRM" },
       { key: "notifications", icon: <BellOutlined />, label: `Уведомления${unreadNotificationsCount ? ` (${unreadNotificationsCount})` : ""}` },
       { key: "sessions", icon: <SafetyOutlined />, label: "Сессии" },
       { key: "help", icon: <QuestionCircleOutlined />, label: "Инструкция" },
