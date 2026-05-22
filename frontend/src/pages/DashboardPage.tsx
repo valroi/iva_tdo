@@ -329,6 +329,7 @@ export default function DashboardPage({
           scroll={{ x: 1300 }}
           rowKey="id"
           onRow={(record) => ({ onDoubleClick: () => openByNotification(record) })}
+          locale={{ emptyText: "Нет текущих задач." }}
         />
       </Card>
       <Card title="Профиль и роли в проектах" className="hrp-card" style={{ marginTop: 16 }}>

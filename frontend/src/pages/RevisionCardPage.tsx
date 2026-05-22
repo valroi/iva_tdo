@@ -71,7 +71,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
         : null,
     [card?.revisions],
   );
-  const latestRevisionId = lastRevision?.id ?? null;
+  const latestRevisionId = latestByCreated?.id ?? null;
   const documentCompleted =
     (latestByCreated?.issue_purpose ?? "").toUpperCase() === "AFD" && latestByCreated?.review_code === "AP";
 
@@ -403,6 +403,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
           dataSource={card?.revisions ?? []}
           pagination={false}
           size="small"
+          locale={{ emptyText: "История ревизий пуста." }}
           columns={[
             { title: "Рев", width: 90, render: (_, row) => getDisplayRevisionCode(row, card?.revisions ?? []) },
             { title: "Цель", dataIndex: "issue_purpose", width: 120 },

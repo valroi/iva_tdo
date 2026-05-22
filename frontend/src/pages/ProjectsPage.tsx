@@ -513,7 +513,7 @@ export default function ProjectsPage({
                       </Button>
                     )}
                   </Space>
-                  <Table rowKey="id" columns={memberColumns} dataSource={members} pagination={false} />
+                  <Table rowKey="id" columns={memberColumns} dataSource={members} pagination={false} locale={{ emptyText: "Участники не добавлены." }} />
                 </>
               ),
             },
@@ -532,7 +532,7 @@ export default function ProjectsPage({
                       + Добавить строку матрицы
                     </Button>
                   </Space>
-                  <Table rowKey="id" columns={matrixColumns} dataSource={reviewMatrix} pagination={false} />
+                  <Table rowKey="id" columns={matrixColumns} dataSource={reviewMatrix} pagination={false} locale={{ emptyText: "Матрица назначений пуста." }} />
                 </>
               ),
                   },
@@ -652,6 +652,7 @@ export default function ProjectsPage({
                             columns={referenceColumns}
                             dataSource={references.filter((ref) => ref.ref_type === tab.key)}
                             pagination={false}
+                            locale={{ emptyText: "Справочник пуст." }}
                           />
                         </>
                       ),

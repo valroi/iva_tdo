@@ -505,12 +505,12 @@ export default function AdminPage({ currentUser, onGlobalReload }: Props): JSX.E
           {
             key: "users",
             label: "Пользователи",
-            children: <Table rowKey="id" loading={loading} columns={userColumns} dataSource={users} size="small" />,
+            children: <Table rowKey="id" loading={loading} columns={userColumns} dataSource={users} size="small" locale={{ emptyText: "Пользователи не найдены." }} />,
           },
           {
             key: "requests",
             label: "Заявки на регистрацию",
-            children: <Table rowKey="id" loading={loading} columns={requestColumns} dataSource={requests} size="small" />,
+            children: <Table rowKey="id" loading={loading} columns={requestColumns} dataSource={requests} size="small" locale={{ emptyText: "Заявок на регистрацию нет." }} />,
           },
           {
             key: "sla_settings",

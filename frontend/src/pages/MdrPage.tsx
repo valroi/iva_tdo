@@ -567,7 +567,7 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
           </Button>
         )}
       </Space>
-      <Table rowKey="id" columns={columns} dataSource={mdr} size="small" scroll={{ x: 1280 }} />
+      <Table rowKey="id" columns={columns} dataSource={mdr} size="small" scroll={{ x: 1280 }} locale={{ emptyText: "МДР пуст. Добавьте документы через кнопку выше." }} />
 
       <Modal
         open={open}

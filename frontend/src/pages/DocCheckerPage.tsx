@@ -712,6 +712,7 @@ export default function DocCheckerPage(): JSX.Element {
               },
             ]}
             scroll={{ x: 1700 }}
+            locale={{ emptyText: "Реестр документов пуст." }}
           />
         </Space>
       </Card>

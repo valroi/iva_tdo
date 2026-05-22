@@ -403,6 +403,7 @@ export default function ReportingPage({ projects, mdr }: Props): JSX.Element {
         dataSource={progressRows}
         pagination={false}
         scroll={{ x: "max-content" }}
+        locale={{ emptyText: "Нет данных для отчёта. Выберите проект и нажмите «Загрузить»." }}
         columns={[
           { title: "Документ", dataIndex: "document_num" },
           { title: "Название", dataIndex: "document_title" },
