@@ -87,7 +87,7 @@ DEFAULT_MARKS: list[tuple[str, str, str]] = [
 ]
 
 DEMO_ROLE_PRESET_PERMISSIONS: dict[str, dict[str, bool]] = {
-    "tdolead_ctr@mail.ru": {
+    "con_tdo@mail.ru": {
         "can_manage_users": False,
         "can_manage_projects": False,
         "can_edit_project_references": False,
@@ -102,7 +102,7 @@ DEMO_ROLE_PRESET_PERMISSIONS: dict[str, dict[str, bool]] = {
         "can_edit_workflow_statuses": False,
         "can_process_tdo_queue": True,
     },
-    "dev_ctr@mail.ru": {
+    "dev@mail.ru": {
         "can_manage_users": False,
         "can_manage_projects": False,
         "can_edit_project_references": False,
@@ -117,7 +117,7 @@ DEMO_ROLE_PRESET_PERMISSIONS: dict[str, dict[str, bool]] = {
         "can_edit_workflow_statuses": False,
         "can_process_tdo_queue": False,
     },
-    "owner_lr@mail.ru": {
+    "lr@mail.ru": {
         "can_manage_users": False,
         "can_manage_projects": False,
         "can_edit_project_references": False,
@@ -132,7 +132,7 @@ DEMO_ROLE_PRESET_PERMISSIONS: dict[str, dict[str, bool]] = {
         "can_edit_workflow_statuses": False,
         "can_process_tdo_queue": False,
     },
-    "owner_rev@mail.ru": {
+    "r@mail.ru": {
         "can_manage_users": False,
         "can_manage_projects": False,
         "can_edit_project_references": False,
@@ -265,10 +265,10 @@ def seed_default_data(db: Session) -> None:
 
     if settings.seed_demo_users:
         demo_users = [
-            ("tdolead_ctr@mail.ru", "Contractor TDO Lead", CompanyType.contractor),
-            ("dev_ctr@mail.ru", "Contractor Developer", CompanyType.contractor),
-            ("owner_lr@mail.ru", "Owner Lead Reviewer", CompanyType.owner),
-            ("owner_rev@mail.ru", "Owner Reviewer", CompanyType.owner),
+            ("con_tdo@mail.ru", "Рук тдо подрядчика", CompanyType.contractor),
+            ("dev@mail.ru", "Разработчик чертежей подрядчика", CompanyType.contractor),
+            ("lr@mail.ru", "Лидер Ревьювер Заказчика", CompanyType.owner),
+            ("r@mail.ru", "Простой ревьювер заказчика", CompanyType.owner),
         ]
         for email, full_name, company_type in demo_users:
             user = db.query(User).filter(User.email == email).first()

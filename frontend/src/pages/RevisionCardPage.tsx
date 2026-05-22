@@ -445,7 +445,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                       (currentUser.company_type === "owner" && !(row.status === "UNDER_REVIEW" || row.status === "OWNER_COMMENTS_SENT"))
                     }
                   >
-                    {currentUser.company_type === "contractor" ? "Открыть" : "Комментировать"}
+                    {isOwner(currentUser) ? "Комментировать" : "Открыть"}
                   </Button>
                   </Tooltip>
                   <Button
