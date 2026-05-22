@@ -26,36 +26,54 @@ export default function LoginForm({ onLoggedIn }: Props): JSX.Element {
   };
 
   return (
-    <Card style={{ maxWidth: 420, margin: "120px auto" }}>
-      <Typography.Title level={3} style={{ marginTop: 0 }}>
-        IvaMaris TDO
-      </Typography.Title>
-      <Typography.Paragraph>Вход по email/паролю.</Typography.Paragraph>
-
-      {error && (
-        <Alert
-          type="error"
-          message="Ошибка входа"
-          description={error}
-          style={{ marginBottom: 16 }}
-        />
-      )}
-
-      <Form
-        form={form}
-        layout="vertical"
-        onFinish={handleFinish}
+    <div
+      style={{
+        minHeight: "100vh",
+        background: "#f5f5f5",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <Card
+        style={{
+          width: 400,
+          boxShadow: "0 4px 24px rgba(0,0,0,0.10)",
+          border: "1px solid #e8e8e8",
+          borderRadius: 12,
+        }}
+        styles={{ body: { padding: "28px 28px 24px" } }}
       >
-        <Form.Item name="email" label="Email" rules={[{ required: true, type: "email" }]}>
-          <Input placeholder="admin@ivamaris.io" />
-        </Form.Item>
-        <Form.Item name="password" label="Пароль" rules={[{ required: true }]}>
-          <Input.Password placeholder="Введите пароль" />
-        </Form.Item>
-        <Button type="primary" htmlType="submit" block loading={loading}>
-          Войти
-        </Button>
-      </Form>
-    </Card>
+        <div style={{ marginBottom: 24 }}>
+          <Typography.Title level={4} style={{ margin: 0, fontSize: 18 }}>
+            IvaMaris TDO
+          </Typography.Title>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            Система управления документами
+          </Typography.Text>
+        </div>
+
+        {error && (
+          <Alert
+            type="error"
+            message={error}
+            style={{ marginBottom: 16, fontSize: 12 }}
+            showIcon
+          />
+        )}
+
+        <Form form={form} layout="vertical" onFinish={handleFinish}>
+          <Form.Item name="email" label="Email" rules={[{ required: true, type: "email" }]}>
+            <Input placeholder="your@email.com" autoComplete="email" />
+          </Form.Item>
+          <Form.Item name="password" label="Пароль" rules={[{ required: true }]} style={{ marginBottom: 20 }}>
+            <Input.Password placeholder="Пароль" autoComplete="current-password" />
+          </Form.Item>
+          <Button type="primary" htmlType="submit" block loading={loading} style={{ height: 36 }}>
+            Войти
+          </Button>
+        </Form>
+      </Card>
+    </div>
   );
 }

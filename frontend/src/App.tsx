@@ -1,18 +1,24 @@
 import {
+  AuditOutlined,
   BellOutlined,
+  BarChartOutlined,
   FileSearchOutlined,
+  FileTextOutlined,
+  FolderOutlined,
   HomeOutlined,
   LogoutOutlined,
   ProjectOutlined,
-  ReadOutlined,
+  QuestionCircleOutlined,
+  SafetyOutlined,
+  TableOutlined,
   TeamOutlined,
+  UnorderedListOutlined,
 } from "@ant-design/icons";
 import { Avatar, Breadcrumb, Button, Layout, Menu, Segmented, Space, Spin, Typography, message } from "antd";
 import { Component, useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   clearTokens,
-  getActiveProfileId,
   hasAccessToken,
   listDocuments,
   listMdr,
@@ -88,7 +94,6 @@ class UiErrorBoundary extends Component<{ children: JSX.Element }, { error: Erro
 }
 
 export default function App(): JSX.Element {
-  const profileId = useMemo(() => getActiveProfileId(), []);
   const [authenticated, setAuthenticated] = useState(hasAccessToken());
   const [loading, setLoading] = useState(false);
   const [activeSection, setActiveSection] = useState<Section>("dashboard");
@@ -150,25 +155,25 @@ export default function App(): JSX.Element {
     const items = [
       { key: "dashboard", icon: <HomeOutlined />, label: "Обзор" },
       { key: "projects", icon: <ProjectOutlined />, label: "Проекты" },
-      { key: "documents_registry", icon: <ReadOutlined />, label: "Документы" },
-      { key: "revisions", icon: <ReadOutlined />, label: "Ревизии" },
-      { key: "trm", icon: <ReadOutlined />, label: "TRM" },
+      { key: "documents_registry", icon: <FolderOutlined />, label: "Документы" },
+      { key: "revisions", icon: <FileTextOutlined />, label: "Ревизии" },
+      { key: "trm", icon: <TableOutlined />, label: "TRM" },
       { key: "notifications", icon: <BellOutlined />, label: `Уведомления${unreadNotificationsCount ? ` (${unreadNotificationsCount})` : ""}` },
-      { key: "sessions", icon: <LogoutOutlined />, label: "Сессии" },
-      { key: "help", icon: <ReadOutlined />, label: "Инструкция" },
+      { key: "sessions", icon: <SafetyOutlined />, label: "Сессии" },
+      { key: "help", icon: <QuestionCircleOutlined />, label: "Инструкция" },
     ];
 
     if (user?.permissions.can_manage_users) {
       items.push({ key: "admin", icon: <TeamOutlined />, label: "Администрирование" });
     }
     if (user?.permissions.can_view_reporting) {
-      items.push({ key: "reporting", icon: <ReadOutlined />, label: "Отчетность" });
+      items.push({ key: "reporting", icon: <BarChartOutlined />, label: "Отчетность" });
     }
     if (user?.permissions.can_process_tdo_queue) {
-      items.push({ key: "tdo_queue", icon: <ReadOutlined />, label: "Очередь ТРМ" });
+      items.push({ key: "tdo_queue", icon: <UnorderedListOutlined />, label: "Очередь ТРМ" });
     }
     if (user?.permissions.can_publish_comments) {
-      items.push({ key: "crs_queue", icon: <ReadOutlined />, label: "CRS" });
+      items.push({ key: "crs_queue", icon: <AuditOutlined />, label: "CRS" });
     }
 
     return items;
@@ -246,27 +251,28 @@ export default function App(): JSX.Element {
             <div className="sider-user-info">
               <div className="name">{user?.full_name}</div>
               <div className="email">{user?.email}</div>
-              <div className="email">profile: {profileId}</div>
             </div>
           </div>
         </Sider>
 
         <Layout className="app-main-layout">
           <Header className="app-header">
-            <Space style={{ justifyContent: "space-between", width: "100%" }}>
-              <div>
+            <Space style={{ justifyContent: "space-between", width: "100%", alignItems: "center" }}>
+              <div style={{ lineHeight: 1 }}>
                 <Breadcrumb
+                  style={{ marginBottom: 2 }}
                   items={[
                     { title: activeModule === "docchecker" ? "DOCchecker" : "DCC" },
                     { title: sectionTitleMap[activeSection] },
                   ]}
                 />
-                <Typography.Title level={4} style={{ margin: 0 }}>
+                <Typography.Title level={4} style={{ margin: 0, lineHeight: 1.2 }}>
                   {sectionTitleMap[activeSection]}
                 </Typography.Title>
               </div>
               <Button
                 icon={<LogoutOutlined />}
+                size="small"
                 onClick={() => {
                   clearTokens();
                   setAuthenticated(false);
