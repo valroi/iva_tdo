@@ -316,7 +316,6 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
             {(selectedRevision ?? lastRevision) ? (
               <Space direction="vertical" size={2}>
                 <Typography.Text strong>{getRuStatusLabel((selectedRevision ?? lastRevision)?.status ?? "")}</Typography.Text>
-                <Typography.Text type="secondary" style={{ fontSize: 12 }}>{(selectedRevision ?? lastRevision)?.status}</Typography.Text>
                 <Space size={6}>
                   <Typography.Text type="secondary">Код замечаний:</Typography.Text>
                   <Tag color={currentProcessStatus === "AP" ? "success" : "default"}>{currentProcessStatus}</Tag>
@@ -1177,7 +1176,15 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
           card?.current_user_matrix_role === "LR" ||
           card?.current_user_matrix_role === "R"
         }
-        noAccessHint="Вы не назначены рассматривающим (LR/R) по этому документу. Доступен только просмотр PDF и замечаний."
+        noAccessHint={
+          documentCompleted
+            ? "Документ финально согласован (AFD + AP). Добавление замечаний закрыто."
+            : !canOwnerCreateRemarks
+            ? "Вы не назначены рассматривающим (LR/R) по этому документу. Доступен только просмотр PDF и замечаний."
+            : !canCommentOnSelectedRevision
+            ? "Замечания можно добавлять только при статусе «На рассмотрении заказчиком». Доступен только просмотр PDF."
+            : "Нет прав для создания замечаний."
+        }
         focusCommentId={pdfFocusCommentId}
         carryActionMode={carryActionMode}
         carryRHints={carryRHintsBySourceId}

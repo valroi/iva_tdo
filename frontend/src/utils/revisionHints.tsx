@@ -39,47 +39,19 @@ export function RevisionStatusCell({
   currentUser: User | null | undefined;
   status: string;
 }): JSX.Element {
-  const ruLabelMap = RU_STATUS_LABEL;
-  const ruLabel = ruLabelMap[status] ?? status;
-  if (status === "CONTRACTOR_REPLY_I") {
+  const ruLabel = RU_STATUS_LABEL[status] ?? status;
+
+  if (contractorNeedsPdfReupload(currentUser, status)) {
     return (
       <Space direction="vertical" size={2}>
         <Typography.Text>{ruLabel}</Typography.Text>
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          CONTRACTOR_REPLY_I
+          Руководитель ТДО отклонил загрузку. Загрузите исправленный PDF (кнопка «PDF»).
         </Typography.Text>
+        <ContractorReuploadPdfTag />
       </Space>
     );
   }
-  if (status === "CONTRACTOR_REPLY_A") {
-    return (
-      <Space direction="vertical" size={2}>
-        <Typography.Text>{ruLabel}</Typography.Text>
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          CONTRACTOR_REPLY_A
-        </Typography.Text>
-      </Space>
-    );
-  }
-  if (!contractorNeedsPdfReupload(currentUser, status)) {
-    return (
-      <Space direction="vertical" size={2}>
-        <Typography.Text>{ruLabel}</Typography.Text>
-        {ruLabel !== status && (
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            {status}
-          </Typography.Text>
-        )}
-      </Space>
-    );
-  }
-  return (
-    <Space direction="vertical" size={2}>
-      <Typography.Text>{ruLabel}</Typography.Text>
-      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-        Руководитель ТДО отклонил загрузку. Загрузите исправленный PDF (кнопка «PDF»).
-      </Typography.Text>
-      <ContractorReuploadPdfTag />
-    </Space>
-  );
+
+  return <Typography.Text>{ruLabel}</Typography.Text>;
 }
