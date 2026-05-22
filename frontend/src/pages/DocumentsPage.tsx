@@ -79,6 +79,7 @@ import {
   shouldCarryRemark,
   type PreviousRevisionRemark,
 } from "../utils/workflowProgress";
+import { canCreateRevision, canUploadRevisionFiles, isContractor, isOwner } from "../utils/revisionActions";
 
 const workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
 pdfjs.GlobalWorkerOptions.workerSrc = `${workerSrc}?v=${pdfjs.version}`;
@@ -185,7 +186,6 @@ export default function DocumentsPage({
     if (ids.length === 1) return ids[0] ?? null;
     return projectMembers[0]?.project_id ?? null;
   }, [projectMembers]);
-  const currentCategory = (selectedMdr?.category ?? "").toUpperCase();
   const currentMemberRole = useMemo(
     () => projectMembers.find((m) => m.user_id === currentUser.id)?.member_role ?? null,
     [projectMembers, currentUser.id],
@@ -198,10 +198,8 @@ export default function DocumentsPage({
   );
   const latestRevision = useMemo(() => {
     if (!revisions.length) return null;
-    return [...revisions].sort((a, b) => {
-      if (a.created_at === b.created_at) return b.id - a.id;
-      return a.created_at < b.created_at ? 1 : -1;
-    })[0];
+    // Ревизии создаются последовательно — последняя = максимальный id.
+    return [...revisions].sort((a, b) => b.id - a.id)[0];
   }, [revisions]);
   const latestEffectiveReviewCode = useMemo(
     () => getRemarksSummaryLabel(latestRevisionComments, latestRevision?.review_code ?? null),
@@ -318,21 +316,8 @@ export default function DocumentsPage({
     RJ: "Ревизия не засчитывается. Перевыпуск в той же ревизии и с той же целью.",
   };
 
-  const issuePurposeOptions = useMemo(() => {
-    if (currentCategory === "PD") {
-      return ["IFR", "IFD"];
-    }
-    if (currentCategory === "DD") {
-      return ["IFR", "IFC"];
-    }
-    if (["PR", "PROCUREMENT", "PURCHASE", "SUPPLY", "PO"].includes(currentCategory)) {
-      return ["IFQ", "IFP", "AFP"];
-    }
-    if (["PM", "PROCEDURE", "MANAGEMENT"].includes(currentCategory)) {
-      return ["IFR", "IFU"];
-    }
-    return ["IFR", "IFD", "IFC", "IFQ", "IFP", "AFP", "IFU"];
-  }, [currentCategory]);
+  // Единая цепочка целей выпуска: IFR (на рассмотрение) → AFD (финальная, после AP).
+  const issuePurposeOptions = useMemo(() => ["IFR", "AFD"], []);
 
   const progressMilestones = useMemo(() => {
     const addDays = (value: string | null | undefined, days: number): string => {
@@ -345,7 +330,7 @@ export default function DocumentsPage({
     };
     const revA = revisions.find((rev) => rev.revision_code.toUpperCase() === "A" && rev.issue_purpose.toUpperCase() === "IFR") ?? null;
     const revB = revisions.find((rev) => rev.revision_code.toUpperCase() === "B" && rev.issue_purpose.toUpperCase() === "IFR") ?? null;
-    const rev00 = revisions.find((rev) => rev.revision_code === "00" && rev.issue_purpose.toUpperCase() === "IFD") ?? null;
+    const rev00 = revisions.find((rev) => rev.revision_code === "00" && rev.issue_purpose.toUpperCase() === "AFD") ?? null;
     const planStart = selectedMdr?.planned_dev_start ?? null;
     const ownerReviewDays = adminSla?.owner_specialist_review_days ?? 8;
     const contractorConsiderDays = adminSla?.contractor_consideration_days ?? 2;
@@ -357,14 +342,15 @@ export default function DocumentsPage({
     const plan90 = plan85 !== "—" ? addDays(plan85, resolveCycleDays(revB?.issue_purpose ?? "IFR")) : "—";
     const plan100 = plan90 !== "—" ? addDays(plan90, ownerReviewDays) : "—";
     const cycles85 = revisions.filter((rev) => rev.review_code && rev.review_code !== "AP").length;
-    const latestReviewCode = [...revisions].reverse().find((rev) => rev.review_code)?.review_code ?? null;
+    // revisions приходят по id убыванию (новые сверху) → первый с review_code = последний.
+    const latestReviewCode = [...revisions].sort((a, b) => b.id - a.id).find((rev) => rev.review_code)?.review_code ?? null;
     const contractorFixDaysByCode =
       latestReviewCode === "AN"
         ? adminSla?.contractor_an_issue_days ?? 5
         : latestReviewCode === "CO" || latestReviewCode === "RJ"
           ? adminSla?.contractor_co_rj_issue_days ?? 8
           : adminSla?.contractor_ap_issue_days ?? 2;
-    const latestCreated = revisions.length > 0 ? revisions[revisions.length - 1].created_at : null;
+    const latestCreated = latestRevision?.created_at ?? null;
     const forecast100 =
       latestRevision?.status === "CONTRACTOR_REPLY_I"
         ? addDays(latestCreated, contractorConsiderDays)
@@ -436,7 +422,7 @@ export default function DocumentsPage({
           "—",
         fact: `${revB?.status === "OWNER_COMMENTS_SENT" || revB?.status === "CONTRACTOR_REPLY_A" || revB?.status === "SUBMITTED" ? formatDateTimeRu(revB.created_at) : "—"}${cycles85 > 0 ? ` · циклов: ${cycles85}` : ""}${latestReviewCode ? ` · код: ${latestReviewCode}` : ""}`,
       },
-      { key: "90", step: "Выпуск ревизии 00 (IFD)", progress: "90%", plan: formatDateRu(plan90), forecast: formatDateRu(plan90), trm: rev00?.trm_number ?? "—", fact: factBySentToOwner(rev00) },
+      { key: "90", step: "Выпуск ревизии 00 (AFD)", progress: "90%", plan: formatDateRu(plan90), forecast: formatDateRu(plan90), trm: rev00?.trm_number ?? "—", fact: factBySentToOwner(rev00) },
       {
         key: "100",
         step: "Получение согласования от заказчика",
@@ -711,10 +697,7 @@ export default function DocumentsPage({
     }
     const previous = revisions
       .filter((item) => isOlderRevision(item, selectedRevision))
-      .sort((a, b) => {
-        if (a.created_at === b.created_at) return b.id - a.id;
-        return a.created_at < b.created_at ? 1 : -1;
-      })[0];
+      .sort((a, b) => b.id - a.id)[0];
     if (!previous) {
       setPreviousRevisionRemarks([]);
       return;
@@ -740,11 +723,8 @@ export default function DocumentsPage({
 
   useEffect(() => {
     if (!revModalOpen) return;
-    const canUseIfd = issuePurposeOptions.includes("IFD");
-    const defaultPurpose =
-      latestRevision?.review_code === "AP" && canUseIfd
-        ? "IFD"
-        : issuePurposeOptions[0] ?? "IFR";
+    // После IFR+AP следующая (финальная) ревизия выпускается с целью AFD.
+    const defaultPurpose = latestRevision?.review_code === "AP" ? "AFD" : "IFR";
     revForm.setFieldValue("issue_purpose", defaultPurpose);
     applyAutoRevision(defaultPurpose);
   }, [revModalOpen, selectedDocumentId, issuePurposeOptions, revisions, latestRevision?.review_code]);
@@ -920,15 +900,11 @@ export default function DocumentsPage({
           >
             Файлы
           </Button>
-          {currentUser.permissions.can_upload_files && (
+          {canUploadRevisionFiles(currentUser, row.status) && (
             <Button
               size="small"
               icon={<UploadOutlined />}
-              disabled={
-                selectedDocumentCompleted ||
-                currentUser.company_type === "contractor" &&
-                !["REVISION_CREATED", "UPLOADED_WAITING_TDO", "CANCELLED_BY_TDO"].includes(row.status)
-              }
+              disabled={selectedDocumentCompleted}
               onClick={() => {
                 setSelectedRevisionId(row.id);
                 setUploadFile(null);
@@ -938,7 +914,7 @@ export default function DocumentsPage({
               PDF
             </Button>
           )}
-          {currentUser.permissions.can_process_tdo_queue && (
+          {isContractor(currentUser) && currentUser.permissions.can_process_tdo_queue && (
             <>
               <Button
                 size="small"
@@ -970,7 +946,7 @@ export default function DocumentsPage({
           )}
           {(row.id === latestRevision?.id &&
             row.review_code !== "AP" &&
-            (currentUser.role === "admin" || (currentUser.company_type === "owner" && currentUser.permissions.can_publish_comments))) &&
+            isOwner(currentUser) && currentUser.permissions.can_publish_comments) &&
             (() => {
               const rowComments = commentsByRevision[row.id];
               const activeCount = (rowComments ?? []).filter(
@@ -1291,10 +1267,7 @@ export default function DocumentsPage({
       revForm.resetFields();
       const items = await listRevisions(selectedDocumentId);
       setRevisions(items);
-      const nextSelected = [...items].sort((a, b) => {
-        if (a.created_at === b.created_at) return b.id - a.id;
-        return a.created_at < b.created_at ? 1 : -1;
-      })[0];
+      const nextSelected = [...items].sort((a, b) => b.id - a.id)[0];
       if (nextSelected) {
         setSelectedRevisionId(nextSelected.id);
       }
@@ -1358,7 +1331,7 @@ export default function DocumentsPage({
         <Typography.Title level={4} style={{ margin: 0 }}>
           Ревизии и комментарии
         </Typography.Title>
-        {currentUser.permissions.can_upload_files && (
+        {canCreateRevision(currentUser) && (
           <Tooltip
             title={
               latestRevisionInProgress
@@ -1376,15 +1349,15 @@ export default function DocumentsPage({
             </span>
           </Tooltip>
         )}
-        {currentUser.permissions.can_raise_comments && (
+        {isOwner(currentUser) && currentUser.permissions.can_raise_comments && (
           <Tooltip
             title={
               !selectedRevisionId
                 ? "Выберите ревизию в таблице"
                 : !selectedRevision?.file_path
                 ? "PDF ещё не загружен"
-                : ownerCommentLocked
-                ? "Замечания заблокированы — CRS уже отправлен подрядчику"
+                : selectedRevision?.status !== "UNDER_REVIEW"
+                ? "Замечания можно добавлять только пока ревизия на рассмотрении заказчиком"
                 : selectedDocumentCompleted
                 ? "Документ финально согласован — редактирование закрыто"
                 : "Открыть PDF и добавить замечание к выбранной ревизии"
@@ -1393,7 +1366,13 @@ export default function DocumentsPage({
             <span>
               <Button
                 onClick={() => setPdfAnnotatorOpen(true)}
-                disabled={!selectedRevisionId || ownerCommentLocked || selectedDocumentCompleted || !selectedRevision?.file_path}
+                disabled={
+                  !selectedRevisionId ||
+                  selectedRevision?.status !== "UNDER_REVIEW" ||
+                  ownerCommentLocked ||
+                  selectedDocumentCompleted ||
+                  !selectedRevision?.file_path
+                }
               >
                 + Вопрос/замечание
               </Button>

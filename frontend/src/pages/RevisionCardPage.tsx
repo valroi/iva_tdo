@@ -10,6 +10,7 @@ import { formatDateTimeRu } from "../utils/datetime";
 import { ContractorReuploadPdfTag, RevisionStatusCell, contractorNeedsPdfReupload, getRuStatusLabel } from "../utils/revisionHints";
 import { getCleanRemarkText, getDisplayRevisionCode, getRemarksSummaryLabel } from "../utils/revisionProcess";
 import { PROCESS_STEPS, getProcessCurrentStep, isOwnerCommentingAllowedStatus } from "../utils/workflowProgress";
+import { canUploadRevisionFiles, isOwner } from "../utils/revisionActions";
 
 interface Props {
   revisionId: number;
@@ -60,20 +61,19 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
     () => getRemarksSummaryLabel(selectedRevisionComments, selectedRevision?.review_code ?? null),
     [selectedRevisionComments, selectedRevision?.review_code],
   );
-  const lastRevision = useMemo(
-    () => (card?.revisions.length ? card.revisions[card.revisions.length - 1] : null),
-    [card?.revisions],
-  );
-  const latestByCreated = useMemo(
+  // Ревизии создаются строго последовательно, поэтому id монотонен.
+  // «Последняя» ревизия = ревизия с максимальным id (created_at ненадёжен).
+  const latestRevision = useMemo(
     () =>
       card?.revisions.length
-        ? [...card.revisions].sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : b.id - a.id))[0]
+        ? [...card.revisions].sort((a, b) => a.id - b.id)[card.revisions.length - 1]
         : null,
     [card?.revisions],
   );
-  const latestRevisionId = latestByCreated?.id ?? null;
+  const lastRevision = latestRevision;
+  const latestRevisionId = latestRevision?.id ?? null;
   const documentCompleted =
-    (latestByCreated?.issue_purpose ?? "").toUpperCase() === "AFD" && latestByCreated?.review_code === "AP";
+    (latestRevision?.issue_purpose ?? "").toUpperCase() === "AFD" && latestRevision?.review_code === "AP";
 
   const filteredHistory = useMemo(() => {
     if (!card?.history) return [];
@@ -121,11 +121,11 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
   const canCommentOnSelectedRevision = isOwnerCommentingAllowedStatus(selectedRevision?.status);
   const isSelectedRevisionClosedForPdfUpdate =
     selectedRevision?.status === "CONTRACTOR_REPLY_A" || selectedRevision?.status === "SUBMITTED";
+  // AP ставит только LR/R заказчика. Администратор — наблюдатель, AP не ставит.
   const canSetApByRole =
-    currentUser.role === "admin" ||
-    (currentUser.company_type === "owner" &&
-      currentUser.permissions.can_publish_comments &&
-      (card?.current_user_matrix_role === "LR" || card?.current_user_matrix_role === "R"));
+    currentUser.company_type === "owner" &&
+    currentUser.permissions.can_publish_comments &&
+    (card?.current_user_matrix_role === "LR" || card?.current_user_matrix_role === "R");
   const activePublishedRemarksCount = selectedRevisionComments.filter(
     (comment) =>
       comment.parent_id === null &&
@@ -245,10 +245,10 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
               (currentUser.company_type === "owner" && !canCommentOnSelectedRevision)
             }
           >
-            {currentUser.company_type === "contractor" ? "Открыть PDF" : "Комментировать PDF"}
+            {isOwner(currentUser) ? "Комментировать PDF" : "Открыть PDF"}
           </Button>
         </Tooltip>
-        {currentUser.permissions.can_upload_files && (
+        {canUploadRevisionFiles(currentUser, selectedRevision?.status) && (
           <Tooltip title={isSelectedRevisionClosedForPdfUpdate ? "По этой ревизии цикл завершен. Создайте следующую ревизию для новой загрузки PDF." : "Загрузить или заменить основной PDF выбранной ревизии"}>
             <Button
               icon={<UploadOutlined />}
@@ -461,7 +461,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                   >
                     Файлы
                   </Button>
-                  {currentUser.permissions.can_upload_files && (
+                  {canUploadRevisionFiles(currentUser, row.status) && (
                     <Button
                       size="small"
                       icon={<UploadOutlined />}
@@ -480,7 +480,6 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
           ]}
           tableLayout="fixed"
           scroll={{ x: 1080 }}
-          locale={{ emptyText: "История ревизий пуста." }}
         />
       </Card>
 
@@ -502,9 +501,11 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
           locale={{ emptyText: "По этой ревизии пока нет комментариев." }}
           expandable={{
             expandedRowRender: (row) => {
+              // Управление замечаниями/CRS из карточки — только LR/R заказчика.
               const canManageFromCard =
+                isOwner(currentUser) &&
                 currentUser.permissions.can_publish_comments &&
-                (currentUser.role === "admin" || card?.current_user_matrix_role === "LR" || card?.current_user_matrix_role === "R") &&
+                (card?.current_user_matrix_role === "LR" || card?.current_user_matrix_role === "R") &&
                 !documentCompleted;
               const isLatestRow = latestRevisionId !== null && row.revision_id === latestRevisionId;
               const rowComments =

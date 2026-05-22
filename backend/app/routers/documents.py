@@ -94,7 +94,7 @@ def _is_completed_document(db: Session, document_id: int) -> bool:
     latest = (
         db.query(Revision)
         .filter(Revision.document_id == document_id)
-        .order_by(Revision.created_at.desc(), Revision.id.desc())
+        .order_by(Revision.id.desc())
         .first()
     )
     if latest is None:
@@ -450,7 +450,7 @@ def list_tdo_queue(
         .join(MDRRecord, MDRRecord.id == Document.mdr_id)
         .outerjoin(User, User.id == Revision.author_id)
         .filter(MDRRecord.project_code.in_(allowed_codes), Revision.status == "UPLOADED_WAITING_TDO")
-        .order_by(Revision.created_at.asc())
+        .order_by(Revision.id.asc())
         .all()
     )
     result: list[TdoQueueItem] = []
@@ -499,7 +499,7 @@ def list_revisions_overview(
         query = query.filter(MDRRecord.project_code.in_(allowed_project_codes))
     if current_user.role.value != "admin" and current_user.company_type == CompanyType.owner:
         query = query.filter(Revision.status.in_(OWNER_VISIBLE_REVISION_STATUSES))
-    rows = query.order_by(Revision.created_at.desc()).all()
+    rows = query.order_by(Revision.id.desc()).all()
     return [
         RevisionOverviewRead(
             revision_id=revision.id,
@@ -766,7 +766,7 @@ def list_documents(db: Session = Depends(get_db), current_user: User = Depends(g
         latest = (
             db.query(Revision)
             .filter(Revision.document_id == doc.id)
-            .order_by(Revision.created_at.desc(), Revision.id.desc())
+            .order_by(Revision.id.desc())
             .first()
         )
         if current_user.role.value != "admin" and current_user.company_type == CompanyType.owner:
@@ -822,7 +822,7 @@ def list_documents_registry(
         revisions = (
             db.query(Revision)
             .filter(Revision.document_id == doc.id)
-            .order_by(Revision.created_at.desc(), Revision.id.desc())
+            .order_by(Revision.id.desc())
             .all()
         )
         if current_user.role.value != "admin" and current_user.company_type == CompanyType.owner:
@@ -968,7 +968,7 @@ def get_document(document_id: int, db: Session = Depends(get_db), current_user: 
     latest = (
         db.query(Revision)
         .filter(Revision.document_id == doc.id)
-        .order_by(Revision.created_at.desc(), Revision.id.desc())
+        .order_by(Revision.id.desc())
         .first()
     )
     if current_user.role.value != "admin" and current_user.company_type == CompanyType.owner:
@@ -1112,7 +1112,7 @@ def list_document_attachments(
     latest_revision = (
         db.query(Revision)
         .filter(Revision.document_id == document.id)
-        .order_by(Revision.created_at.desc(), Revision.id.desc())
+        .order_by(Revision.id.desc())
         .first()
     )
     if latest_revision is not None and not _owner_can_access_revision(current_user, latest_revision):
@@ -1244,7 +1244,7 @@ def download_document_attachments_archive(
     latest_revision = (
         db.query(Revision)
         .filter(Revision.document_id == document.id)
-        .order_by(Revision.created_at.desc(), Revision.id.desc())
+        .order_by(Revision.id.desc())
         .first()
     )
     if latest_revision is not None and not _owner_can_access_revision(current_user, latest_revision):
@@ -1417,7 +1417,7 @@ def set_revision_review_code(
     latest_revision = (
         db.query(Revision)
         .filter(Revision.document_id == revision.document_id)
-        .order_by(Revision.created_at.desc(), Revision.id.desc())
+        .order_by(Revision.id.desc())
         .first()
     )
     if latest_revision is None or latest_revision.id != revision.id:
@@ -1675,7 +1675,7 @@ def create_revision(
     latest = (
         db.query(Revision)
         .filter(Revision.document_id == payload.document_id)
-        .order_by(Revision.created_at.desc(), Revision.id.desc())
+        .order_by(Revision.id.desc())
         .first()
     )
     latest_effective_review_code: ReviewCode | None = None
@@ -3069,7 +3069,7 @@ def get_revision_card(
     revisions = (
         db.query(Revision)
         .filter(Revision.document_id == document.id)
-        .order_by(Revision.created_at.asc(), Revision.id.asc())
+        .order_by(Revision.id.asc())
         .all()
     )
     developer_user = db.query(User).filter(User.id == (revision.author_id or document.created_by_id)).first()
@@ -3152,7 +3152,7 @@ def get_revision_card(
         None,
     )
     rev_00 = next(
-        (item for item in revisions if (item.revision_code or "") == "00" and (item.issue_purpose or "").upper() == "IFD"),
+        (item for item in revisions if (item.revision_code or "") == "00" and (item.issue_purpose or "").upper() == "AFD"),
         None,
     )
 

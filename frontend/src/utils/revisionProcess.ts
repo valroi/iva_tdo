@@ -64,12 +64,8 @@ export function getDisplayRevisionCode(current: RevisionCodeCarrier, all?: Revis
     const nonIfr = all
       .filter((item) => String(item.issue_purpose ?? "").trim().toUpperCase() !== "IFR")
       .slice()
-      .sort((a, b) => {
-        const at = new Date(a.created_at ?? "").getTime();
-        const bt = new Date(b.created_at ?? "").getTime();
-        if (!Number.isNaN(at) && !Number.isNaN(bt) && at !== bt) return at - bt;
-        return Number(a.id ?? 0) - Number(b.id ?? 0);
-      });
+      // Ревизии создаются последовательно — порядок по id надёжнее created_at.
+      .sort((a, b) => Number(a.id ?? 0) - Number(b.id ?? 0));
     const index = nonIfr.findIndex((item) => Number(item.id ?? -1) === Number(current.id ?? -2));
     if (index >= 0) return String(index).padStart(2, "0");
   }

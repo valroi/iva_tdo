@@ -43,7 +43,8 @@ export function shouldCarryRemark(status: string): boolean {
 
 export function isOlderRevision(revision: Revision, selected: Revision | null): boolean {
   if (!selected) return false;
-  return revision.created_at < selected.created_at;
+  // Ревизии создаются последовательно — id монотонен и надёжнее created_at.
+  return revision.id < selected.id;
 }
 
 export function isOwnerCommentLockedStatus(status: string | null | undefined): boolean {
