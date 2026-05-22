@@ -6,6 +6,7 @@ import { downloadRevisionAttachmentsArchive, listTdoQueue, processRevisionsTdoDe
 import ProcessHint from "../components/ProcessHint";
 import type { TdoQueueItem, User } from "../types";
 import { formatDateTimeRu } from "../utils/datetime";
+import { getRuStatusLabel } from "../utils/revisionHints";
 import { getDisplayRevisionCode } from "../utils/revisionProcess";
 
 interface Props {
@@ -44,7 +45,7 @@ export default function TdoQueuePage({ currentUser, onReload, onOpenRevision }: 
     { title: "Название", dataIndex: "document_title", key: "document_title" },
     { title: "Рев", key: "revision_code", width: 70, render: (_, row) => getDisplayRevisionCode(row) },
     { title: "Цель", dataIndex: "issue_purpose", key: "issue_purpose", width: 80 },
-    { title: "Статус", dataIndex: "status", key: "status", width: 220 },
+    { title: "Статус", dataIndex: "status", key: "status", width: 220, render: (v: string) => getRuStatusLabel(v) },
     { title: "Срок", dataIndex: "review_deadline", key: "review_deadline", width: 130, render: (v: string | null) => formatDateTimeRu(v) },
     {
       title: "Ссылка",

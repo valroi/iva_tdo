@@ -10,6 +10,7 @@ import {
   ContractorReuploadPdfTag,
   RevisionStatusCell,
   contractorNeedsPdfReupload,
+  getRuStatusLabel,
 } from "../utils/revisionHints";
 import { getDisplayRevisionCode, getRemarksSummaryLabel } from "../utils/revisionProcess";
 
@@ -105,10 +106,10 @@ export default function DocumentsRegistryPage({ currentUser, onOpenRevision, pre
       title: "Последний статус",
       dataIndex: "latest_revision_status",
       width: 200,
-      render: (v) =>
+      render: (v: string | null) =>
         v ? (
           <Space direction="vertical" size={2}>
-            <Typography.Text>{v}</Typography.Text>
+            <Typography.Text>{getRuStatusLabel(v)}</Typography.Text>
             {contractorNeedsPdfReupload(currentUser, v) && <ContractorReuploadPdfTag />}
           </Space>
         ) : (
@@ -263,7 +264,7 @@ export default function DocumentsRegistryPage({ currentUser, onOpenRevision, pre
             allowClear
             placeholder="Шаг воркфлоу"
             style={{ width: 180 }}
-            options={["REVISION_CREATED", "UPLOADED_WAITING_TDO", "UNDER_REVIEW", "CANCELLED_BY_TDO", "SUBMITTED"].map((value) => ({ value, label: value }))}
+            options={["REVISION_CREATED", "UPLOADED_WAITING_TDO", "UNDER_REVIEW", "CANCELLED_BY_TDO", "SUBMITTED"].map((value) => ({ value, label: getRuStatusLabel(value) }))}
             onChange={(value) => setFilters((prev) => ({ ...prev, revision_status: value ?? undefined }))}
           />
           <Select

@@ -3,6 +3,7 @@ import type { ColumnsType } from "antd/es/table";
 import { useEffect, useState } from "react";
 import { listDocumentsRegistry, listOwnerReviewQueue, listProjectMembers, listReviewMatrix, listRevisionsOverview } from "../api";
 import { formatDateTimeRu } from "../utils/datetime";
+import { getRuStatusLabel } from "../utils/revisionHints";
 
 import type { DocumentItem, DocumentRegistryItem, MDRRecord, NotificationItem, ProjectItem, ProjectMemberRole, RevisionOverviewItem, TdoQueueItem, User } from "../types";
 
@@ -257,7 +258,7 @@ export default function DashboardPage({
     { title: "Проект", dataIndex: "project_code", width: 110 },
     { title: "Документ", dataIndex: "document_num", ellipsis: true },
     { title: "Ревизия", dataIndex: "revision_code", width: 90 },
-    { title: "Статус", dataIndex: "status", width: 190 },
+    { title: "Статус", dataIndex: "status", width: 190, render: (v: string) => getRuStatusLabel(v) },
     { title: "SLA дедлайн", dataIndex: "review_deadline", width: 130, render: (v) => formatDateTimeRu(v) },
     {
       title: "Осталось",
