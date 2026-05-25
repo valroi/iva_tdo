@@ -14,7 +14,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.deps import get_current_user, require_permissions, users_by_company_types
+from app.deps import get_current_user, get_effective_permissions, require_permissions, users_by_company_types
 from app.models import (
     Comment,
     CarryOverDecision,
@@ -795,9 +795,13 @@ def list_documents_registry(
     revision_status: str | None = Query(default=None),
     comments_scope: str | None = Query(default=None, pattern="^(ANY|OPEN|NONE)$"),
     overdue_only: bool = Query(default=False),
+    for_reporting: bool = Query(default=False),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # Для отчётности заказчику показываем все ревизии проекта (включая
+    # pre-owner статусы), чтобы корректно строить план/факт по всему циклу.
+    bypass_owner_filter = for_reporting and bool(get_effective_permissions(current_user).get("can_view_reporting"))
     docs_query = db.query(Document).join(MDRRecord, MDRRecord.id == Document.mdr_id)
     if current_user.role.value != "admin":
         allowed_codes = (
@@ -825,10 +829,10 @@ def list_documents_registry(
             .order_by(Revision.id.desc())
             .all()
         )
-        if current_user.role.value != "admin" and current_user.company_type == CompanyType.owner:
+        if current_user.role.value != "admin" and current_user.company_type == CompanyType.owner and not bypass_owner_filter:
             revisions = [item for item in revisions if item.status in OWNER_VISIBLE_REVISION_STATUSES]
         latest = revisions[0] if revisions else None
-        if current_user.role.value != "admin" and current_user.company_type == CompanyType.owner and latest is None:
+        if current_user.role.value != "admin" and current_user.company_type == CompanyType.owner and not bypass_owner_filter and latest is None:
             continue
 
         if project_code and mdr.project_code != project_code:

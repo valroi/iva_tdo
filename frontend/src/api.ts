@@ -264,6 +264,7 @@ export function listDocumentsRegistry(filters?: {
   revision_status?: string;
   comments_scope?: "ANY" | "OPEN" | "NONE";
   overdue_only?: boolean;
+  for_reporting?: boolean;
 }): Promise<DocumentRegistryItem[]> {
   const search = new URLSearchParams();
   if (filters?.project_code) search.set("project_code", filters.project_code);
@@ -274,6 +275,7 @@ export function listDocumentsRegistry(filters?: {
   if (filters?.revision_status) search.set("revision_status", filters.revision_status);
   if (filters?.comments_scope) search.set("comments_scope", filters.comments_scope);
   if (filters?.overdue_only) search.set("overdue_only", "true");
+  if (filters?.for_reporting) search.set("for_reporting", "true");
   const suffix = search.toString() ? `?${search.toString()}` : "";
   return request<DocumentRegistryItem[]>(`/documents/registry${suffix}`);
 }

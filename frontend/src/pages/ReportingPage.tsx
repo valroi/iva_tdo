@@ -1,84 +1,128 @@
-import { Card, Empty, Select, Space, Table, Typography } from "antd";
+import { Card, Empty, Select, Space, Statistic, Typography } from "antd";
 import { useEffect, useMemo, useState } from "react";
+import {
+  CartesianGrid,
+  Legend,
+  Line,
+  LineChart,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
-import { getAdminReviewSlaSettings, listDocumentsRegistry, listProjectReferences } from "../api";
-import type { DocumentRegistryItem, MDRRecord, ProjectItem } from "../types";
-import { formatDateTimeRu } from "../utils/datetime";
+import { getAdminReviewSlaSettings, listDocumentsRegistry } from "../api";
+import type { DocumentRegistryItem, MDRRecord, ProjectItem, RegistryRevisionItem } from "../types";
 
 interface Props {
   projects: ProjectItem[];
   mdr: MDRRecord[];
 }
 
-const DEFAULT_PLANNED_DURATION_DAYS = 14;
+interface AdminSla {
+  owner_specialist_review_days: number;
+  contractor_co_rj_issue_days: number;
+  owner_final_approval_days: number;
+}
+
+// Фиксированные веса этапов жизненного цикла документа.
+// Накопительный прогресс одного документа = STAGES[k].weight × doc.weight / 100.
+const STAGES = [
+  { weight: 70, title: "Выпуск ревизии A (IFR)" },
+  { weight: 75, title: "Рассмотрение ревизии A заказчиком" },
+  { weight: 80, title: "Выпуск ревизии B (IFR)" },
+  { weight: 85, title: "Циклы рассмотрения до AP" },
+  { weight: 90, title: "Выпуск ревизии 00 (AFD)" },
+  { weight: 100, title: "Получение AP по AFD" },
+] as const;
+
+const PLAN_INITIAL_DAYS = 20; // план — длительность от planned_dev_start до выпуска A
 
 function toDate(value: string | null | undefined): Date | null {
   if (!value) return null;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return parsed;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
-function toIsoDate(value: Date | null): string | null {
-  if (!value) return null;
-  return value.toISOString().slice(0, 10);
+function addDays(d: Date, days: number): Date {
+  const r = new Date(d);
+  r.setDate(r.getDate() + days);
+  return r;
 }
 
-function formatDateRu(value: Date | null): string {
-  if (!value) return "—";
-  const dd = String(value.getDate()).padStart(2, "0");
-  const mm = String(value.getMonth() + 1).padStart(2, "0");
-  const yyyy = String(value.getFullYear());
-  return `${dd}.${mm}.${yyyy}`;
+function toIso(d: Date): string {
+  return d.toISOString().slice(0, 10);
 }
 
-function addDays(date: Date | null, days: number): Date | null {
-  if (!date) return null;
-  const dt = new Date(date);
-  dt.setDate(dt.getDate() + days);
-  return dt;
+function formatDateRu(d: Date): string {
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  return `${dd}.${mm}.${d.getFullYear()}`;
 }
 
-function diffDays(a: Date, b: Date): number {
-  const ms = b.getTime() - a.getTime();
-  return Math.max(0, ms / (1000 * 60 * 60 * 24));
+// Плановые даты 6 этапов для документа (с учётом SLA-настроек).
+function plannedStageDates(item: DocumentRegistryItem, sla: AdminSla | null): (Date | null)[] {
+  const base = toDate(item.planned_dev_start) ?? toDate(item.first_upload_date);
+  if (!base) return [null, null, null, null, null, null];
+  const review = sla?.owner_specialist_review_days ?? 8;
+  const reissue = sla?.contractor_co_rj_issue_days ?? 8;
+  const final = sla?.owner_final_approval_days ?? 2;
+  const p70 = addDays(base, PLAN_INITIAL_DAYS);
+  const p75 = addDays(p70, review);
+  const p80 = addDays(p75, reissue);
+  const p85 = addDays(p80, review);
+  const p90 = addDays(p85, reissue);
+  const p100 = addDays(p90, final);
+  return [p70, p75, p80, p85, p90, p100];
 }
 
-function clamp01(value: number): number {
-  return Math.max(0, Math.min(1, value));
+// Фактические даты 6 этапов для документа на основе текущих ревизий.
+function actualStageDates(revs: RegistryRevisionItem[]): (Date | null)[] {
+  const sorted = [...revs].sort((a, b) => a.id - b.id);
+  const ifrs = sorted.filter((r) => (r.issue_purpose ?? "").toUpperCase() === "IFR");
+  const afdRev = sorted.find((r) => (r.issue_purpose ?? "").toUpperCase() === "AFD") ?? null;
+  const revA = ifrs[0] ?? null;
+  const revB = ifrs[1] ?? null;
+  const lastIfrAp = [...ifrs].reverse().find((r) => r.review_code === "AP") ?? null;
+
+  const f70 = revA ? toDate(revA.created_at) : null;
+
+  // 75 — момент, когда A получила решение LR. Прокси: появление B/AFD,
+  // либо own.created_at если на A уже есть review_code.
+  let f75: Date | null = null;
+  if (revB) f75 = toDate(revB.created_at);
+  else if (afdRev) f75 = toDate(afdRev.created_at);
+  else if (revA?.review_code) f75 = toDate(revA.created_at);
+
+  const f80 = revB ? toDate(revB.created_at) : null;
+
+  // 85 — закрытие IFR-циклов на AP. Прокси: AFD создан (после AP),
+  // либо last IFR с AP уже зафиксирована.
+  let f85: Date | null = null;
+  if (afdRev) f85 = toDate(afdRev.created_at);
+  else if (lastIfrAp) f85 = toDate(lastIfrAp.created_at);
+
+  const f90 = afdRev ? toDate(afdRev.created_at) : null;
+  const f100 = afdRev?.review_code === "AP" ? toDate(afdRev.created_at) : null;
+
+  return [f70, f75, f80, f85, f90, f100];
 }
 
-function smoothstep01(x: number): number {
-  const t = clamp01(x);
-  return t * t * (3 - 2 * t);
-}
-
-function statusProgress(status: string): number {
-  const map: Record<string, number> = {
-    REVISION_CREATED: 0.2,
-    UPLOADED_WAITING_TDO: 0.4,
-    CANCELLED_BY_TDO: 0.3,
-    UNDER_REVIEW: 0.6,
-    OWNER_COMMENTS_SENT: 0.75,
-    CONTRACTOR_REPLY_I: 0.8,
-    CONTRACTOR_REPLY_A: 0.9,
-    SUBMITTED: 1,
-  };
-  return map[status] ?? 0;
+// Текущий вес-процент для документа на дату t.
+function progressPercentAt(stageDates: (Date | null)[], t: Date): number {
+  let max = 0;
+  for (let i = 0; i < STAGES.length; i++) {
+    const sd = stageDates[i];
+    if (sd && sd.getTime() <= t.getTime()) max = STAGES[i].weight;
+  }
+  return max;
 }
 
 export default function ReportingPage({ projects, mdr }: Props): JSX.Element {
   const [projectCode, setProjectCode] = useState<string | null>(projects[0]?.code ?? null);
   const [rows, setRows] = useState<DocumentRegistryItem[]>([]);
-  const [slaByCode, setSlaByCode] = useState<Map<string, number>>(new Map());
-  const [adminSla, setAdminSla] = useState<{
-    owner_specialist_review_days: number;
-    contractor_consideration_days: number;
-    contractor_ap_issue_days: number;
-    contractor_an_issue_days: number;
-    contractor_co_rj_issue_days: number;
-    owner_final_approval_days: number;
-  } | null>(null);
+  const [sla, setSla] = useState<AdminSla | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -86,7 +130,7 @@ export default function ReportingPage({ projects, mdr }: Props): JSX.Element {
       setProjectCode(null);
       return;
     }
-    if (!projectCode || !projects.some((item) => item.code === projectCode)) {
+    if (!projectCode || !projects.some((p) => p.code === projectCode)) {
       setProjectCode(projects[0].code);
     }
   }, [projectCode, projects]);
@@ -97,330 +141,189 @@ export default function ReportingPage({ projects, mdr }: Props): JSX.Element {
       return;
     }
     setLoading(true);
-    void listDocumentsRegistry({ project_code: projectCode })
+    void listDocumentsRegistry({ project_code: projectCode, for_reporting: true })
       .then(setRows)
       .finally(() => setLoading(false));
   }, [projectCode]);
 
   useEffect(() => {
     void getAdminReviewSlaSettings()
-      .then((settings) =>
-        setAdminSla({
-          owner_specialist_review_days: settings.owner_specialist_review_days,
-          contractor_consideration_days: settings.contractor_consideration_days,
-          contractor_ap_issue_days: settings.contractor_ap_issue_days,
-          contractor_an_issue_days: settings.contractor_an_issue_days,
-          contractor_co_rj_issue_days: settings.contractor_co_rj_issue_days,
-          owner_final_approval_days: settings.owner_final_approval_days,
+      .then((s) =>
+        setSla({
+          owner_specialist_review_days: s.owner_specialist_review_days,
+          contractor_co_rj_issue_days: s.contractor_co_rj_issue_days,
+          owner_final_approval_days: s.owner_final_approval_days,
         }),
       )
-      .catch(() => setAdminSla(null));
+      .catch(() => setSla(null));
   }, []);
 
-  useEffect(() => {
-    const selectedProject = projects.find((item) => item.code === projectCode);
-    if (!selectedProject) {
-      setSlaByCode(new Map());
-      return;
-    }
-    void listProjectReferences(selectedProject.id, "review_sla_days")
-      .then((refs) => {
-        const parsed = new Map<string, number>();
-        refs.forEach((ref) => {
-          const num = Number(ref.value);
-          if (ref.is_active && Number.isFinite(num) && num > 0) {
-            parsed.set(ref.code.toUpperCase(), num);
-          }
-        });
-        setSlaByCode(parsed);
-      })
-      .catch(() => setSlaByCode(new Map()));
-  }, [projectCode, projects]);
+  const mdrByDoc = useMemo(() => new Map(mdr.map((m) => [m.doc_number, m])), [mdr]);
 
-  const mdrByDocNum = useMemo(() => new Map(mdr.map((item) => [item.doc_number, item])), [mdr]);
-
-  const resolvePlannedDurationDays = useMemo(() => {
-    return (row: DocumentRegistryItem): number => {
-      const issue = (row.latest_issue_purpose ?? "").toUpperCase();
-      const category = (row.category ?? "*").toUpperCase();
-      const phase = row.revisions.length <= 1 ? "INITIAL" : "NEXT";
-      const candidates = [
-        `${category}:${issue}:${phase}`,
-        `*:${issue}:${phase}`,
-        `${category}:*:${phase}`,
-        `*:*:${phase}`,
-      ];
-      for (const key of candidates) {
-        const value = slaByCode.get(key);
-        if (value && value > 0) return value;
-      }
-
-      // Fallback by release purpose when project SLA refs are not configured.
-      if (phase === "INITIAL") {
-        if (issue === "IFA" || issue === "IFR") return 20;
-        return 14;
-      }
-      if (issue === "IFA" || issue === "IFR") return 7;
-      return DEFAULT_PLANNED_DURATION_DAYS;
-    };
-  }, [slaByCode]);
-
-  const progressRows = useMemo(() => {
-    return rows.map((item) => {
-      const mdrRow = mdrByDocNum.get(item.document_num);
-      const plannedStartDate = toDate(item.planned_dev_start ?? mdrRow?.planned_dev_start ?? null);
-      const plannedDurationDays = resolvePlannedDurationDays(item);
-      const plannedFinishDate = addDays(plannedStartDate, plannedDurationDays);
-      const actualStartDate = toDate(item.first_upload_date);
-      const revisions = [...item.revisions].sort((a, b) => a.created_at.localeCompare(b.created_at));
-      const latestRevision = revisions[revisions.length - 1];
-      const latestRevisionDate = toDate(latestRevision?.created_at ?? null);
-      const actualNow = statusProgress(latestRevision?.status ?? "");
-      const actualFinishDate = actualNow >= 1 ? latestRevisionDate : null;
-      const ownerReviewCycles = revisions.filter((rev) => rev.review_code && rev.review_code !== "AP").length;
-      const latestOwnerReviewCode = [...revisions].reverse().find((rev) => rev.review_code)?.review_code ?? null;
-      const ownerReviewDays = adminSla?.owner_specialist_review_days ?? 8;
-      const contractorFixDaysByCode =
-        latestOwnerReviewCode === "AN"
-          ? adminSla?.contractor_an_issue_days ?? 5
-          : latestOwnerReviewCode === "CO" || latestOwnerReviewCode === "RJ"
-            ? adminSla?.contractor_co_rj_issue_days ?? 8
-            : adminSla?.contractor_ap_issue_days ?? 2;
-      const plannedDurationByProcedure =
-        plannedDurationDays +
-        ownerReviewDays +
-        ownerReviewCycles * (contractorFixDaysByCode + ownerReviewDays) +
-        (latestOwnerReviewCode === "AP" ? adminSla?.owner_final_approval_days ?? 2 : 0);
-
-      const durationDays =
-        plannedStartDate && plannedFinishDate
-          ? Math.max(1, diffDays(plannedStartDate, plannedFinishDate))
-          : plannedDurationByProcedure;
-      let forecastFinishDate: Date | null = null;
-      if (actualNow >= 1) {
-        forecastFinishDate = actualFinishDate;
-      } else if (actualNow <= 0) {
-        forecastFinishDate = addDays(plannedStartDate, plannedDurationByProcedure);
-      } else {
-        const anchor = latestRevisionDate ?? actualStartDate ?? new Date();
-        if (latestRevision?.status === "CONTRACTOR_REPLY_I") {
-          forecastFinishDate = addDays(anchor, adminSla?.contractor_consideration_days ?? 2);
-        } else if (latestRevision?.status === "OWNER_COMMENTS_SENT") {
-          forecastFinishDate = addDays(anchor, contractorFixDaysByCode + ownerReviewDays);
-        } else if (latestRevision?.status === "UNDER_REVIEW") {
-          forecastFinishDate = addDays(anchor, ownerReviewDays + contractorFixDaysByCode + ownerReviewDays);
-        } else {
-          const remaining = 1 - actualNow;
-          const forecastDays = Math.max(1, Math.round((remaining * durationDays) / Math.max(actualNow, 0.05)));
-          forecastFinishDate = addDays(anchor, forecastDays);
-        }
-      }
-
-      const today = new Date();
-      const plannedNow =
-        plannedStartDate && plannedFinishDate
-          ? smoothstep01(diffDays(plannedStartDate, today) / Math.max(1, diffDays(plannedStartDate, plannedFinishDate)))
-          : 0;
-
-      return {
-        key: item.document_id,
-        document_num: item.document_num,
-        document_title: item.document_title,
-        weight: Number(mdrRow?.doc_weight ?? 0),
-        issuePurpose: item.latest_issue_purpose ?? "—",
-        latestOwnerReviewCode,
-        ownerReviewCycles,
-        plannedDurationDays: plannedDurationByProcedure,
-        plannedStartDate,
-        plannedFinishDate,
-        actualStartDate,
-        actualFinishDate,
-        latestRevisionDate,
-        revisions,
-        plannedNow,
-        actualNow,
-        forecastFinishDate,
-      };
-    });
-  }, [adminSla, mdrByDocNum, resolvePlannedDurationDays, rows]);
-
-  const hasPositiveWeights = useMemo(() => progressRows.some((row) => row.weight > 0), [progressRows]);
-  const totalWeight = useMemo(
+  // Собираем нормализованные точки на документ: вес + плановые/фактические даты этапов.
+  const docs = useMemo(
     () =>
-      progressRows.reduce((acc, row) => {
-        if (hasPositiveWeights) return acc + Math.max(0, row.weight);
-        return acc + 1;
-      }, 0),
-    [hasPositiveWeights, progressRows],
+      rows.map((r) => {
+        const mdrRow = mdrByDoc.get(r.document_num);
+        const weight = Math.max(0, Number(mdrRow?.doc_weight ?? 0)) || 1;
+        return {
+          key: r.document_id,
+          num: r.document_num,
+          title: r.document_title,
+          weight,
+          planned: plannedStageDates(r, sla),
+          actual: actualStageDates(r.revisions),
+        };
+      }),
+    [rows, mdrByDoc, sla],
   );
 
-  const currentTotals = useMemo(() => {
-    if (!progressRows.length || totalWeight <= 0) return { planned: 0, actual: 0 };
-    const weighted = progressRows.reduce(
-      (acc, row) => {
-        const w = hasPositiveWeights ? Math.max(0, row.weight) : 1;
-        acc.planned += row.plannedNow * w;
-        acc.actual += row.actualNow * w;
-        return acc;
-      },
-      { planned: 0, actual: 0 },
-    );
-    return {
-      planned: (weighted.planned / totalWeight) * 100,
-      actual: (weighted.actual / totalWeight) * 100,
-    };
-  }, [hasPositiveWeights, progressRows, totalWeight]);
-
-  const curvePoints = useMemo(() => {
-    if (!progressRows.length || totalWeight <= 0) return [];
-    const today = new Date();
-    const dateSet = new Set<string>([toIsoDate(today) ?? ""]);
-    progressRows.forEach((row) => {
-      [row.plannedStartDate, row.plannedFinishDate, row.actualStartDate, row.actualFinishDate, row.forecastFinishDate, row.latestRevisionDate].forEach(
-        (dt) => {
-          const key = toIsoDate(dt);
-          if (key) dateSet.add(key);
-        },
-      );
-      row.revisions.forEach((revision) => {
-        const key = toIsoDate(toDate(revision.created_at));
-        if (key) dateSet.add(key);
-      });
+  // Точки S-кривой: для каждой релевантной даты — накопительный план и факт.
+  const curve = useMemo(() => {
+    if (!docs.length) return [] as { date: string; plan: number; fact: number }[];
+    const dateSet = new Set<string>();
+    docs.forEach((d) => {
+      d.planned.forEach((p) => p && dateSet.add(toIso(p)));
+      d.actual.forEach((a) => a && dateSet.add(toIso(a)));
     });
-    const sortedDates = [...dateSet].filter(Boolean).sort();
-
-    return sortedDates.map((dateIso) => {
-      const currentDate = toDate(dateIso)!;
-      let planned = 0;
-      let actual = 0;
-      let forecast = 0;
-      for (const row of progressRows) {
-        const w = hasPositiveWeights ? Math.max(0, row.weight) : 1;
-
-        let plannedFraction = 0;
-        if (row.plannedStartDate && row.plannedFinishDate) {
-          const full = Math.max(1, diffDays(row.plannedStartDate, row.plannedFinishDate));
-          plannedFraction = clamp01(diffDays(row.plannedStartDate, currentDate) / full);
-        }
-
-        const latestUntilDate = row.revisions
-          .filter((revision) => {
-            const revisionDate = toDate(revision.created_at);
-            return revisionDate ? revisionDate.getTime() <= currentDate.getTime() : false;
-          })
-          .at(-1);
-        const actualFraction = statusProgress(latestUntilDate?.status ?? "");
-
-        let forecastFraction = actualFraction;
-        if (currentDate.getTime() > today.getTime() && row.forecastFinishDate) {
-          const startProgress = row.actualNow;
-          const startDate = row.latestRevisionDate ?? today;
-          if (currentDate.getTime() >= row.forecastFinishDate.getTime()) {
-            forecastFraction = 1;
-          } else {
-            const full = Math.max(1, diffDays(startDate, row.forecastFinishDate));
-            const part = clamp01(diffDays(startDate, currentDate) / full);
-            forecastFraction = clamp01(startProgress + (1 - startProgress) * smoothstep01(part));
-          }
-        }
-
-        planned += plannedFraction * w;
-        actual += actualFraction * w;
-        forecast += forecastFraction * w;
+    dateSet.add(toIso(new Date()));
+    const sorted = [...dateSet].filter(Boolean).sort();
+    return sorted.map((iso) => {
+      const t = new Date(iso);
+      let plan = 0;
+      let fact = 0;
+      for (const d of docs) {
+        plan += (progressPercentAt(d.planned, t) / 100) * d.weight;
+        fact += (progressPercentAt(d.actual, t) / 100) * d.weight;
       }
-
       return {
-        date: dateIso,
-        planned: (planned / totalWeight) * 100,
-        actual: (actual / totalWeight) * 100,
-        forecast: (forecast / totalWeight) * 100,
+        date: iso,
+        plan: Math.round(plan * 100) / 100,
+        fact: Math.round(fact * 100) / 100,
       };
     });
-  }, [hasPositiveWeights, progressRows, totalWeight]);
+  }, [docs]);
 
-  if (!projectCode) {
-    return <Empty description="Выберите проект" />;
-  }
+  const totalWeight = useMemo(() => docs.reduce((acc, d) => acc + d.weight, 0), [docs]);
+  const todayIso = toIso(new Date());
+  // Точка «сегодня»: либо точная, либо последняя ≤ сегодня.
+  const currentPoint = useMemo(() => {
+    if (!curve.length) return null;
+    const exact = curve.find((p) => p.date === todayIso);
+    if (exact) return exact;
+    const earlier = [...curve].reverse().find((p) => p.date <= todayIso);
+    return earlier ?? curve[0];
+  }, [curve, todayIso]);
+  const planNow = currentPoint?.plan ?? 0;
+  const factNow = currentPoint?.fact ?? 0;
+  const lagAbs = planNow - factNow;
+  const lagPercent = totalWeight > 0 ? (lagAbs / totalWeight) * 100 : 0;
 
   return (
-    <Card title="Отчетность: план/факт и S-кривая">
-      <Space style={{ marginBottom: 12 }}>
-        <Typography.Text>Проект:</Typography.Text>
+    <div className="reporting-module">
+      <Space style={{ marginBottom: 12, justifyContent: "space-between", width: "100%" }}>
+        <Typography.Title level={4} style={{ margin: 0 }}>
+          Отчётность
+        </Typography.Title>
         <Select
-          style={{ minWidth: 300 }}
-          value={projectCode ?? undefined}
-          options={projects.map((item) => ({ value: item.code, label: `${item.code} - ${item.name}` }))}
-          onChange={(value) => setProjectCode(value)}
+          style={{ minWidth: 280 }}
+          value={projectCode}
+          onChange={setProjectCode}
+          options={projects.map((p) => ({ value: p.code, label: `${p.code} — ${p.name}` }))}
+          placeholder="Проект"
         />
       </Space>
-      <Typography.Paragraph type="secondary" style={{ marginTop: 0, marginBottom: 8 }}>
-        Логика 3.0: накопление идет по весам `doc_weight` из MDR. В цикле 85% учитываются повторные итерации замечаний
-        (AN/CO/RJ) до достижения AP. Факт - по workflow, прогноз - от текущего факта по SLA-ветке статуса.
-      </Typography.Paragraph>
-      <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-        Длительность плана берется из справочника проекта `review_sla_days` (маска `CATEGORY:ISSUE_PURPOSE:INITIAL|NEXT`), при отсутствии - fallback.
-      </Typography.Paragraph>
-      <Typography.Text strong>
-        Текущий прогресс проекта: план {currentTotals.planned.toFixed(1)}% / факт {currentTotals.actual.toFixed(1)}%
-      </Typography.Text>
-      {curvePoints.length === 0 ? (
-        <Empty description="Недостаточно данных для построения S-кривой" />
-      ) : (
-        <svg width="100%" height="200" viewBox="0 0 800 200">
-          <polyline
-            fill="none"
-            stroke="#1677ff"
-            strokeWidth="3"
-            points={curvePoints
-              .map((point, index) => `${(index / Math.max(1, curvePoints.length - 1)) * 760 + 20},${180 - (point.planned / 100) * 160}`)
-              .join(" ")}
+
+      <Space size={12} style={{ width: "100%", marginBottom: 12 }} wrap>
+        <Card size="small" style={{ minWidth: 150 }} className="dashboard-stat-card">
+          <Statistic title="Документов" value={docs.length} />
+        </Card>
+        <Card size="small" style={{ minWidth: 150 }} className="dashboard-stat-card">
+          <Statistic title="Общий вес" value={Math.round(totalWeight)} />
+        </Card>
+        <Card size="small" style={{ minWidth: 150 }} className="dashboard-stat-card">
+          <Statistic title="План на сегодня" value={Math.round(planNow)} valueStyle={{ color: "#1677ff" }} />
+        </Card>
+        <Card size="small" style={{ minWidth: 150 }} className="dashboard-stat-card">
+          <Statistic title="Факт на сегодня" value={Math.round(factNow)} valueStyle={{ color: "#52c41a" }} />
+        </Card>
+        <Card size="small" style={{ minWidth: 170 }} className="dashboard-stat-card">
+          <Statistic
+            title={lagAbs > 0 ? "Отставание" : lagAbs < 0 ? "Опережение" : "По плану"}
+            value={Math.abs(Math.round(lagPercent * 10) / 10)}
+            suffix="%"
+            valueStyle={{
+              color: lagAbs > 0 ? "#ff4d4f" : lagAbs < 0 ? "#52c41a" : "#737373",
+            }}
           />
-          <polyline
-            fill="none"
-            stroke="#52c41a"
-            strokeWidth="3"
-            points={curvePoints
-              .map((point, index) => `${(index / Math.max(1, curvePoints.length - 1)) * 760 + 20},${180 - (point.actual / 100) * 160}`)
-              .join(" ")}
-          />
-          <polyline
-            fill="none"
-            stroke="#faad14"
-            strokeWidth="3"
-            points={curvePoints
-              .map((point, index) => `${(index / Math.max(1, curvePoints.length - 1)) * 760 + 20},${180 - (point.forecast / 100) * 160}`)
-              .join(" ")}
-          />
-        </svg>
-      )}
-      <Typography.Paragraph type="secondary" style={{ marginTop: 8 }}>
-        Синяя линия - план, зеленая - факт, желтая - прогноз.
+        </Card>
+      </Space>
+
+      <Card title="S-кривая прогресса проекта (план / факт)" loading={loading}>
+        {curve.length === 0 ? (
+          <Empty description="Нет данных. Выберите проект с документами в работе." />
+        ) : (
+          <ResponsiveContainer width="100%" height={400}>
+            <LineChart data={curve} margin={{ top: 10, right: 24, bottom: 24, left: 8 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
+              <XAxis
+                dataKey="date"
+                tickFormatter={(v) => formatDateRu(new Date(v))}
+                tick={{ fontSize: 11, fill: "#737373" }}
+                tickMargin={8}
+                minTickGap={40}
+              />
+              <YAxis
+                tick={{ fontSize: 11, fill: "#737373" }}
+                tickMargin={4}
+                width={60}
+                label={{ value: "Прогресс (ед. веса)", angle: -90, position: "insideLeft", offset: 10, style: { fontSize: 11, fill: "#737373" } }}
+              />
+              <Tooltip
+                formatter={(value) => String(Math.round(Number(value)))}
+                labelFormatter={(v) => formatDateRu(new Date(String(v)))}
+                contentStyle={{ borderRadius: 8, border: "1px solid #e8e8e8", fontSize: 12 }}
+              />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <ReferenceLine
+                x={todayIso}
+                stroke="#a3a3a3"
+                strokeDasharray="4 4"
+                label={{ value: "сегодня", fontSize: 11, fill: "#737373", position: "top" }}
+              />
+              <Line
+                type="monotone"
+                dataKey="plan"
+                name="План"
+                stroke="#1677ff"
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive={false}
+              />
+              <Line
+                type="monotone"
+                dataKey="fact"
+                name="Факт"
+                stroke="#52c41a"
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive={false}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </Card>
+
+      <Typography.Paragraph type="secondary" style={{ marginTop: 12, fontSize: 12 }}>
+        Этапы прогресса (фиксированные веса):
+        {" "}
+        {STAGES.map((s, i) => (
+          <span key={s.weight}>
+            {i > 0 ? " · " : ""}
+            <b>{s.weight}%</b> {s.title}
+          </span>
+        ))}
       </Typography.Paragraph>
-      <Table
-        rowKey="key"
-        loading={loading}
-        size="small"
-        dataSource={progressRows}
-        pagination={false}
-        scroll={{ x: "max-content" }}
-        locale={{ emptyText: "Нет данных для отчёта. Выберите проект и нажмите «Загрузить»." }}
-        columns={[
-          { title: "Документ", dataIndex: "document_num" },
-          { title: "Название", dataIndex: "document_title" },
-          { title: "Цель", dataIndex: "issuePurpose" },
-          { title: "Код заказчика", dataIndex: "latestOwnerReviewCode", render: (v: string | null) => v ?? "—" },
-          { title: "Циклы 85%", dataIndex: "ownerReviewCycles" },
-          { title: "Вес", dataIndex: "weight", render: (v: number) => String(Math.round(v)) },
-          { title: "План, дн", dataIndex: "plannedDurationDays" },
-          { title: "План старт", dataIndex: "plannedStartDate", render: (v: Date | null) => formatDateRu(v) },
-          { title: "План финиш", dataIndex: "plannedFinishDate", render: (v: Date | null) => formatDateRu(v) },
-          { title: "Факт старт", dataIndex: "actualStartDate", render: (v: Date | null) => formatDateRu(v) },
-          { title: "Факт финиш", dataIndex: "actualFinishDate", render: (v: Date | null) => formatDateRu(v) },
-          { title: "Прогноз финиша", dataIndex: "forecastFinishDate", render: (v: Date | null) => formatDateRu(v) },
-          { title: "План %", dataIndex: "plannedNow", render: (v: number) => (v * 100).toFixed(1) },
-          { title: "Факт %", dataIndex: "actualNow", render: (v: number) => (v * 100).toFixed(1) },
-        ]}
-      />
-    </Card>
+    </div>
   );
 }
