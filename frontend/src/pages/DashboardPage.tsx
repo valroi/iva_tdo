@@ -1,4 +1,4 @@
-import { Button, Card, Col, Row, Space, Statistic, Table, Typography } from "antd";
+import { Button, Card, Col, Row, Space, Statistic, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useState } from "react";
 import { listDocumentsRegistry, listOwnerReviewQueue, listProjectMembers, listReviewMatrix, listRevisionsOverview } from "../api";
@@ -41,6 +41,12 @@ export default function DashboardPage({
   const [projectRoles, setProjectRoles] = useState<Array<{ project_code: string; project_name: string; role: ProjectMemberRole; role_label: string }>>([]);
   const [ownerReviewTasks, setOwnerReviewTasks] = useState<DashboardTask[]>([]);
   const [developerWorkItems, setDeveloperWorkItems] = useState<RevisionOverviewItem[]>([]);
+  // Виджет «Приближается выпуск» — для рук. ТДО подрядчика: документы,
+  // у которых до планового выпуска первой ревизии ≤ 7 дней и ревизия
+  // ещё не создана. Пропадают как только подрядчик создаёт ревизию A.
+  const [upcomingReleases, setUpcomingReleases] = useState<
+    Array<{ document_num: string; document_title: string; project_code: string; planned_release: string; days_left: number }>
+  >([]);
   const activeNotifications = notifications.filter((n) => !n.is_read);
   const unread = activeNotifications.length;
   const notificationTasks: DashboardTask[] = activeNotifications.map((item) => ({
@@ -77,6 +83,48 @@ export default function DashboardPage({
       .then((rows) => setOverdueDocs(rows))
       .catch(() => setOverdueDocs([]));
   }, [currentUser.permissions.can_process_tdo_queue]);
+
+  // «Приближается выпуск ≤ 7 дн» — только для рук. ТДО подрядчика
+  // (или любой роли, ведущей реестр документов).
+  useEffect(() => {
+    if (!currentUser.permissions.can_create_mdr) {
+      setUpcomingReleases([]);
+      return;
+    }
+    let cancelled = false;
+    listDocumentsRegistry({ for_reporting: true })
+      .then((rows) => {
+        if (cancelled) return;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const PLAN_INITIAL_DAYS = 20; // план выпуска A = старт + 20 дн (PD/IFR initial)
+        const result = rows
+          .filter((doc) => doc.revisions.length === 0)
+          .map((doc) => {
+            const start = doc.planned_dev_start ? new Date(doc.planned_dev_start) : null;
+            if (!start) return null;
+            const release = new Date(start);
+            release.setDate(release.getDate() + PLAN_INITIAL_DAYS);
+            const days = Math.ceil((release.getTime() - today.getTime()) / 86400000);
+            return {
+              document_num: doc.document_num,
+              document_title: doc.document_title,
+              project_code: doc.project_code,
+              planned_release: release.toISOString().slice(0, 10),
+              days_left: days,
+            };
+          })
+          .filter((r): r is NonNullable<typeof r> => !!r && r.days_left <= 7)
+          .sort((a, b) => a.days_left - b.days_left);
+        setUpcomingReleases(result);
+      })
+      .catch(() => {
+        if (!cancelled) setUpcomingReleases([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser.permissions.can_create_mdr]);
   useEffect(() => {
     let cancelled = false;
     const loadRoles = async (): Promise<void> => {
@@ -320,6 +368,48 @@ export default function DashboardPage({
           </Col>
         )}
       </Row>
+      {currentUser.permissions.can_create_mdr && upcomingReleases.length > 0 && (
+        <Card
+          title={`Приближается выпуск (≤ 7 дн) — ${upcomingReleases.length}`}
+          className="hrp-card"
+          style={{ marginTop: 16 }}
+          extra={<Typography.Text type="secondary" style={{ fontSize: 12 }}>Напоминание о плановом выпуске первой ревизии</Typography.Text>}
+        >
+          <Table
+            rowKey="document_num"
+            size="small"
+            pagination={false}
+            dataSource={upcomingReleases}
+            locale={{ emptyText: "Нет ближайших выпусков." }}
+            columns={[
+              { title: "Проект", dataIndex: "project_code", key: "project_code", width: 110 },
+              { title: "Документ", dataIndex: "document_num", key: "document_num", width: 260 },
+              { title: "Название", dataIndex: "document_title", key: "document_title", ellipsis: true },
+              {
+                title: "Плановый выпуск",
+                dataIndex: "planned_release",
+                key: "planned_release",
+                width: 160,
+                render: (v: string) => {
+                  const dt = new Date(v);
+                  return `${String(dt.getDate()).padStart(2, "0")}.${String(dt.getMonth() + 1).padStart(2, "0")}.${dt.getFullYear()}`;
+                },
+              },
+              {
+                title: "Осталось",
+                dataIndex: "days_left",
+                key: "days_left",
+                width: 120,
+                render: (d: number) => {
+                  const color = d < 0 ? "red" : d <= 2 ? "orange" : "blue";
+                  const label = d < 0 ? `Просрочено ${Math.abs(d)} дн` : d === 0 ? "Сегодня" : `${d} дн`;
+                  return <Tag color={color}>{label}</Tag>;
+                },
+              },
+            ]}
+          />
+        </Card>
+      )}
       <Card title="Текущие задачи" className="hrp-card" style={{ marginTop: 16 }}>
         <Table
           columns={taskColumns}

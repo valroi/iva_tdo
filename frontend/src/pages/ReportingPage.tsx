@@ -216,8 +216,6 @@ export default function ReportingPage({ projects, mdr }: Props): JSX.Element {
   }, [curve, todayIso]);
   const planNow = currentPoint?.plan ?? 0;
   const factNow = currentPoint?.fact ?? 0;
-  const lagAbs = planNow - factNow;
-  const lagPercent = totalWeight > 0 ? (lagAbs / totalWeight) * 100 : 0;
 
   return (
     <div className="reporting-module">
@@ -246,16 +244,6 @@ export default function ReportingPage({ projects, mdr }: Props): JSX.Element {
         </Card>
         <Card size="small" style={{ minWidth: 150 }} className="dashboard-stat-card">
           <Statistic title="Факт на сегодня" value={Math.round(factNow)} valueStyle={{ color: "#52c41a" }} />
-        </Card>
-        <Card size="small" style={{ minWidth: 170 }} className="dashboard-stat-card">
-          <Statistic
-            title={lagAbs > 0 ? "Отставание" : lagAbs < 0 ? "Опережение" : "По плану"}
-            value={Math.abs(Math.round(lagPercent * 10) / 10)}
-            suffix="%"
-            valueStyle={{
-              color: lagAbs > 0 ? "#ff4d4f" : lagAbs < 0 ? "#52c41a" : "#737373",
-            }}
-          />
         </Card>
       </Space>
 
