@@ -180,29 +180,35 @@ export default function DashboardPage({
       return;
     }
     let cancelled = false;
-    listOwnerReviewQueue()
-      .then((items) => {
-        if (cancelled) return;
-        // Заказчик «держит мяч» только в UNDER_REVIEW и CONTRACTOR_REPLY_A.
-        // В OWNER_COMMENTS_SENT и CONTRACTOR_REPLY_I ходит подрядчик —
-        // задачи у LR/R быть не должно.
-        const pending = items
-          .filter((item: TdoQueueItem) => item.status === "UNDER_REVIEW" || item.status === "CONTRACTOR_REPLY_A")
-          .map((item: TdoQueueItem) => ({
-            id: `owner_queue_${item.revision_id}`,
-            event_type: "OWNER_REVIEW_PENDING",
-            message: `${item.document_num}, ревизия ${item.revision_code}, TRM ${item.trm_number ?? "—"}`,
-            created_at: item.created_at,
-            task_deadline: item.review_deadline,
-            revision_id: item.revision_id,
-            project_code: item.project_code,
-          }));
-        setOwnerReviewTasks(pending);
-      })
-      .catch(() => {
-        if (!cancelled) setOwnerReviewTasks([]);
-      });
+    const load = () => {
+      listOwnerReviewQueue()
+        .then((items) => {
+          if (cancelled) return;
+          // Заказчик «держит мяч» только в UNDER_REVIEW и CONTRACTOR_REPLY_A.
+          // В OWNER_COMMENTS_SENT и CONTRACTOR_REPLY_I ходит подрядчик —
+          // задачи у LR/R быть не должно.
+          const pending = items
+            .filter((item: TdoQueueItem) => item.status === "UNDER_REVIEW" || item.status === "CONTRACTOR_REPLY_A")
+            .map((item: TdoQueueItem) => ({
+              id: `owner_queue_${item.revision_id}`,
+              event_type: "OWNER_REVIEW_PENDING",
+              message: `${item.document_num}, ревизия ${item.revision_code}, TRM ${item.trm_number ?? "—"}`,
+              created_at: item.created_at,
+              task_deadline: item.review_deadline,
+              revision_id: item.revision_id,
+              project_code: item.project_code,
+            }));
+          setOwnerReviewTasks(pending);
+        })
+        .catch(() => {
+          if (!cancelled) setOwnerReviewTasks([]);
+        });
+    };
+    load();
+    // Polling 30 сек — новые ревизии на рассмотрение появляются «вживую».
+    const intervalId = window.setInterval(load, 30_000);
     return () => {
+      window.clearInterval(intervalId);
       cancelled = true;
     };
   }, [currentUser.company_type]);

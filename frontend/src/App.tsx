@@ -205,6 +205,21 @@ export default function App(): JSX.Element {
     }
   }, [authenticated, loadInitialData]);
 
+  // Polling уведомлений каждые 30 секунд: новые задачи (упал документ
+  // на отработку, пришло замечание и т.п.) появляются в реальном времени
+  // без необходимости обновлять страницу. Heavy-данные (mdr, projects,
+  // documents) не пере-запрашиваем — они меняются реже.
+  useEffect(() => {
+    if (!authenticated) return;
+    const tick = () => {
+      void listNotifications()
+        .then(setNotifications)
+        .catch(() => {});
+    };
+    const id = window.setInterval(tick, 30_000);
+    return () => window.clearInterval(id);
+  }, [authenticated]);
+
   const unreadNotificationsCount = useMemo(
     () => notifications.filter((item) => !item.is_read).length,
     [notifications],
@@ -415,7 +430,7 @@ export default function App(): JSX.Element {
                 <RevisionCardPage
                   revisionId={openedRevisionId}
                   currentUser={user}
-                  onBack={() => setActiveSection("revisions")}
+                  onBack={() => setActiveSection("projects")}
                 />
               )}
               {activeSection === "notifications" && (
