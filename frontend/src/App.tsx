@@ -93,8 +93,45 @@ class UiErrorBoundary extends Component<{ children: JSX.Element }, { error: Erro
 export default function App(): JSX.Element {
   const [authenticated, setAuthenticated] = useState(hasAccessToken());
   const [loading, setLoading] = useState(false);
-  const [activeSection, setActiveSection] = useState<Section>("dashboard");
-  const [activeModule, setActiveModule] = useState<AppModule>("dcc");
+  // Активная секция и открытая ревизия сохраняются в URL hash, чтобы F5
+  // или прямая ссылка восстанавливали место работы, а не сбрасывали на «Обзор».
+  // Формат: #/<section>            например, #/projects
+  //         #/revision_card/<id>   например, #/revision_card/42
+  //         #/module=docchecker    переключает модуль DCC ↔ DOCchecker
+  const parseHash = (): { section: Section; module: AppModule; revisionId: number | null } => {
+    if (typeof window === "undefined") {
+      return { section: "dashboard", module: "dcc", revisionId: null };
+    }
+    const raw = window.location.hash.replace(/^#\/?/, "").trim();
+    if (!raw) return { section: "dashboard", module: "dcc", revisionId: null };
+    if (raw === "module=docchecker" || raw === "docchecker") {
+      return { section: "docchecker", module: "docchecker", revisionId: null };
+    }
+    const [seg, arg] = raw.split("/");
+    const validSections: Section[] = [
+      "dashboard",
+      "projects",
+      "documents_registry",
+      "revisions",
+      "trm",
+      "reporting",
+      "crs_queue",
+      "revision_card",
+      "notifications",
+      "tdo_queue",
+      "sessions",
+      "admin",
+      "help",
+      "docchecker",
+    ];
+    const section = (validSections as string[]).includes(seg) ? (seg as Section) : "dashboard";
+    const revisionId = section === "revision_card" && arg ? Number(arg) || null : null;
+    const module: AppModule = section === "docchecker" ? "docchecker" : "dcc";
+    return { section, module, revisionId };
+  };
+  const initialHash = parseHash();
+  const [activeSection, setActiveSection] = useState<Section>(initialHash.section);
+  const [activeModule, setActiveModule] = useState<AppModule>(initialHash.module);
 
   const [user, setUser] = useState<User | null>(null);
   const [mdr, setMdr] = useState<MDRRecord[]>([]);
@@ -107,8 +144,33 @@ export default function App(): JSX.Element {
     document_num?: string | null;
     revision_id?: number | null;
   } | null>(null);
-  const [openedRevisionId, setOpenedRevisionId] = useState<number | null>(null);
+  const [openedRevisionId, setOpenedRevisionId] = useState<number | null>(initialHash.revisionId);
   const [documentsRegistryPreset, setDocumentsRegistryPreset] = useState<{ overdue_only?: boolean } | null>(null);
+
+  // Синхронизация состояния в URL hash: при изменении секции/ревизии — push в URL.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let hash = `#/${activeSection}`;
+    if (activeSection === "revision_card" && openedRevisionId) {
+      hash = `#/revision_card/${openedRevisionId}`;
+    }
+    if (window.location.hash !== hash) {
+      window.history.replaceState(null, "", hash);
+    }
+  }, [activeSection, openedRevisionId]);
+
+  // Реакция на «Назад/Вперёд» в браузере — синхронизируем состояние из URL.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onPop = () => {
+      const next = parseHash();
+      setActiveSection(next.section);
+      setActiveModule(next.module);
+      setOpenedRevisionId(next.revisionId);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
 
   const loadInitialData = useCallback(async () => {
     setLoading(true);

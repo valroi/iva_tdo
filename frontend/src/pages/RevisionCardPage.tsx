@@ -133,12 +133,23 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
       comment.status !== "REJECTED" &&
       (comment.status === "OPEN" || comment.status === "IN_PROGRESS"),
   ).length;
+  // Есть хотя бы одно RJ-замечание → ревизия отвергнута полностью,
+  // AP по ней невозможен (только переиздание с тем же шифром).
+  const hasRejectRemark = selectedRevisionComments.some(
+    (comment) => comment.parent_id === null && comment.is_published_to_contractor && comment.review_code === "RJ",
+  );
   const carryOpenCount = selectedCarryRemarks.length;
+  // AP допустим только когда мяч у заказчика (UNDER_REVIEW или CONTRACTOR_REPLY_A).
+  // В OWNER_COMMENTS_SENT / CONTRACTOR_REPLY_I LR ничего не делает — кнопка скрыта.
+  const apActionableStatus =
+    selectedRevision?.status === "UNDER_REVIEW" || selectedRevision?.status === "CONTRACTOR_REPLY_A";
   const canSetApForSelectedRevision =
     Boolean(selectedRevision) &&
     selectedRevision?.id === latestRevisionId &&
     selectedRevision?.review_code !== "AP" &&
     canSetApByRole &&
+    apActionableStatus &&
+    !hasRejectRemark &&
     activePublishedRemarksCount === 0 &&
     carryOpenCount === 0;
   const getRevisionRemarksStatus = (revisionId: number, comments: CommentItem[]): string => {
@@ -214,40 +225,41 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
         <Typography.Title level={4} style={{ margin: 0 }}>
           Карточка документа
         </Typography.Title>
-        <Tooltip
-          title={
-            !selectedRevision?.file_path
-              ? "PDF ещё не загружен для этой ревизии"
-              : documentCompleted
-              ? "Документ финально согласован (AFD + AP) — редактирование закрыто"
-              : !canOwnerCreateRemarks
-              ? "Вы не назначены рассматривающим (LR/R) по этому документу"
-              : currentUser.company_type === "owner" && !canCommentOnSelectedRevision
-              ? "Замечания можно добавлять только при статусе «На рассмотрении заказчиком»"
-              : !currentUser.permissions.can_raise_comments && currentUser.company_type !== "contractor"
-              ? "Нет прав для создания замечаний"
-              : currentUser.company_type === "contractor"
-              ? "Открыть PDF для просмотра"
-              : "Открыть PDF и добавить замечания"
-          }
-        >
-          <Button
-            type="primary"
-            onClick={() => {
-              setPdfFocusCommentId(null);
-              setPdfAnnotatorOpen(true);
-            }}
-            disabled={
-              !selectedRevision?.file_path ||
-              documentCompleted ||
-              (!currentUser.permissions.can_raise_comments && currentUser.company_type !== "contractor") ||
-              !canOwnerCreateRemarks ||
-              (currentUser.company_type === "owner" && !canCommentOnSelectedRevision)
-            }
-          >
-            {isOwner(currentUser) ? "Комментировать PDF" : "Открыть PDF"}
-          </Button>
-        </Tooltip>
+        {/* Кнопка PDF: для owner — «Комментировать» только когда ревизия
+            на рассмотрении заказчика; для contractor/admin — всегда «Открыть»
+            для просмотра. В прочих owner-статусах кнопка прячется целиком. */}
+        {(() => {
+          const ownerCanShow = isOwner(currentUser)
+            ? Boolean(canOwnerCreateRemarks) && canCommentOnSelectedRevision
+            : true;
+          if (!ownerCanShow) return null;
+          return (
+            <Tooltip
+              title={
+                !selectedRevision?.file_path
+                  ? "PDF ещё не загружен для этой ревизии"
+                  : documentCompleted
+                  ? "Документ финально согласован (AFD + AP) — редактирование закрыто"
+                  : currentUser.company_type === "contractor"
+                  ? "Открыть PDF для просмотра"
+                  : isOwner(currentUser)
+                  ? "Открыть PDF и добавить замечания"
+                  : "Открыть PDF для просмотра"
+              }
+            >
+              <Button
+                type="primary"
+                onClick={() => {
+                  setPdfFocusCommentId(null);
+                  setPdfAnnotatorOpen(true);
+                }}
+                disabled={!selectedRevision?.file_path || documentCompleted}
+              >
+                {isOwner(currentUser) ? "Комментировать PDF" : "Открыть PDF"}
+              </Button>
+            </Tooltip>
+          );
+        })()}
         {canUploadRevisionFiles(currentUser, selectedRevision?.status) && (
           <Tooltip title={isSelectedRevisionClosedForPdfUpdate ? "По этой ревизии цикл завершен. Создайте следующую ревизию для новой загрузки PDF." : "Загрузить или заменить основной PDF выбранной ревизии"}>
             <Button
@@ -262,7 +274,11 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
             </Button>
           </Tooltip>
         )}
-        {(selectedRevision?.id === latestRevisionId && selectedRevision?.review_code !== "AP" && canSetApByRole) && (
+        {selectedRevision?.id === latestRevisionId &&
+          selectedRevision?.review_code !== "AP" &&
+          canSetApByRole &&
+          apActionableStatus &&
+          !hasRejectRemark && (
           <Tooltip
             title={(() => {
               const blocks: string[] = [];

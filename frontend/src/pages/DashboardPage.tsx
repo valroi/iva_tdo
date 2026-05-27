@@ -183,8 +183,11 @@ export default function DashboardPage({
     listOwnerReviewQueue()
       .then((items) => {
         if (cancelled) return;
+        // Заказчик «держит мяч» только в UNDER_REVIEW и CONTRACTOR_REPLY_A.
+        // В OWNER_COMMENTS_SENT и CONTRACTOR_REPLY_I ходит подрядчик —
+        // задачи у LR/R быть не должно.
         const pending = items
-          .filter((item: TdoQueueItem) => item.status !== "OWNER_COMMENTS_SENT")
+          .filter((item: TdoQueueItem) => item.status === "UNDER_REVIEW" || item.status === "CONTRACTOR_REPLY_A")
           .map((item: TdoQueueItem) => ({
             id: `owner_queue_${item.revision_id}`,
             event_type: "OWNER_REVIEW_PENDING",

@@ -273,6 +273,7 @@ def seed_default_data(db: Session) -> None:
         for email, full_name, company_type in demo_users:
             user = db.query(User).filter(User.email == email).first()
             if user is None:
+                # Новый демо-пользователь: создаём с пресетом прав по роли.
                 user = User(
                     email=email,
                     hashed_password=get_password_hash("Password_123!"),
@@ -280,23 +281,30 @@ def seed_default_data(db: Session) -> None:
                     company_code=("CTR" if company_type == CompanyType.contractor else "OWN"),
                     company_type=company_type,
                     role=UserRole.user,
-                    permissions=default_permissions_for_role(UserRole.user),
+                    permissions=DEMO_ROLE_PRESET_PERMISSIONS.get(
+                        email, default_permissions_for_role(UserRole.user)
+                    ),
                     is_active=True,
                 )
                 db.add(user)
             else:
+                # Уже существует. Обновляем только базовые поля (имя, тип компании),
+                # пароль и активность — но НЕ перезаписываем permissions:
+                # они могут быть отредактированы админом через UI и должны
+                # сохраняться при рестартах. Если у пользователя по какой-то
+                # причине права пусты — впервые подставим пресет.
                 user.hashed_password = get_password_hash("Password_123!")
                 user.full_name = full_name
                 user.company_type = company_type
                 user.company_code = user.company_code or ("CTR" if company_type == CompanyType.contractor else "OWN")
                 user.role = UserRole.user
-                user.permissions = DEMO_ROLE_PRESET_PERMISSIONS.get(email, default_permissions_for_role(UserRole.user))
+                if not user.permissions:
+                    user.permissions = DEMO_ROLE_PRESET_PERMISSIONS.get(
+                        email, default_permissions_for_role(UserRole.user)
+                    )
                 user.is_active = True
                 db.add(user)
-            if user is not None:
-                user.permissions = DEMO_ROLE_PRESET_PERMISSIONS.get(email, default_permissions_for_role(UserRole.user))
-                db.add(user)
-                demo_user_by_email[email] = user
+            demo_user_by_email[email] = user
         # Ensure newly created users have IDs before creating memberships.
         db.flush()
 

@@ -55,6 +55,15 @@ export function canPublishToContractor(user: User): boolean {
   return isOwner(user) && user.permissions.can_publish_comments;
 }
 
+/**
+ * Статусы, в которых заказчик ещё «держит мяч» по ревизии и может
+ * выставить AP. В OWNER_COMMENTS_SENT/CONTRACTOR_REPLY_I мяч у подрядчика —
+ * никаких действий со стороны заказчика быть не должно.
+ */
+export function isOwnerActionableStatus(revisionStatus?: string | null): boolean {
+  return revisionStatus === "UNDER_REVIEW" || revisionStatus === "CONTRACTOR_REPLY_A";
+}
+
 /** Ответ подрядчика на замечания — после получения CRS. */
 export function canRespondToRemarks(user: User, revisionStatus?: string | null): boolean {
   if (!isContractor(user)) return false;
