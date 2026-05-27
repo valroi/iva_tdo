@@ -177,10 +177,15 @@ def seed_default_data(db: Session) -> None:
     # On some legacy Postgres deployments enum type "userrole" may not yet include
     # value "user". In that case, hard migration on startup crashes the whole app.
     # Keep startup resilient: try migration, and if enum is not ready - skip for now.
+    #
+    # Раньше здесь вместе с ролью сбрасывались permissions у всех non-admin
+    # пользователей до дефолтных — это убивало любые правки прав через
+    # «Администрирование» при каждом рестарте. Теперь миграция трогает ТОЛЬКО
+    # роль, права остаются как админ их настроил в UI.
     try:
         with db.begin_nested():
             db.query(User).filter(User.role != UserRole.admin).update(
-                {User.role: UserRole.user, User.permissions: default_permissions_for_role(UserRole.user)}
+                {User.role: UserRole.user}
             )
     except (DataError, ProgrammingError):
         # Keep startup resilient on legacy enum schemas without rolling back
@@ -288,20 +293,17 @@ def seed_default_data(db: Session) -> None:
                 )
                 db.add(user)
             else:
-                # Уже существует. Обновляем только базовые поля (имя, тип компании),
-                # пароль и активность — но НЕ перезаписываем permissions:
-                # они могут быть отредактированы админом через UI и должны
-                # сохраняться при рестартах. Если у пользователя по какой-то
-                # причине права пусты — впервые подставим пресет.
+                # Демо-пользователь уже существует. Обновляем только базовые
+                # поля (имя, тип компании, пароль, активность). НИКОГДА не
+                # перезаписываем permissions — это уничтожало правки админа
+                # через UI при каждом рестарте контейнера. Если в будущем
+                # понадобится переразлить пресеты — это будет одноразовая
+                # ручная команда, а не автоматический seed.
                 user.hashed_password = get_password_hash("Password_123!")
                 user.full_name = full_name
                 user.company_type = company_type
                 user.company_code = user.company_code or ("CTR" if company_type == CompanyType.contractor else "OWN")
                 user.role = UserRole.user
-                if not user.permissions:
-                    user.permissions = DEMO_ROLE_PRESET_PERMISSIONS.get(
-                        email, default_permissions_for_role(UserRole.user)
-                    )
                 user.is_active = True
                 db.add(user)
             demo_user_by_email[email] = user
