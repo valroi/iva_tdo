@@ -734,38 +734,31 @@ export default function DocumentsPage({
       title: "Шифр",
       dataIndex: "document_num",
       key: "document_num",
-      width: 320,
+      ellipsis: { showTitle: false },
       render: (value: string, row) => (
-        <Button type="link" size="small" onClick={() => setSelectedDocumentId(row.id)} style={{ padding: 0 }}>
-          {value}
-        </Button>
+        <Tooltip title={value} placement="topLeft">
+          <Button type="link" size="small" onClick={() => setSelectedDocumentId(row.id)} style={{ padding: 0 }}>
+            {value}
+          </Button>
+        </Tooltip>
       ),
     },
     {
       title: "Название",
       dataIndex: "title",
       key: "title",
-      width: 240,
-      ellipsis: true,
+      ellipsis: { showTitle: false },
       render: (value: string) => (
-        <Typography.Text ellipsis={{ tooltip: value }} style={{ maxWidth: 220 }}>
-          {value}
-        </Typography.Text>
+        <Tooltip title={value} placement="topLeft">
+          <span>{value}</span>
+        </Tooltip>
       ),
     },
-    { title: "Дисциплина", dataIndex: "discipline", key: "discipline", width: 120 },
-    {
-      title: "Последняя ревизия",
-      key: "latest_revision",
-      width: 130,
-      render: (_, row) => row.latest_revision_code ?? "—",
-    },
-    // Колонки «Статус последней», «Review code» и «Действие» убраны:
-    // вся эта информация дублирует карточку документа справа, а кнопки
-    // «Открыть/Прогресс» совпадают с действиями в самой карточке. Клик
-    // по строке выбирает документ — карточка обновляется автоматически.
-    // Если нужен PDF-перезалив у подрядчика, тег рендерится прямо в шифре.
   ];
+  // Колонки «Дисциплина», «Последняя ревизия», «Статус», «Review code»,
+  // «Действие» убраны из таблицы — всё это видно в правой панели
+  // «Карточка документа» после выбора строки. Чем меньше колонок, тем
+  // удобнее читать список, особенно в узком окне.
 
   const revisionColumns: ColumnsType<Revision> = [
     {
@@ -1365,7 +1358,8 @@ export default function DocumentsPage({
                       dataSource={activeDocumentRows}
                       pagination={false}
                       tableLayout="fixed"
-                      scroll={{ x: 1250 }}
+                      /* scroll x убран — узкая таблица (Шифр + Название)
+                         помещается в любую ширину панели. */
                       locale={{ emptyText: "Документы в работе не найдены." }}
                       rowClassName={(row) => (row.id === selectedDocumentId ? "ant-table-row-selected" : "")}
                       onRow={(row) => ({
@@ -1387,7 +1381,8 @@ export default function DocumentsPage({
                       dataSource={completedDocumentRows}
                       pagination={false}
                       tableLayout="fixed"
-                      scroll={{ x: 1250 }}
+                      /* scroll x убран — узкая таблица (Шифр + Название)
+                         помещается в любую ширину панели. */
                       locale={{ emptyText: "Завершенные документы пока отсутствуют." }}
                     />
                   ),
@@ -1447,6 +1442,21 @@ export default function DocumentsPage({
                         </Button>
                       </Tooltip>
                     </>
+                  )}
+                  {/* Прямой переход в полную карточку ревизии без захода
+                      в «Обзор». Открывается последняя ревизия документа. */}
+                  {latestRevision?.id && (
+                    <Tooltip title="Открыть полную карточку документа со всеми ревизиями и комментариями">
+                      <Button
+                        type="primary"
+                        size="small"
+                        onClick={() => {
+                          window.location.hash = `#/revision_card/${latestRevision.id}`;
+                        }}
+                      >
+                        Полная карточка
+                      </Button>
+                    </Tooltip>
                   )}
                 </Space>
                 {selectedRevision && (

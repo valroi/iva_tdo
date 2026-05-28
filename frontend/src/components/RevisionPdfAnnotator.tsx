@@ -425,7 +425,10 @@ export default function RevisionPdfAnnotator({
             <Typography.Text>
               Страница {pageNumber}/{numPages}
             </Typography.Text>
-            <Button onClick={() => setSelection(null)}>Сбросить выделение</Button>
+            {/* «Сбросить выделение» нужно только при создании замечаний
+                заказчиком (он рисует прямоугольники на PDF). Подрядчику
+                на этапе просмотра/ответа — нет, у него нет выделений. */}
+            {mode === "owner_create" && <Button onClick={() => setSelection(null)}>Сбросить выделение</Button>}
           </Space>
           <div style={{ border: "1px solid #d9e2f1", borderRadius: 8, padding: 8, maxHeight: 520, overflow: "auto" }}>
             <div
@@ -697,7 +700,11 @@ export default function RevisionPdfAnnotator({
                 />
               )}
             </>
-          ) : (
+          ) : contractorPendingParentComments.length > 0 ? (
+            // Кнопки ответа подрядчика «I — На обсуждение» и «A — Принято»
+            // показываем только когда есть нерассмотренные замечания
+            // заказчика. Пока подрядчик просто просматривает свой PDF
+            // (до получения CRS) — кнопок нет, чтобы не путать.
             <Space direction="vertical" style={{ width: "100%" }} size={8}>
               <Space>
                 <Button
@@ -712,8 +719,7 @@ export default function RevisionPdfAnnotator({
                       const active = comments.find((item) => item.id === activeCommentId);
                       if (!active) return true;
                       return active.contractor_status !== null;
-                    })() ||
-                    contractorPendingParentComments.length === 0
+                    })()
                   }
                 >
                   I - На обсуждение
@@ -730,15 +736,14 @@ export default function RevisionPdfAnnotator({
                       const active = comments.find((item) => item.id === activeCommentId);
                       if (!active) return true;
                       return !(active.contractor_status === null || (active.contractor_status === "I" && active.backlog_status === "LR_FINAL_CONFIRM"));
-                    })() ||
-                    contractorPendingParentComments.length === 0
+                    })()
                   }
                 >
                   A - Принято
                 </Button>
               </Space>
             </Space>
-          )}
+          ) : null}
         </Space>
       )}
     </Modal>
