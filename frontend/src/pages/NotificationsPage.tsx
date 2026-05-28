@@ -4,7 +4,7 @@ import { useMemo } from "react";
 
 import { markNotificationRead } from "../api";
 import type { NotificationItem } from "../types";
-import { formatDateTimeRu } from "../utils/datetime";
+import { formatDateTimeRu, formatDeadlineRu } from "../utils/datetime";
 
 interface Props {
   notifications: NotificationItem[];
@@ -52,7 +52,7 @@ export default function NotificationsPage({ notifications, onReload, onOpenTarge
       dataIndex: "task_deadline",
       key: "task_deadline",
       width: 130,
-      render: (v: string | null | undefined) => formatDateTimeRu(v),
+      render: (v: string | null | undefined) => formatDeadlineRu(v),
     },
     {
       title: "Прочитано",

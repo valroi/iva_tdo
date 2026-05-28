@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "svadba",
+      "runtimeExecutable": "/Users/Valerii/.nvm/versions/node/v24.11.0/bin/npx",
+      "runtimeArgs": ["serve", "/Users/Valerii/Documents/svadba", "-p", "3456", "--no-clipboard"],
+      "port": 3456
+    },
+    {
+      "name": "hrp-landing",
+      "runtimeExecutable": "/Users/Valerii/.nvm/versions/node/v24.11.0/bin/npx",
+      "runtimeArgs": ["serve", "/Users/Valerii/Documents/hrp-landing/dist", "-p", "5176", "--no-clipboard"],
+      "port": 5176
+    }
+  ]
+}

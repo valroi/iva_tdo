@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { downloadRevisionAttachmentsArchive, listOwnerReviewQueue, listRevisionsOverview } from "../api";
 import ProcessHint from "../components/ProcessHint";
 import type { RevisionOverviewItem, TdoQueueItem, User } from "../types";
-import { formatDateTimeRu } from "../utils/datetime";
+import { formatDateTimeRu, formatDeadlineRu } from "../utils/datetime";
 import { getDisplayRevisionCode } from "../utils/revisionProcess";
 import { RevisionStatusCell } from "../utils/revisionHints";
 
@@ -113,7 +113,7 @@ export default function TrmPage({ currentUser, onOpenRevision }: Props): JSX.Ele
       width: 260,
       render: (v: string) => <RevisionStatusCell currentUser={currentUser} status={v} />,
     },
-    { title: "Срок", dataIndex: "latest_deadline", key: "latest_deadline", width: 130, render: (v: string | null) => formatDateTimeRu(v) },
+    { title: "Срок", dataIndex: "latest_deadline", key: "latest_deadline", width: 130, render: (v: string | null) => formatDeadlineRu(v) },
   ];
 
   const ownerColumns: ColumnsType<OwnerTrmRow> = [

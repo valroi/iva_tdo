@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { downloadRevisionAttachmentsArchive, listRevisionsOverview } from "../api";
 import ProcessHint from "../components/ProcessHint";
 import type { RevisionOverviewItem, User } from "../types";
-import { formatDateTimeRu } from "../utils/datetime";
+import { formatDeadlineRu } from "../utils/datetime";
 import { getDisplayRevisionCode } from "../utils/revisionProcess";
 import { ContractorReuploadPdfTag, RevisionStatusCell, contractorNeedsPdfReupload } from "../utils/revisionHints";
 
@@ -50,7 +50,7 @@ export default function RevisionsPage({ currentUser, onOpenRevision }: Props): J
       render: (_, row) => <RevisionStatusCell currentUser={currentUser} status={row.status} />,
     },
     { title: "TRM", dataIndex: "trm_number", key: "trm_number", width: 220, render: (v: string | null) => v ?? "—" },
-    { title: "Срок", dataIndex: "review_deadline", key: "review_deadline", width: 130, render: (v: string | null) => formatDateTimeRu(v) },
+    { title: "Срок", dataIndex: "review_deadline", key: "review_deadline", width: 130, render: (v: string | null) => formatDeadlineRu(v) },
     {
       title: "Ссылка",
       key: "link",

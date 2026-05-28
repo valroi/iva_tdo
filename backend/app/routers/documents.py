@@ -1080,13 +1080,30 @@ def upload_document_file(
                         .all()
                     )
                     for lead in lead_members:
+                        # Дедупликация: если у рук. ТДО уже есть непрочитанное
+                        # уведомление по этой же ревизии — не плодим новые.
+                        # Подрядчик может перезаливать PDF несколько раз —
+                        # ТДО всё равно нужна одна задача «проверить и в TRM».
+                        already_exists = (
+                            db.query(Notification.id)
+                            .filter(
+                                Notification.user_id == lead.user_id,
+                                Notification.event_type == "REVISION_UPLOADED_FOR_TDO",
+                                Notification.revision_id == revision.id,
+                                Notification.is_read.is_(False),
+                            )
+                            .first()
+                            is not None
+                        )
+                        if already_exists:
+                            continue
                         db.add(
                             Notification(
                                 user_id=lead.user_id,
                                 event_type="REVISION_UPLOADED_FOR_TDO",
                                 message=(
                                     f"Загружен PDF для документа {doc.document_num}, ревизия {revision.revision_code}. "
-                                    "Требуется решение ТДО (TRM/отклонить)."
+                                    "Требуется решение ТДО (проверить комплектность и отправить в TRM)."
                                 ),
                                 project_code=mdr.project_code,
                                 document_num=doc.document_num,

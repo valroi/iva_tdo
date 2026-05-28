@@ -121,11 +121,12 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
   const canCommentOnSelectedRevision = isOwnerCommentingAllowedStatus(selectedRevision?.status);
   const isSelectedRevisionClosedForPdfUpdate =
     selectedRevision?.status === "CONTRACTOR_REPLY_A" || selectedRevision?.status === "SUBMITTED";
-  // AP ставит только LR/R заказчика. Администратор — наблюдатель, AP не ставит.
+  // AP ставит ТОЛЬКО LR заказчика. R может комментировать, но финальное
+  // решение AP — прерогатива лидера ревьюверов. Администратор — наблюдатель.
   const canSetApByRole =
     currentUser.company_type === "owner" &&
     currentUser.permissions.can_publish_comments &&
-    (card?.current_user_matrix_role === "LR" || card?.current_user_matrix_role === "R");
+    card?.current_user_matrix_role === "LR";
   const activePublishedRemarksCount = selectedRevisionComments.filter(
     (comment) =>
       comment.parent_id === null &&

@@ -2,7 +2,7 @@ import { Button, Card, Col, Row, Space, Statistic, Table, Tag, Typography } from
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useState } from "react";
 import { listDocumentsRegistry, listOwnerReviewQueue, listProjectMembers, listReviewMatrix, listRevisionsOverview } from "../api";
-import { formatDateTimeRu } from "../utils/datetime";
+import { formatDateTimeRu, formatDeadlineRu } from "../utils/datetime";
 import { getRuStatusLabel } from "../utils/revisionHints";
 
 import type { DocumentItem, DocumentRegistryItem, MDRRecord, NotificationItem, ProjectItem, ProjectMemberRole, RevisionOverviewItem, TdoQueueItem, User } from "../types";
@@ -276,7 +276,7 @@ export default function DashboardPage({
       width: 220,
       render: (_, row) => (row.project_code ? (roleLabelByProjectCode[row.project_code] ?? "—") : "—"),
     },
-    { title: "Дедлайн", dataIndex: "task_deadline", key: "task_deadline", width: 130, render: (v) => formatDateTimeRu(v) },
+    { title: "Дедлайн", dataIndex: "task_deadline", key: "task_deadline", width: 130, render: (v) => formatDeadlineRu(v) },
     {
       title: "От кого",
       key: "author_status",
@@ -316,7 +316,7 @@ export default function DashboardPage({
     { title: "Документ", dataIndex: "document_num", ellipsis: true },
     { title: "Ревизия", dataIndex: "revision_code", width: 90 },
     { title: "Статус", dataIndex: "status", width: 190, render: (v: string) => getRuStatusLabel(v) },
-    { title: "SLA дедлайн", dataIndex: "review_deadline", width: 130, render: (v) => formatDateTimeRu(v) },
+    { title: "SLA дедлайн", dataIndex: "review_deadline", width: 130, render: (v) => formatDeadlineRu(v) },
     {
       title: "Осталось",
       key: "remaining",
