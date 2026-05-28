@@ -475,9 +475,13 @@ export default function ProjectsPage({
               Матрица шифрования
             </Button>
           )}
-          <Button type="primary" onClick={() => setProjectOpen(true)} disabled={!isAdmin}>
-            + Создать проект
-          </Button>
+          {/* Создание проектов — только админ. У роли без прав кнопка скрыта,
+              чтобы не было «лишних» элементов в интерфейсе. */}
+          {isAdmin && (
+            <Button type="primary" onClick={() => setProjectOpen(true)}>
+              + Создать проект
+            </Button>
+          )}
         </Space>
       </Space>
 

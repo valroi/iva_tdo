@@ -1,4 +1,6 @@
-import { Button, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
+import { Button, Dropdown, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
+import { DownOutlined, FileExcelOutlined } from "@ant-design/icons";
+import type { MenuProps } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -52,6 +54,9 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
 
   const [form] = Form.useForm();
   const latestComposeRequestRef = useRef(0);
+  // Скрытые input'ы для импорта Excel — Dropdown триггерит их клик.
+  const importCheckRef = useRef<HTMLInputElement | null>(null);
+  const importApplyRef = useRef<HTMLInputElement | null>(null);
 
   const currentProjectCode = Form.useWatch("project_code", form);
   const currentDocType = Form.useWatch("doc_type", form);
@@ -489,62 +494,78 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
         <Typography.Title level={4} style={{ margin: 0, whiteSpace: "nowrap", flexShrink: 0 }}>
           Реестр документов
         </Typography.Title>
-        {selectedProject?.code && (
+        {/* Excel-операции собраны в один dropdown «Excel» — четыре кнопки в
+            строке выглядели свалкой. Виден только тем у кого права на ведение
+            реестра. Скрытые file-input'ы переиспользуются через ref. */}
+        {projects[0]?.code && canManageMdr && (
           <>
-            <Button
-              onClick={async () => {
-                try {
-                  await downloadMdrTemplate(selectedProject.code);
-                } catch (error) {
-                  message.error(error instanceof Error ? error.message : "Не удалось скачать шаблон");
-                }
+            <input
+              ref={importCheckRef}
+              type="file"
+              accept=".xlsx"
+              style={{ display: "none" }}
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                await handleImportFile(file, true);
+                e.currentTarget.value = "";
+              }}
+            />
+            <input
+              ref={importApplyRef}
+              type="file"
+              accept=".xlsx"
+              style={{ display: "none" }}
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                await handleImportFile(file, false);
+                e.currentTarget.value = "";
+              }}
+            />
+            <Dropdown
+              menu={{
+                items: [
+                  {
+                    key: "template",
+                    label: "Скачать шаблон",
+                    onClick: async () => {
+                      try {
+                        await downloadMdrTemplate(projects[0].code);
+                      } catch (error) {
+                        message.error(error instanceof Error ? error.message : "Не удалось скачать шаблон");
+                      }
+                    },
+                  },
+                  {
+                    key: "export",
+                    label: "Экспорт реестра",
+                    onClick: async () => {
+                      try {
+                        await exportMdr(projects[0].code);
+                      } catch (error) {
+                        message.error(error instanceof Error ? error.message : "Не удалось выгрузить Excel");
+                      }
+                    },
+                  },
+                  { type: "divider" as const },
+                  {
+                    key: "check",
+                    label: "Проверить файл (dry-run)",
+                    onClick: () => importCheckRef.current?.click(),
+                  },
+                  {
+                    key: "import",
+                    label: "Импорт реестра",
+                    onClick: () => importApplyRef.current?.click(),
+                  },
+                ] as MenuProps["items"],
               }}
             >
-              Шаблон Excel
-            </Button>
-            <Button
-              onClick={async () => {
-                try {
-                  await exportMdr(selectedProject.code);
-                } catch (error) {
-                  message.error(error instanceof Error ? error.message : "Не удалось выгрузить Excel");
-                }
-              }}
-            >
-              Экспорт Excel
-            </Button>
-            <Button loading={importingMdr}>
-              <label style={{ cursor: "pointer" }}>
-                Проверить Excel
-                <input
-                  type="file"
-                  accept=".xlsx"
-                  style={{ display: "none" }}
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0];
-                    if (!file) return;
-                    await handleImportFile(file, true);
-                    e.currentTarget.value = "";
-                  }}
-                />
-              </label>
-            </Button>
-            <Button loading={importingMdr} type="primary">
-              <label style={{ cursor: "pointer" }}>
-                Импорт Excel
-                <input
-                  type="file"
-                  accept=".xlsx"
-                  style={{ display: "none" }}
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0];
-                    if (!file) return;
-                    await handleImportFile(file, false);
-                    e.currentTarget.value = "";
-                  }}
-                />
-              </label>
-            </Button>
+              <Button icon={<FileExcelOutlined />} loading={importingMdr}>
+                Excel <DownOutlined />
+              </Button>
+            </Dropdown>
           </>
         )}
         {canManageMdr && (
