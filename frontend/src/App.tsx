@@ -205,19 +205,33 @@ export default function App(): JSX.Element {
     }
   }, [authenticated, loadInitialData]);
 
-  // Polling уведомлений каждые 30 секунд: новые задачи (упал документ
-  // на отработку, пришло замечание и т.п.) появляются в реальном времени
-  // без необходимости обновлять страницу. Heavy-данные (mdr, projects,
-  // documents) не пере-запрашиваем — они меняются реже.
+  // Polling всех ключевых списков каждые 20 секунд: уведомления,
+  // реестр (mdr), документы, проекты. Это даёт «онлайн»-эффект:
+  // создал документ con_tdo — у разработчика появляется без F5.
+  // Polling работает только когда вкладка видима — иначе зря грузим
+  // сервер, когда пользователь переключился на другую вкладку браузера.
   useEffect(() => {
     if (!authenticated) return;
     const tick = () => {
-      void listNotifications()
-        .then(setNotifications)
-        .catch(() => {});
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+        return;
+      }
+      void listNotifications().then(setNotifications).catch(() => {});
+      void listMdr().then(setMdr).catch(() => {});
+      void listDocuments().then(setDocuments).catch(() => {});
+      void listProjects().then(setProjects).catch(() => {});
     };
-    const id = window.setInterval(tick, 30_000);
-    return () => window.clearInterval(id);
+    const id = window.setInterval(tick, 20_000);
+    // Дополнительный «толчок» при возврате на вкладку — данные обновятся
+    // сразу, не дожидаясь следующего тика.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") tick();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [authenticated]);
 
   const unreadNotificationsCount = useMemo(
