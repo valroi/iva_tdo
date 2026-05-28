@@ -144,7 +144,18 @@ export default function ProjectsPage({
   const [cipherFields, setCipherFields] = useState<CipherTemplateField[]>([]);
   const [cipherPreviewValues, setCipherPreviewValues] = useState<Record<string, string>>({});
   const [cipherPreviewResult, setCipherPreviewResult] = useState<string>("");
-  const [activeTabKey, setActiveTabKey] = useState<string>("members");
+  // Активная вкладка проекта переживает refresh данных / перерендер.
+  // Сохраняем в localStorage, чтобы после «Добавить документ» / других
+  // действий пользователь оставался на той же вкладке, а не улетал
+  // обратно на «Участники проекта».
+  const [activeTabKey, setActiveTabKey] = useState<string>(() => {
+    if (typeof window === "undefined") return "members";
+    return window.localStorage.getItem("tdo_projects_tab") || "members";
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem("tdo_projects_tab", activeTabKey);
+  }, [activeTabKey]);
   const [localNotificationTarget, setLocalNotificationTarget] = useState<{ project_code?: string | null; document_num?: string | null; revision_id?: number | null } | null>(null);
   const isAdmin = currentUser.role === "admin";
   const canManageMatrix = isAdmin || currentUser.permissions.can_manage_review_matrix;
