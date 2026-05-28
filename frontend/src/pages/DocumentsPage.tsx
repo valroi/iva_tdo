@@ -760,48 +760,11 @@ export default function DocumentsPage({
       width: 130,
       render: (_, row) => row.latest_revision_code ?? "—",
     },
-    {
-      title: "Статус последней",
-      key: "latest_status",
-      width: 220,
-      render: (_, row) => (
-        <Space direction="vertical" size={2} style={{ maxWidth: 200 }}>
-          <Typography.Text ellipsis={{ tooltip: row.latest_revision_status ?? "—" }}>
-            {row.latest_revision_status ?? "—"}
-          </Typography.Text>
-          {contractorNeedsPdfReupload(currentUser, row.latest_revision_status ?? undefined) && (
-            <ContractorReuploadPdfTag />
-          )}
-        </Space>
-      ),
-    },
-    {
-      title: "Review code",
-      key: "latest_review",
-      width: 110,
-      render: (_, row) => row.latest_review_code ?? "—",
-    },
-    {
-      title: "Действие",
-      key: "action",
-      width: 180,
-      render: (_, row) => (
-        <Space>
-          <Button size="small" onClick={() => setSelectedDocumentId(row.id)}>
-            Открыть
-          </Button>
-          <Button
-            size="small"
-            onClick={() => {
-              setSelectedDocumentId(row.id);
-              setProgressModalOpen(true);
-            }}
-          >
-            Прогресс
-          </Button>
-        </Space>
-      ),
-    },
+    // Колонки «Статус последней», «Review code» и «Действие» убраны:
+    // вся эта информация дублирует карточку документа справа, а кнопки
+    // «Открыть/Прогресс» совпадают с действиями в самой карточке. Клик
+    // по строке выбирает документ — карточка обновляется автоматически.
+    // Если нужен PDF-перезалив у подрядчика, тег рендерится прямо в шифре.
   ];
 
   const revisionColumns: ColumnsType<Revision> = [
@@ -825,7 +788,7 @@ export default function DocumentsPage({
         ) {
           return (
             <Space direction="vertical" size={2}>
-              <Tag color="gold">{value}</Tag>
+              <Tag color="gold">{getRuStatusLabel(value)}</Tag>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 Не отправлено в TRM
               </Typography.Text>
@@ -835,7 +798,7 @@ export default function DocumentsPage({
         if (currentUser.company_type === "owner" && value === "UPLOADED_WAITING_TDO") {
           return (
             <Space direction="vertical" size={2}>
-              <Tag color="blue">{value}</Tag>
+              <Tag color="blue">{getRuStatusLabel(value)}</Tag>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 Доступно после TRM
               </Typography.Text>
@@ -1331,22 +1294,16 @@ export default function DocumentsPage({
         <Typography.Title level={4} style={{ margin: 0 }}>
           Ревизии и комментарии
         </Typography.Title>
-        {canCreateRevision(currentUser) && (
-          <Tooltip
-            title={
-              latestRevisionInProgress
-                ? "Нельзя создать новую ревизию, пока предыдущая в работе (на рассмотрении / в ответе). Дождитесь завершения цикла."
-                : "Создать новую ревизию для выбранного документа"
-            }
-          >
-            <span>
-              <Button
-                onClick={() => setRevModalOpen(true)}
-                disabled={!selectedDocumentId || selectedDocumentCompleted || latestRevisionInProgress}
-              >
-                + Ревизия
-              </Button>
-            </span>
+        {/* Кнопка «+ Ревизия» появляется только когда подрядчик действительно
+            может создать ревизию: выбран документ, не завершён, и предыдущая
+            ревизия НЕ в работе. В остальных случаях кнопки нет совсем —
+            никакого disabled-«заигрывания», экран чистый. */}
+        {canCreateRevision(currentUser) &&
+          selectedDocumentId &&
+          !selectedDocumentCompleted &&
+          !latestRevisionInProgress && (
+          <Tooltip title="Создать новую ревизию для выбранного документа">
+            <Button onClick={() => setRevModalOpen(true)}>+ Ревизия</Button>
           </Tooltip>
         )}
         {isOwner(currentUser) && currentUser.permissions.can_raise_comments && (
@@ -1410,6 +1367,11 @@ export default function DocumentsPage({
                       tableLayout="fixed"
                       scroll={{ x: 1250 }}
                       locale={{ emptyText: "Документы в работе не найдены." }}
+                      rowClassName={(row) => (row.id === selectedDocumentId ? "ant-table-row-selected" : "")}
+                      onRow={(row) => ({
+                        onClick: () => setSelectedDocumentId(row.id),
+                        style: { cursor: "pointer" },
+                      })}
                     />
                   ),
                 },
@@ -1493,7 +1455,8 @@ export default function DocumentsPage({
                       <Typography.Text type="secondary">Workflow ревизии:</Typography.Text>
                       <Typography.Text type="secondary">
                         Статус: <Typography.Text strong>{getRuStatusLabel(latestRevision?.status ?? "")}</Typography.Text>
-                        {latestRevision?.status && <Typography.Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>({latestRevision.status})</Typography.Text>}
+                        {/* Технический enum-код раньше отображался в скобках —
+                            пользователю он не нужен, скрыт. */}
                       </Typography.Text>
                       <Space size={6}>
                         <Typography.Text type="secondary">Код замечаний (по выбранной ревизии):</Typography.Text>
