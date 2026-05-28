@@ -94,6 +94,9 @@ export default function RevisionPdfAnnotator({
   const [contractorResponseStatus, setContractorResponseStatus] = useState<"I" | "A">("I");
   const [contractorResponseText, setContractorResponseText] = useState("");
   const overlayRef = useRef<HTMLDivElement | null>(null);
+  // Контейнер с PDF (с overflow:auto) — к нему делаем scroll при переходе
+  // к замечанию, чтобы область выделения сразу попала в видимую часть.
+  const pdfScrollRef = useRef<HTMLDivElement | null>(null);
 
   const fileUrl = useMemo(() => (revisionId ? getRevisionPdfUrl(revisionId) : null), [revisionId]);
   const documentOptions = useMemo(() => ({ httpHeaders: getAuthHeaders() }), [open]);
@@ -274,15 +277,30 @@ export default function RevisionPdfAnnotator({
   const jumpToComment = (item: CommentItem): void => {
     setActiveCommentId(item.id);
     setPageNumber(Math.min(Math.max(1, item.page ?? 1), Math.max(1, numPages)));
-    if (
+    const hasArea =
       item.area_x !== null &&
       item.area_y !== null &&
       item.area_w !== null &&
-      item.area_h !== null
-    ) {
-      setSelection({ x: item.area_x, y: item.area_y, w: item.area_w, h: item.area_h });
+      item.area_h !== null;
+    if (hasArea) {
+      setSelection({ x: item.area_x!, y: item.area_y!, w: item.area_w!, h: item.area_h! });
     } else {
       setSelection(null);
+    }
+    // Auto-scroll к области замечания. Координаты нормализованы 0..1
+    // относительно overlay-страницы. Задержка нужна, чтобы Page успел
+    // отрендериться после смены номера страницы.
+    if (hasArea) {
+      setTimeout(() => {
+        const scroller = pdfScrollRef.current;
+        const overlay = overlayRef.current;
+        if (!scroller || !overlay) return;
+        const overlayHeight = overlay.getBoundingClientRect().height;
+        if (!overlayHeight) return;
+        // Сдвигаем верхний край замечания ближе к центру окна.
+        const targetTop = (item.area_y ?? 0) * overlayHeight - scroller.clientHeight / 3;
+        scroller.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
+      }, 250);
     }
   };
 
@@ -430,7 +448,7 @@ export default function RevisionPdfAnnotator({
                 на этапе просмотра/ответа — нет, у него нет выделений. */}
             {mode === "owner_create" && <Button onClick={() => setSelection(null)}>Сбросить выделение</Button>}
           </Space>
-          <div style={{ border: "1px solid #d9e2f1", borderRadius: 8, padding: 8, maxHeight: 520, overflow: "auto" }}>
+          <div ref={pdfScrollRef} style={{ border: "1px solid #d9e2f1", borderRadius: 8, padding: 8, maxHeight: 520, overflow: "auto" }}>
             <div
               ref={overlayRef}
               style={{ position: "relative", width: "fit-content", margin: "0 auto", cursor: "crosshair" }}

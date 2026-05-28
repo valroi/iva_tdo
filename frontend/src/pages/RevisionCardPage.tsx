@@ -49,6 +49,27 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
     void loadCard();
   }, [revisionId]);
 
+  // Polling карточки и замечаний каждые 15 секунд: пока пользователь
+  // смотрит документ, другие роли могут добавлять/менять замечания —
+  // они должны появляться вживую без F5. Не дёргаем API когда вкладка
+  // скрыта (visibilityState !== visible).
+  useEffect(() => {
+    if (!revisionId) return;
+    const tick = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      void loadCard();
+    };
+    const id = window.setInterval(tick, 15_000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void loadCard();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [revisionId]);
+
   const selectedRevision = useMemo(
     () => card?.revisions.find((item) => item.id === selectedRevisionId) ?? null,
     [card?.revisions, selectedRevisionId],
@@ -518,11 +539,13 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
           locale={{ emptyText: "По этой ревизии пока нет комментариев." }}
           expandable={{
             expandedRowRender: (row) => {
-              // Управление замечаниями/CRS из карточки — только LR/R заказчика.
+              // Управление замечаниями (Отклонить, Добавить в CRS) — только
+              // LR заказчика по дисциплине документа. R по дисциплине только
+              // комментирует и не может принимать/отклонять/публиковать.
               const canManageFromCard =
                 isOwner(currentUser) &&
                 currentUser.permissions.can_publish_comments &&
-                (card?.current_user_matrix_role === "LR" || card?.current_user_matrix_role === "R") &&
+                card?.current_user_matrix_role === "LR" &&
                 !documentCompleted;
               const isLatestRow = latestRevisionId !== null && row.revision_id === latestRevisionId;
               const rowComments =
@@ -1191,9 +1214,9 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
         canCreateRemarks={(card?.can_current_user_raise_comments ?? true) && !documentCompleted}
         canCreateOwnerRemarks={canOwnerCreateRemarks && canCommentOnSelectedRevision && !documentCompleted}
         canManageOwnerRemarks={
-          currentUser.role === "admin" ||
-          card?.current_user_matrix_role === "LR" ||
-          card?.current_user_matrix_role === "R"
+          // Принять/Отклонить/Удалить замечания — прерогатива LR
+          // по дисциплине документа. R и admin не управляют решениями.
+          card?.current_user_matrix_role === "LR"
         }
         noAccessHint={
           documentCompleted
