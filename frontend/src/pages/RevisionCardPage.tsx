@@ -540,14 +540,23 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
           locale={{ emptyText: "По этой ревизии пока нет комментариев." }}
           expandable={{
             expandedRowRender: (row) => {
-              // Управление замечаниями (Отклонить, Добавить в CRS) — только
-              // LR заказчика по дисциплине документа. R по дисциплине только
-              // комментирует и не может принимать/отклонять/публиковать.
+              // Управление замечаниями (Отклонить, Добавить в CRS, Вернуть
+              // в работу, Удалить) — только LR заказчика по дисциплине
+              // документа. R по дисциплине только комментирует.
+              //
+              // Также важна линейность процесса: ПОСЛЕ отправки CRS
+              // (status OWNER_COMMENTS_SENT / CONTRACTOR_REPLY_I) мяч у
+              // подрядчика — заказчик уже не может ничего менять, пока
+              // подрядчик не ответит. Все кнопки управления исчезают.
+              const rowStatus = row.status;
+              const rowOwnerHoldsBall =
+                rowStatus === "UNDER_REVIEW" || rowStatus === "CONTRACTOR_REPLY_A";
               const canManageFromCard =
                 isOwner(currentUser) &&
                 currentUser.permissions.can_publish_comments &&
                 card?.current_user_matrix_role === "LR" &&
-                !documentCompleted;
+                !documentCompleted &&
+                rowOwnerHoldsBall;
               const isLatestRow = latestRevisionId !== null && row.revision_id === latestRevisionId;
               const rowComments =
                 showOnlyUnsentCrs && currentUser.permissions.can_publish_comments && row.revision_id === selectedRevisionId
@@ -1216,8 +1225,9 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
         canCreateOwnerRemarks={canOwnerCreateRemarks && canCommentOnSelectedRevision && !documentCompleted}
         canManageOwnerRemarks={
           // Принять/Отклонить/Удалить замечания — прерогатива LR
-          // по дисциплине документа. R и admin не управляют решениями.
-          card?.current_user_matrix_role === "LR"
+          // по дисциплине документа. После отправки CRS (мяч у подрядчика)
+          // даже LR ничего не может менять до получения ответа.
+          card?.current_user_matrix_role === "LR" && apActionableStatus
         }
         noAccessHint={
           documentCompleted

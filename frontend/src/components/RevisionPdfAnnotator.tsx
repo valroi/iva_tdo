@@ -1,4 +1,4 @@
-import { Alert, Button, Form, Input, Modal, Select, Space, Tabs, Tag, Typography, App } from "antd";
+import { Alert, Button, Form, Input, Modal, Select, Space, Tabs, Tag, Tooltip, Typography, App } from "antd";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 
@@ -435,19 +435,47 @@ export default function RevisionPdfAnnotator({
                 {comments
                   .filter((item) => item.parent_id === null)
                   .map((item) => (
-                    <Button
+                    <Tooltip
                       key={item.id}
-                      size="small"
-                      type={activeCommentId === item.id ? "primary" : "default"}
-                      style={{ width: "100%", textAlign: "left", height: "auto", whiteSpace: "normal", justifyContent: "flex-start" }}
-                      onMouseEnter={() => setHoveredCommentId(item.id)}
-                      onMouseLeave={() => setHoveredCommentId((prev) => (prev === item.id ? null : prev))}
-                      onClick={() => jumpToComment(item)}
+                      title={(item.text ?? "").replace(/^\[(REMARK|QUESTION)\]\s*/i, "")}
+                      placement="topLeft"
+                      mouseEnterDelay={0.3}
                     >
-                      {(item.review_code ?? "—")} · стр. {item.page ?? "—"} · {item.author_name ?? item.author_email ?? "—"} ·{" "}
-                      {item.status === "REJECTED" ? "Отклонено LR" : item.status === "RESOLVED" ? "Будет учтено" : "В работе"} ·{" "}
-                      {(item.text ?? "").replace(/^\[(REMARK|QUESTION)\]\s*/i, "").slice(0, 120)}
-                    </Button>
+                      <Button
+                        size="small"
+                        type={activeCommentId === item.id ? "primary" : "default"}
+                        style={{ width: "100%", textAlign: "left", justifyContent: "flex-start", padding: "2px 8px" }}
+                        onMouseEnter={() => setHoveredCommentId(item.id)}
+                        onMouseLeave={() => setHoveredCommentId((prev) => (prev === item.id ? null : prev))}
+                        onClick={() => jumpToComment(item)}
+                      >
+                        <Space size={6} wrap={false} style={{ width: "100%", overflow: "hidden" }}>
+                          <Tag
+                            color={
+                              item.review_code === "AP" ? "green" :
+                              item.review_code === "AN" ? "blue" :
+                              item.review_code === "CO" ? "orange" :
+                              item.review_code === "RJ" ? "red" : "default"
+                            }
+                            style={{ margin: 0, minWidth: 28, textAlign: "center", fontWeight: 600 }}
+                          >
+                            {item.review_code ?? "—"}
+                          </Tag>
+                          <Typography.Text type="secondary" style={{ fontSize: 11, whiteSpace: "nowrap" }}>
+                            стр. {item.page ?? "—"}
+                          </Typography.Text>
+                          <Tag
+                            color={item.status === "REJECTED" ? "red" : item.status === "RESOLVED" ? "green" : "default"}
+                            style={{ margin: 0, fontSize: 10, padding: "0 6px" }}
+                          >
+                            {item.status === "REJECTED" ? "Откл." : item.status === "RESOLVED" ? "Учт." : "В раб."}
+                          </Tag>
+                          <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {(item.text ?? "").replace(/^\[(REMARK|QUESTION)\]\s*/i, "")}
+                          </span>
+                        </Space>
+                      </Button>
+                    </Tooltip>
                   ))}
               </Space>
             </Space>
