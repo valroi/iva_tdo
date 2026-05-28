@@ -98,6 +98,20 @@ export default function RevisionPdfAnnotator({
   // к замечанию, чтобы область выделения сразу попала в видимую часть.
   const pdfScrollRef = useRef<HTMLDivElement | null>(null);
 
+  // Polling замечаний пока модалка открыта: даже если параллельно
+  // работает другая роль (LR добавил замечание, R должен увидеть в
+  // реальном времени), новые комменты подтянутся через onCreated→
+  // loadCard у родителя без необходимости закрывать/открывать модалку.
+  useEffect(() => {
+    if (!open) return;
+    const tick = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      void onCreated();
+    };
+    const id = window.setInterval(tick, 8_000);
+    return () => window.clearInterval(id);
+  }, [open, onCreated]);
+
   const fileUrl = useMemo(() => (revisionId ? getRevisionPdfUrl(revisionId) : null), [revisionId]);
   const documentOptions = useMemo(() => ({ httpHeaders: getAuthHeaders() }), [open]);
 
@@ -287,20 +301,25 @@ export default function RevisionPdfAnnotator({
     } else {
       setSelection(null);
     }
-    // Auto-scroll к области замечания. Координаты нормализованы 0..1
-    // относительно overlay-страницы. Задержка нужна, чтобы Page успел
-    // отрендериться после смены номера страницы.
+    // Auto-scroll к области замечания. Координаты area_x/area_y хранятся
+    // в пикселях относительно overlay-страницы (см. как они рисуются
+    // ниже в JSX). Задержка нужна, чтобы Page успел отрендериться
+    // после смены номера страницы.
     if (hasArea) {
-      setTimeout(() => {
+      const ay = item.area_y ?? 0;
+      const tryScroll = () => {
         const scroller = pdfScrollRef.current;
-        const overlay = overlayRef.current;
-        if (!scroller || !overlay) return;
-        const overlayHeight = overlay.getBoundingClientRect().height;
-        if (!overlayHeight) return;
-        // Сдвигаем верхний край замечания ближе к центру окна.
-        const targetTop = (item.area_y ?? 0) * overlayHeight - scroller.clientHeight / 3;
-        scroller.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
-      }, 250);
+        if (!scroller) return false;
+        // Сдвигаем верхний край замечания на 1/4 высоты вьюпорта от
+        // верха — замечание оказывается в верхней трети, контекст
+        // сверху виден.
+        const targetTop = Math.max(0, ay - scroller.clientHeight / 4);
+        scroller.scrollTo({ top: targetTop, behavior: "smooth" });
+        return true;
+      };
+      // Несколько попыток на случай, если страница рендерится дольше.
+      setTimeout(tryScroll, 200);
+      setTimeout(tryScroll, 600);
     }
   };
 

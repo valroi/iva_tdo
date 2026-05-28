@@ -49,17 +49,18 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
     void loadCard();
   }, [revisionId]);
 
-  // Polling карточки и замечаний каждые 15 секунд: пока пользователь
-  // смотрит документ, другие роли могут добавлять/менять замечания —
-  // они должны появляться вживую без F5. Не дёргаем API когда вкладка
-  // скрыта (visibilityState !== visible).
+  // Polling карточки и замечаний каждые 8 секунд: пока пользователь
+  // смотрит документ (в том числе при открытой модалке PDF), другие
+  // роли могут добавлять/менять замечания — они должны появляться
+  // вживую без F5. Короткий интервал — потому что модалка PDF это
+  // активная зона работы двух ролей одновременно.
   useEffect(() => {
     if (!revisionId) return;
     const tick = () => {
       if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
       void loadCard();
     };
-    const id = window.setInterval(tick, 15_000);
+    const id = window.setInterval(tick, 8_000);
     const onVisible = () => {
       if (document.visibilityState === "visible") void loadCard();
     };
