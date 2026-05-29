@@ -189,14 +189,20 @@ def _owner_matrix_role_for_document(
         return "LR"
     if current_user.company_type != CompanyType.owner or not discipline_code:
         return None
-    query = db.query(ReviewMatrixMember).filter(
+    base_filter = [
         ReviewMatrixMember.project_id == project_id,
         ReviewMatrixMember.user_id == current_user.id,
         ReviewMatrixMember.discipline_code == discipline_code,
-    )
+    ]
+    # Сначала ищем строгое совпадение по типу документа.
+    rows = []
     if doc_type:
-        query = query.filter(ReviewMatrixMember.doc_type == doc_type)
-    rows = query.all()
+        rows = db.query(ReviewMatrixMember).filter(*base_filter, ReviewMatrixMember.doc_type == doc_type).all()
+    # Fallback: если по доку нет, пробуем без типа (назначение «по
+    # дисциплине целиком» — типичный случай в матрице, когда строка
+    # покрывает все типы документов в этой дисциплине).
+    if not rows:
+        rows = db.query(ReviewMatrixMember).filter(*base_filter).all()
     if not rows:
         return None
     lr_row = next((item for item in rows if item.level == 1 and item.state == "LR"), None)
