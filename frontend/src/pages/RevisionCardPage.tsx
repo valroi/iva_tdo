@@ -19,7 +19,7 @@ interface Props {
 }
 
 export default function RevisionCardPage({ revisionId, currentUser, onBack }: Props): JSX.Element {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const [card, setCard] = useState<RevisionCard | null>(null);
   const [selectedRevisionId, setSelectedRevisionId] = useState<number>(revisionId);
   const [pdfAnnotatorOpen, setPdfAnnotatorOpen] = useState(false);
@@ -162,7 +162,15 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
   const hasRejectRemark = selectedRevisionComments.some(
     (comment) => comment.parent_id === null && comment.review_code === "RJ",
   );
-  const carryOpenCount = selectedCarryRemarks.length;
+  // Из carry-кандидатов вычитаем уже решённые LR (CLOSED/OPEN в carry_decisions)
+  // и локально подтверждённые через carryClosedByRevision — иначе AP-кнопка
+  // блокируется даже когда вкладка «Должны были устранить» уже показывает 0.
+  const carryLocallyClosedIds = carryClosedByRevision[selectedRevisionId] ?? [];
+  const carryOpenCount = selectedCarryRemarks.filter(
+    (item) =>
+      !selectedCarryDecidedIds.includes(item.id) &&
+      !carryLocallyClosedIds.includes(item.id),
+  ).length;
   // AP допустим только когда мяч у LR И обсуждение закончено:
   //   UNDER_REVIEW (изначально, до отправки CRS) или CONTRACTOR_REPLY_A
   //   (подрядчик принял всё). При CONTRACTOR_REPLY_I сначала надо
@@ -355,7 +363,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                 // Обязательный confirm-диалог. AP — необратимое действие
                 // (документ помечается окончательно согласованным по этой
                 // ревизии), без подтверждения такое срабатывать не должно.
-                Modal.confirm({
+                modal.confirm({
                   title: "Поставить AP по ревизии?",
                   content: (
                     <Space direction="vertical" size={4}>

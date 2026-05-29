@@ -38,7 +38,6 @@ import {
   listRevisions,
   ownerCommentDecision,
   processRevisionTdoDecision,
-  setRevisionReviewCode,
   setCarryDecision,
   downloadRevisionAttachmentsArchive,
   deleteOwnerComment,
@@ -900,63 +899,6 @@ export default function DocumentsPage({
               </Button>
             </>
           )}
-          {(row.id === latestRevision?.id &&
-            row.review_code !== "AP" &&
-            isOwner(currentUser) && currentUser.permissions.can_publish_comments) &&
-            (() => {
-              const rowComments = commentsByRevision[row.id];
-              const activeCount = (rowComments ?? []).filter(
-                (c) =>
-                  c.parent_id === null &&
-                  c.is_published_to_contractor &&
-                  c.status !== "REJECTED" &&
-                  (c.status === "OPEN" || c.status === "IN_PROGRESS"),
-              ).length;
-              const carryOpenCount =
-                selectedRevisionId === row.id && isLatestSelected
-                  ? previousRevisionRemarks.filter(
-                      (r) => r.status === "RESOLVED" && !(carryClosedByRevision[row.id] ?? []).includes(r.id),
-                    ).length
-                  : 0;
-              const apDisabled = !rowComments || activeCount > 0 || carryOpenCount > 0;
-              return (
-                <Tooltip
-                  title={(() => {
-                    if (!rowComments) return "Проверяем замечания ревизии...";
-                    const blocks: string[] = [];
-                    if (activeCount > 0) blocks.push(`${activeCount} активных замечаний не закрыто`);
-                    if (carryOpenCount > 0) blocks.push(`${carryOpenCount} пункт(а) в «Должны были устранить» без решения`);
-                    return blocks.length > 0
-                      ? `Нельзя поставить AP: ${blocks.join("; ")}`
-                      : "Все замечания закрыты/отклонены — можно поставить AP";
-                  })()}
-                >
-                  <Button
-                    size="small"
-                    disabled={apDisabled}
-                    onClick={async (event) => {
-                      event.stopPropagation();
-                      try {
-                        await setRevisionReviewCode(row.id, "AP");
-                        message.success("Для ревизии установлен статус AP");
-                        if (selectedDocumentId) {
-                          const revs = await listRevisions(selectedDocumentId);
-                          setRevisions(revs);
-                        }
-                        if (selectedRevisionId === row.id) {
-                          setComments(await listComments(row.id));
-                        }
-                      } catch (error: unknown) {
-                        const text = error instanceof Error ? error.message : "Не удалось установить AP";
-                        message.error(text);
-                      }
-                    }}
-                  >
-                    Поставить AP
-                  </Button>
-                </Tooltip>
-              );
-            })()}
         </Space>
         {contractorNeedsPdfReupload(currentUser, row.status) && <ContractorReuploadPdfTag />}
       </Space>
@@ -1489,7 +1431,7 @@ export default function DocumentsPage({
                         ),
                       }))}
                     />
-                    {selectedRevision.review_code && (
+                    {selectedRevision.review_code && !selectedDocumentCompleted && (
                       <Alert
                         style={{ marginTop: 10 }}
                         type="info"

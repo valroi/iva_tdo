@@ -3214,6 +3214,14 @@ def get_revision_card(
         actual_progress = max(actual_progress, 90.0)
     if any((item.status == "SUBMITTED") for item in revisions):
         actual_progress = max(actual_progress, 100.0)
+    # Документ считается полностью завершённым, когда есть AFD-ревизия с AP.
+    # В этом случае независимо от статуса ставим 100% — карточка отражает
+    # фактическое закрытие документа.
+    if any(
+        (item.review_code == ReviewCode.AP and (item.issue_purpose or "").upper() == "AFD")
+        for item in revisions
+    ):
+        actual_progress = max(actual_progress, 100.0)
 
     return RevisionCardRead(
         revision_id=revision.id,
