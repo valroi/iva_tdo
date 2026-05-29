@@ -665,9 +665,14 @@ export default function RevisionPdfAnnotator({
                             size="small"
                             danger
                             onClick={async () => {
-                              await ownerCommentDecision(active.id, { action: "REJECT", note: "LR согласился с подрядчиком" });
-                              message.success("Замечание снято — LR согласился с подрядчиком");
-                              await onCreated();
+                              try {
+                                await ownerCommentDecision(active.id, { action: "REJECT", note: "LR согласился с подрядчиком" });
+                                message.success("Замечание снято — LR согласился с подрядчиком");
+                                await onCreated();
+                              } catch (error: unknown) {
+                                const text = error instanceof Error ? error.message : "Не удалось снять замечание";
+                                message.error(text);
+                              }
                             }}
                           >
                             Согласиться (отклонить)

@@ -2783,12 +2783,26 @@ def owner_comment_decision(
             detail="No permissions to manage this remark",
         )
 
-    if comment.is_published_to_contractor and payload.action in {"UPDATE", "WITHDRAW", "REJECT", "PUBLISH", "REOPEN"}:
+    # При REJECT исключение: если подрядчик ответил «I» (не согласен),
+    # LR имеет право согласиться с ним и снять замечание. Это нормальный
+    # рабочий сценарий обсуждения, не нарушение линейности.
+    contractor_status_is_i = (
+        comment.contractor_status == ContractorCommentStatus.I
+    )
+    if (
+        comment.is_published_to_contractor
+        and payload.action in {"UPDATE", "WITHDRAW", "REJECT", "PUBLISH", "REOPEN"}
+        and not (payload.action == "REJECT" and contractor_status_is_i)
+    ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Remark is already sent to contractor and cannot be changed by LR/R",
         )
-    if comment.contractor_status is not None and payload.action in {"UPDATE", "REJECT", "WITHDRAW", "REOPEN", "PUBLISH"}:
+    if (
+        comment.contractor_status is not None
+        and payload.action in {"UPDATE", "REJECT", "WITHDRAW", "REOPEN", "PUBLISH"}
+        and not (payload.action == "REJECT" and contractor_status_is_i)
+    ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Remark already has contractor response and cannot be changed",
