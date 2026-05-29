@@ -1553,7 +1553,7 @@ export default function DocumentsPage({
           </Card>
         </Col>
         <Col span={12}>
-          <Card title={`Замечания и обсуждение (ревизия: ${selectedRevisionId ?? "—"})`}>
+          <Card title={`Замечания и обсуждение (ревизия: ${selectedRevision?.revision_code ?? "—"})`}>
             <Tabs
               items={[
                 {
@@ -1627,7 +1627,16 @@ export default function DocumentsPage({
                             columns={[
                               { title: "Из ревизии", dataIndex: "revision_code", width: 100 },
                               { title: "Код", dataIndex: "review_code", width: 90, render: (v) => v ?? "—" },
-                              { title: "Текст", dataIndex: "text", render: (value: string) => getCleanRemarkText(value) },
+                              {
+                                title: "Текст",
+                                dataIndex: "text",
+                                ellipsis: { showTitle: false },
+                                render: (value: string) => (
+                                  <Tooltip title={getCleanRemarkText(value)} placement="topLeft">
+                                    <span>{getCleanRemarkText(value)}</span>
+                                  </Tooltip>
+                                ),
+                              },
                               {
                                 title: "Подсказка R",
                                 width: 210,
@@ -1759,7 +1768,7 @@ export default function DocumentsPage({
                                 ),
                               },
                             ]}
-                            scroll={{ x: 980, y: 180 }}
+                            scroll={{ x: 1100, y: 240 }}
                             tableLayout="fixed"
                           />
                         ),
@@ -1778,7 +1787,16 @@ export default function DocumentsPage({
                             columns={[
                               { title: "Из ревизии", dataIndex: "revision_code", width: 100 },
                               { title: "Код", dataIndex: "review_code", width: 90, render: (v) => v ?? "—" },
-                              { title: "Текст", dataIndex: "text", render: (value: string) => getCleanRemarkText(value) },
+                              {
+                                title: "Текст",
+                                dataIndex: "text",
+                                ellipsis: { showTitle: false },
+                                render: (value: string) => (
+                                  <Tooltip title={getCleanRemarkText(value)} placement="topLeft">
+                                    <span>{getCleanRemarkText(value)}</span>
+                                  </Tooltip>
+                                ),
+                              },
                               {
                                 title: "Подсказка R",
                                 width: 210,
@@ -1819,7 +1837,7 @@ export default function DocumentsPage({
                                 render: () => <Typography.Text type="secondary">Зафиксировано</Typography.Text>,
                               },
                             ]}
-                            scroll={{ x: 980, y: 180 }}
+                            scroll={{ x: 1100, y: 240 }}
                             tableLayout="fixed"
                           />
                         ),

@@ -105,19 +105,18 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
     () => filteredHistory.findIndex((item) => item.revision_id === selectedRevisionId),
     [filteredHistory, selectedRevisionId],
   );
+  // Carry remarks — ВСЕ RESOLVED-замечания из предыдущей ревизии.
+  // Не фильтруем по carry_finalized и не выкидываем уже decided:
+  // Annotator сам разделит их на «Должны были устранить» (carryOpen)
+  // и «Было устранено» (carryDone) по carryClosedIds.
   const selectedCarryRemarks = useMemo<CommentItem[]>(
     () =>
       selectedHistoryIndex > 0
-        ? filteredHistory[selectedHistoryIndex - 1].comments
-            .filter(
-              (comment) =>
-                comment.parent_id === null &&
-                comment.status === "RESOLVED" &&
-                !comment.carry_finalized &&
-                !(carryDecisionsByRevision[selectedRevisionId] ?? []).some((item) => (item.status === "OPEN" || item.status === "CLOSED") && item.source_comment_id === comment.id),
-            )
+        ? filteredHistory[selectedHistoryIndex - 1].comments.filter(
+            (comment) => comment.parent_id === null && comment.status === "RESOLVED",
+          )
         : [],
-    [filteredHistory, selectedHistoryIndex, carryDecisionsByRevision, selectedRevisionId],
+    [filteredHistory, selectedHistoryIndex],
   );
 
   const canOwnerCreateRemarks = currentUser.company_type !== "owner" || Boolean(card?.can_current_user_raise_comments);
@@ -629,10 +628,14 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                 rejected: rowComments.filter((comment) => comment.status === "REJECTED"),
               };
               const rowIndex = filteredHistory.findIndex((item) => item.revision_id === row.revision_id);
+              // Кандидаты в carry-over — все RESOLVED-замечания из
+              // предыдущей ревизии. carry_finalized НЕ исключаем —
+              // финализированные нужны в «Было устранено», иначе они
+              // пропадают из UI после нажатия «Устранено ✓».
               const carryCandidates =
                 rowIndex > 0
                   ? filteredHistory[rowIndex - 1].comments.filter(
-                      (comment) => comment.parent_id === null && comment.status === "RESOLVED" && !comment.carry_finalized,
+                      (comment) => comment.parent_id === null && comment.status === "RESOLVED",
                     )
                   : [];
               const carryClosedIds = carryClosedByRevision[row.revision_id] ?? [];

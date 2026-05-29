@@ -721,7 +721,12 @@ export default function RevisionPdfAnnotator({
                   </Form.Item>
                 </Form>
               )}
-              {canManageOwnerRemarks && carryOverRemarks.length > 0 && (
+              {/* Carry remarks из предыдущих ревизий показываем всем
+                  ролям заказчика (LR/R), а не только тем, кто может
+                  управлять. R даёт рекомендации (carryActionMode="recommendation"),
+                  LR ставит финальное решение. Без этого R не видел даже
+                  список замечаний которые нужно отработать. */}
+              {carryOverRemarks.length > 0 && (
                 <Tabs
                   items={[
                     {
