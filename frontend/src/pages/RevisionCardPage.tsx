@@ -149,17 +149,19 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
     currentUser.company_type === "owner" &&
     currentUser.permissions.can_publish_comments &&
     card?.current_user_matrix_role === "LR";
+  // Активные замечания — любые с status OPEN/IN_PROGRESS у корневых
+  // комментариев. Считаем не только опубликованные, но и черновики:
+  // AP не должен ставиться пока есть хоть одно незакрытое замечание,
+  // даже если LR ещё не отправил CRS.
   const activePublishedRemarksCount = selectedRevisionComments.filter(
     (comment) =>
       comment.parent_id === null &&
-      comment.is_published_to_contractor &&
-      comment.status !== "REJECTED" &&
       (comment.status === "OPEN" || comment.status === "IN_PROGRESS"),
   ).length;
-  // Есть хотя бы одно RJ-замечание → ревизия отвергнута полностью,
-  // AP по ней невозможен (только переиздание с тем же шифром).
+  // Есть хотя бы одно RJ-замечание (опубликованное или черновик) →
+  // ревизия отвергнута полностью, AP по ней невозможен.
   const hasRejectRemark = selectedRevisionComments.some(
-    (comment) => comment.parent_id === null && comment.is_published_to_contractor && comment.review_code === "RJ",
+    (comment) => comment.parent_id === null && comment.review_code === "RJ",
   );
   const carryOpenCount = selectedCarryRemarks.length;
   // AP допустим только когда мяч у заказчика (UNDER_REVIEW или CONTRACTOR_REPLY_A).
@@ -314,16 +316,39 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
           >
             <Button
               disabled={!canSetApForSelectedRevision}
-              onClick={async () => {
+              onClick={() => {
                 if (!selectedRevision) return;
-                try {
-                  await setRevisionReviewCode(selectedRevision.id, "AP");
-                  message.success("Для ревизии установлен статус AP");
-                  await loadCard();
-                } catch (error: unknown) {
-                  const text = error instanceof Error ? error.message : "Не удалось установить AP";
-                  message.error(text);
-                }
+                const doAp = async (): Promise<void> => {
+                  try {
+                    await setRevisionReviewCode(selectedRevision.id, "AP");
+                    message.success("Для ревизии установлен статус AP");
+                    await loadCard();
+                  } catch (error: unknown) {
+                    const text = error instanceof Error ? error.message : "Не удалось установить AP";
+                    message.error(text);
+                  }
+                };
+                // Обязательный confirm-диалог. AP — необратимое действие
+                // (документ помечается окончательно согласованным по этой
+                // ревизии), без подтверждения такое срабатывать не должно.
+                Modal.confirm({
+                  title: "Поставить AP по ревизии?",
+                  content: (
+                    <Space direction="vertical" size={4}>
+                      <Typography.Text>
+                        Документ {card?.document_num ?? "—"}, ревизия {selectedRevision.revision_code}.
+                      </Typography.Text>
+                      <Typography.Text type="secondary">
+                        После AP откатить решение можно только через администратора.
+                        Убедитесь, что все замечания закрыты или отклонены.
+                      </Typography.Text>
+                    </Space>
+                  ),
+                  okText: "Да, поставить AP",
+                  cancelText: "Отмена",
+                  okButtonProps: { danger: true },
+                  onOk: doAp,
+                });
               }}
             >
               Поставить AP

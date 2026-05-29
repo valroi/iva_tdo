@@ -431,10 +431,14 @@ export default function RevisionPdfAnnotator({
           {comments.filter((item) => item.parent_id === null).length > 0 && (
             <Space direction="vertical" style={{ width: "100%" }} size={6}>
               <Typography.Text strong>Навигация по замечаниям</Typography.Text>
-              <Space direction="vertical" style={{ width: "100%" }} size={6}>
-                {comments
-                  .filter((item) => item.parent_id === null)
-                  .map((item) => (
+              {/* Группировка: активные замечания и отклонённые отдельно.
+                  Активные — то, чем сейчас занимаются. Отклонённые —
+                  для справки, не засоряют основной список. */}
+              {(() => {
+                const allParents = comments.filter((item) => item.parent_id === null);
+                const activeOnes = allParents.filter((item) => item.status !== "REJECTED");
+                const rejectedOnes = allParents.filter((item) => item.status === "REJECTED");
+                const renderItem = (item: CommentItem): JSX.Element => (
                     <Tooltip
                       key={item.id}
                       title={(item.text ?? "").replace(/^\[(REMARK|QUESTION)\]\s*/i, "")}
@@ -476,8 +480,42 @@ export default function RevisionPdfAnnotator({
                         </Space>
                       </Button>
                     </Tooltip>
-                  ))}
-              </Space>
+                );
+                return (
+                  <Tabs
+                    size="small"
+                    defaultActiveKey="active"
+                    items={[
+                      {
+                        key: "active",
+                        label: `Активные (${activeOnes.length})`,
+                        children: (
+                          <Space direction="vertical" style={{ width: "100%" }} size={6}>
+                            {activeOnes.length === 0 ? (
+                              <Typography.Text type="secondary">Активных замечаний нет.</Typography.Text>
+                            ) : (
+                              activeOnes.map(renderItem)
+                            )}
+                          </Space>
+                        ),
+                      },
+                      {
+                        key: "rejected",
+                        label: `Отклонённые (${rejectedOnes.length})`,
+                        children: (
+                          <Space direction="vertical" style={{ width: "100%" }} size={6}>
+                            {rejectedOnes.length === 0 ? (
+                              <Typography.Text type="secondary">Нет отклонённых замечаний.</Typography.Text>
+                            ) : (
+                              rejectedOnes.map(renderItem)
+                            )}
+                          </Space>
+                        ),
+                      },
+                    ]}
+                  />
+                );
+              })()}
             </Space>
           )}
           <Space>
