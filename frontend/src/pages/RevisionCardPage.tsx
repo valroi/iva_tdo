@@ -164,10 +164,18 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
     (comment) => comment.parent_id === null && comment.review_code === "RJ",
   );
   const carryOpenCount = selectedCarryRemarks.length;
-  // AP допустим только когда мяч у заказчика (UNDER_REVIEW или CONTRACTOR_REPLY_A).
-  // В OWNER_COMMENTS_SENT / CONTRACTOR_REPLY_I LR ничего не делает — кнопка скрыта.
+  // AP допустим только когда мяч у LR И обсуждение закончено:
+  //   UNDER_REVIEW (изначально, до отправки CRS) или CONTRACTOR_REPLY_A
+  //   (подрядчик принял всё). При CONTRACTOR_REPLY_I сначала надо
+  //   разрешить I-замечания (директивно вернуть или согласиться).
   const apActionableStatus =
     selectedRevision?.status === "UNDER_REVIEW" || selectedRevision?.status === "CONTRACTOR_REPLY_A";
+  // Управление замечаниями LR доступно ВКЛЮЧАЯ статус CONTRACTOR_REPLY_I
+  // (нужны кнопки «Вернуть директивно в работу» / «Согласиться»).
+  const ownerRemarkManagementStatus =
+    selectedRevision?.status === "UNDER_REVIEW" ||
+    selectedRevision?.status === "CONTRACTOR_REPLY_I" ||
+    selectedRevision?.status === "CONTRACTOR_REPLY_A";
   const canSetApForSelectedRevision =
     Boolean(selectedRevision) &&
     selectedRevision?.id === latestRevisionId &&
@@ -565,17 +573,22 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
           locale={{ emptyText: "По этой ревизии пока нет комментариев." }}
           expandable={{
             expandedRowRender: (row) => {
-              // Управление замечаниями (Отклонить, Добавить в CRS, Вернуть
-              // в работу, Удалить) — только LR заказчика по дисциплине
-              // документа. R по дисциплине только комментирует.
-              //
-              // Также важна линейность процесса: ПОСЛЕ отправки CRS
-              // (status OWNER_COMMENTS_SENT / CONTRACTOR_REPLY_I) мяч у
-              // подрядчика — заказчик уже не может ничего менять, пока
-              // подрядчик не ответит. Все кнопки управления исчезают.
+              // Управление замечаниями — только LR по дисциплине.
+              // Линейность процесса:
+              //  • UNDER_REVIEW           — LR собирает/правит замечания.
+              //  • OWNER_COMMENTS_SENT    — мяч у подрядчика (CRS уже у него),
+              //                             LR ничего не делает.
+              //  • CONTRACTOR_REPLY_I     — подрядчик ответил «На обсуждение»,
+              //                             мяч ВЕРНУЛСЯ к LR — нужно решить
+              //                             (директивно вернуть в работу
+              //                             или согласиться/закрыть).
+              //  • CONTRACTOR_REPLY_A     — подрядчик принял, мяч у LR
+              //                             (может закрыть цикл, поставить AP).
               const rowStatus = row.status;
               const rowOwnerHoldsBall =
-                rowStatus === "UNDER_REVIEW" || rowStatus === "CONTRACTOR_REPLY_A";
+                rowStatus === "UNDER_REVIEW" ||
+                rowStatus === "CONTRACTOR_REPLY_I" ||
+                rowStatus === "CONTRACTOR_REPLY_A";
               const canManageFromCard =
                 isOwner(currentUser) &&
                 currentUser.permissions.can_publish_comments &&
@@ -1249,10 +1262,11 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
         canCreateRemarks={(card?.can_current_user_raise_comments ?? true) && !documentCompleted}
         canCreateOwnerRemarks={canOwnerCreateRemarks && canCommentOnSelectedRevision && !documentCompleted}
         canManageOwnerRemarks={
-          // Принять/Отклонить/Удалить замечания — прерогатива LR
-          // по дисциплине документа. После отправки CRS (мяч у подрядчика)
-          // даже LR ничего не может менять до получения ответа.
-          card?.current_user_matrix_role === "LR" && apActionableStatus
+          // Управление замечаниями (Отклонить/Удалить/Вернуть директивно)
+          // у LR при UNDER_REVIEW, CONTRACTOR_REPLY_I (надо решить по
+          // «I»-ответам подрядчика) и CONTRACTOR_REPLY_A. В режимах
+          // OWNER_COMMENTS_SENT мяч у подрядчика — LR ничего не трогает.
+          card?.current_user_matrix_role === "LR" && ownerRemarkManagementStatus
         }
         noAccessHint={
           documentCompleted
