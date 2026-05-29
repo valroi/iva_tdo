@@ -236,18 +236,35 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
   };
 
   useEffect(() => {
-    if (!selectedRevisionId || !canManageCarryOver) return;
-    listCarryDecisions(selectedRevisionId)
-      .then((merged) => {
-        setCarryDecisionsByRevision((prev) => ({ ...prev, [selectedRevisionId]: merged }));
-        const closed = merged.filter((item) => item.status === "CLOSED").map((item) => item.source_comment_id);
-        setCarryClosedByRevision((prev) => ({ ...prev, [selectedRevisionId]: closed }));
-      })
-      .catch(() => {
-        setCarryDecisionsByRevision((prev) => ({ ...prev, [selectedRevisionId]: [] }));
-        setCarryClosedByRevision((prev) => ({ ...prev, [selectedRevisionId]: [] }));
-      });
-  }, [selectedRevisionId, canManageCarryOver, filteredHistory]);
+    if (!canManageCarryOver || filteredHistory.length === 0) return;
+    // Грузим carry decisions для ВСЕХ ревизий в истории — таблица
+    // «по нарастанию» раскрывает любую из них, и для каждой нужны
+    // данные «Было устранено». Раньше грузилось только для выбранной
+    // ревизии, и в раскрытых строках «Было устранено» всегда было 0.
+    let cancelled = false;
+    Promise.all(
+      filteredHistory.map((row) =>
+        listCarryDecisions(row.revision_id)
+          .then((merged) => ({ revisionId: row.revision_id, merged }))
+          .catch(() => ({ revisionId: row.revision_id, merged: [] })),
+      ),
+    ).then((results) => {
+      if (cancelled) return;
+      const nextDecisions: Record<number, CarryDecisionItem[]> = {};
+      const nextClosed: Record<number, number[]> = {};
+      for (const { revisionId, merged } of results) {
+        nextDecisions[revisionId] = merged;
+        nextClosed[revisionId] = merged
+          .filter((item) => item.status === "CLOSED")
+          .map((item) => item.source_comment_id);
+      }
+      setCarryDecisionsByRevision(nextDecisions);
+      setCarryClosedByRevision(nextClosed);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [canManageCarryOver, filteredHistory]);
 
   return (
     <div>
