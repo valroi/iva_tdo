@@ -83,6 +83,13 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
     () => getRemarksSummaryLabel(selectedRevisionComments, selectedRevision?.review_code ?? null),
     [selectedRevisionComments, selectedRevision?.review_code],
   );
+  // Код замечаний по последней (актуальной) ревизии — нужен заголовку
+  // карточки, чтобы LR при переходе по задаче не путал статус старой
+  // выбранной ревизии с финальным статусом документа.
+  const latestRevisionComments = useMemo<CommentItem[]>(
+    () => card?.history.find((item) => item.revision_id === (card?.revisions.length ? [...card.revisions].sort((a,b)=>a.id-b.id)[card.revisions.length-1].id : -1))?.comments ?? [],
+    [card?.history, card?.revisions],
+  );
   // Ревизии создаются строго последовательно, поэтому id монотонен.
   // «Последняя» ревизия = ревизия с максимальным id (created_at ненадёжен).
   const latestRevision = useMemo(
@@ -409,26 +416,40 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
           <Descriptions.Item label="LR (ФИО)">{card?.lr_reviewer_name ?? "—"}</Descriptions.Item>
           <Descriptions.Item label="Разработчик (ФИО)">{card?.developer_name ?? "—"}</Descriptions.Item>
           <Descriptions.Item label="Текущий статус процесса">
-            {(selectedRevision ?? lastRevision) ? (
+            {latestRevision ? (
               <Space direction="vertical" size={2}>
-                <Typography.Text strong>{getRuStatusLabel((selectedRevision ?? lastRevision)?.status ?? "")}</Typography.Text>
+                {/* Статус всегда по последней ревизии — это «текущий» статус
+                    документа в целом. Старые ревизии уже закрыты. */}
+                <Typography.Text strong>{getRuStatusLabel(latestRevision.status)}</Typography.Text>
                 <Space size={6}>
-                  <Typography.Text type="secondary">Код замечаний:</Typography.Text>
-                  <Tag color={currentProcessStatus === "AP" ? "success" : "default"}>{currentProcessStatus}</Tag>
+                  <Typography.Text type="secondary">
+                    Код замечаний по последней ревизии ({getDisplayRevisionCode(latestRevision)}):
+                  </Typography.Text>
+                  <Tag color={(latestRevision.review_code ?? null) === "AP" ? "success" : "default"}>
+                    {getRemarksSummaryLabel(latestRevisionComments, latestRevision.review_code ?? null)}
+                  </Tag>
                 </Space>
-                {contractorNeedsPdfReupload(currentUser, (selectedRevision ?? lastRevision)?.status) && <ContractorReuploadPdfTag />}
+                {selectedRevision && selectedRevision.id !== latestRevision.id && (
+                  <Space size={6}>
+                    <Typography.Text type="secondary">
+                      Код замечаний по выбранной ревизии ({getDisplayRevisionCode(selectedRevision)}):
+                    </Typography.Text>
+                    <Tag color={currentProcessStatus === "AP" ? "success" : "default"}>{currentProcessStatus}</Tag>
+                  </Space>
+                )}
+                {contractorNeedsPdfReupload(currentUser, latestRevision.status) && <ContractorReuploadPdfTag />}
               </Space>
             ) : (
               "—"
             )}
           </Descriptions.Item>
         </Descriptions>
-        {(selectedRevision ?? lastRevision) && (
+        {latestRevision && (
           <div style={{ marginTop: 10 }}>
-            <Typography.Text type="secondary">Этапы процесса:</Typography.Text>
+            <Typography.Text type="secondary">Этапы процесса (по последней ревизии):</Typography.Text>
             <Steps
               size="small"
-              current={getProcessCurrentStep((selectedRevision ?? lastRevision)?.status)}
+              current={getProcessCurrentStep(latestRevision.status)}
               responsive={false}
               items={PROCESS_STEPS.map((item) => ({
                 ...item,
@@ -613,11 +634,20 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                 rowStatus === "UNDER_REVIEW" ||
                 rowStatus === "CONTRACTOR_REPLY_I" ||
                 rowStatus === "CONTRACTOR_REPLY_A";
+              // После проставления AP по ревизии её цикл закрыт: LR не
+              // может ни вернуть в работу, ни добавить в CRS, ни удалить
+              // или править замечания (включая carry из прошлых ревизий).
+              // Если AP стоит на текущей (последней) ревизии — это аналог
+              // финального решения, замочные кнопки убираются полностью.
+              const rowFrozenByAp = row.review_code === "AP";
+              const latestApFreeze = latestRevision?.review_code === "AP";
               const canManageFromCard =
                 isOwner(currentUser) &&
                 currentUser.permissions.can_publish_comments &&
                 card?.current_user_matrix_role === "LR" &&
                 !documentCompleted &&
+                !latestApFreeze &&
+                !rowFrozenByAp &&
                 rowOwnerHoldsBall;
               const isLatestRow = latestRevisionId !== null && row.revision_id === latestRevisionId;
               const rowComments =
@@ -1320,18 +1350,32 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
               }
             : undefined
         }
-        canCreateRemarks={(card?.can_current_user_raise_comments ?? true) && !documentCompleted}
-        canCreateOwnerRemarks={canOwnerCreateRemarks && canCommentOnSelectedRevision && !documentCompleted}
+        canCreateRemarks={
+          (card?.can_current_user_raise_comments ?? true) &&
+          !documentCompleted &&
+          selectedRevision?.review_code !== "AP"
+        }
+        canCreateOwnerRemarks={
+          canOwnerCreateRemarks &&
+          canCommentOnSelectedRevision &&
+          !documentCompleted &&
+          selectedRevision?.review_code !== "AP"
+        }
         canManageOwnerRemarks={
           // Управление замечаниями (Отклонить/Удалить/Вернуть директивно)
           // у LR при UNDER_REVIEW, CONTRACTOR_REPLY_I (надо решить по
           // «I»-ответам подрядчика) и CONTRACTOR_REPLY_A. В режимах
           // OWNER_COMMENTS_SENT мяч у подрядчика — LR ничего не трогает.
-          card?.current_user_matrix_role === "LR" && ownerRemarkManagementStatus
+          // После AP по ревизии цикл закрыт — никаких действий.
+          card?.current_user_matrix_role === "LR" &&
+          ownerRemarkManagementStatus &&
+          selectedRevision?.review_code !== "AP"
         }
         noAccessHint={
           documentCompleted
             ? "Документ финально согласован (AFD + AP). Добавление замечаний закрыто."
+            : selectedRevision?.review_code === "AP"
+            ? "По ревизии стоит AP — цикл закрыт, изменение замечаний недоступно."
             : !canOwnerCreateRemarks
             ? "Вы не назначены рассматривающим (LR/R) по этому документу. Доступен только просмотр PDF и замечаний."
             : !canCommentOnSelectedRevision

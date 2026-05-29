@@ -36,6 +36,7 @@ export default function DashboardPage({
     task_deadline: string | null;
     revision_id: number | null;
     project_code: string | null;
+    author_name?: string | null;
   };
   const [overdueDocs, setOverdueDocs] = useState<DocumentRegistryItem[]>([]);
   const [projectRoles, setProjectRoles] = useState<Array<{ project_code: string; project_name: string; role: ProjectMemberRole; role_label: string }>>([]);
@@ -197,6 +198,7 @@ export default function DashboardPage({
               task_deadline: item.review_deadline,
               revision_id: item.revision_id,
               project_code: item.project_code,
+              author_name: item.author_name ?? item.author_email ?? null,
             }));
           setOwnerReviewTasks(pending);
         })
@@ -282,10 +284,13 @@ export default function DashboardPage({
       key: "author_status",
       width: 220,
       render: (_, row) => {
+        // Сначала — явный author_name (из owner-review-queue), иначе
+        // пытаемся вытащить из текста уведомления, иначе прочерк.
         const meta = parseCommentContext(row.message);
+        const author = (row.author_name && row.author_name.trim()) || meta.author;
         return (
           <Space direction="vertical" size={2}>
-            <Typography.Text type="secondary">Автор: {meta.author}</Typography.Text>
+            <Typography.Text type="secondary">Автор: {author}</Typography.Text>
           </Space>
         );
       },

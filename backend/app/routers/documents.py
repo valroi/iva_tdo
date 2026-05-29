@@ -102,6 +102,18 @@ def _is_completed_document(db: Session, document_id: int) -> bool:
     return (latest.issue_purpose or "").upper() == "AFD" and latest.review_code == ReviewCode.AP
 
 
+def _ensure_revision_not_locked_by_ap(revision: Revision) -> None:
+    """После проставления AP по ревизии её цикл считается закрытым: ни LR,
+    ни R, ни подрядчик не могут править замечания на этой ревизии
+    (добавлять в CRS, отклонять, удалять, возвращать в работу). Это
+    защита от случайного «оживления» уже согласованной ревизии."""
+    if revision.review_code == ReviewCode.AP:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Revision is closed by AP — no further changes allowed",
+        )
+
+
 def _set_revision_status(revision: Revision, next_status: str) -> bool:
     current = revision.status
     if current == next_status:
@@ -580,8 +592,27 @@ def list_owner_review_queue(
     else:
         return []
     rows = queue_query.order_by(Revision.created_at.asc()).all()
+    # Очередь LR/R должна показывать только «живые» задачи. Если по
+    # ревизии уже выставлен review_code (AN/CO/RJ/AP) — цикл закрыт,
+    # задача висеть не должна. Аналогично исключаем не-последние ревизии
+    # документа: ответ на A после выпуска B уже не нужен, мяч ушёл вперёд.
+    latest_revision_by_doc: dict[int, int] = {}
+    for revision, document, _mdr, _author in rows:
+        existing = latest_revision_by_doc.get(document.id)
+        if existing is None or revision.id > existing:
+            latest_revision_by_doc[document.id] = revision.id
+
     result: list[TdoQueueItem] = []
     for revision, document, mdr, author in rows:
+        # Только последняя ревизия документа
+        if latest_revision_by_doc.get(document.id) != revision.id:
+            continue
+        # Закрытые review_code-ом ревизии больше не задачи
+        if revision.review_code is not None:
+            continue
+        # Завершённые документы (AFD+AP уже стоит на последней) — исключить
+        if _is_completed_document(db, document.id):
+            continue
         if revision.status == "UNDER_REVIEW" and not revision.trm_number:
             sender_code = (author.company_code if author else None) or (mdr.originator_code or "").strip().upper() or "CTR"
             receiver_code = _project_reference_value(
@@ -2242,6 +2273,7 @@ def add_comment_to_crs(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
     if not _owner_can_access_revision(current_user, revision):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
+    _ensure_revision_not_locked_by_ap(revision)
     document, mdr, project = _ensure_lr_can_publish_for_revision(db, current_user=current_user, revision=revision)
     if not _can_manage_owner_remark(
         db,
@@ -2475,6 +2507,7 @@ def create_comment(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
     if _is_completed_document(db, rev.document_id):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Document is completed (AFD+AP); commenting is locked")
+    _ensure_revision_not_locked_by_ap(rev)
 
     document = db.query(Document).filter(Document.id == rev.document_id).first()
     if document is None:
@@ -2588,6 +2621,7 @@ def respond_comment(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
     if _is_completed_document(db, revision.document_id):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Document is completed (AFD+AP); commenting is locked")
+    _ensure_revision_not_locked_by_ap(revision)
     if not _owner_can_access_revision(current_user, revision):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
 
@@ -2777,6 +2811,7 @@ def owner_comment_decision(
     project = db.query(Project).filter(Project.code == mdr.project_code).first()
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    _ensure_revision_not_locked_by_ap(revision)
     if payload.action in {"PUBLISH", "WITHDRAW", "UPDATE", "FINAL_CONFIRM", "REJECT", "REOPEN"} and not _can_manage_owner_remark(
         db,
         current_user=current_user,
@@ -2975,6 +3010,7 @@ def delete_owner_comment(
     project = db.query(Project).filter(Project.code == mdr.project_code).first()
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    _ensure_revision_not_locked_by_ap(revision)
     if not _can_manage_owner_remark(
         db,
         current_user=current_user,
