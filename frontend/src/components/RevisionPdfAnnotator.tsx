@@ -646,13 +646,31 @@ export default function RevisionPdfAnnotator({
                         {active.contractor_status === "I" && active.backlog_status !== "LR_FINAL_CONFIRM" && (
                           <Button
                             size="small"
+                            type="primary"
                             onClick={async () => {
                               await ownerCommentDecision(active.id, { action: "FINAL_CONFIRM" });
-                              message.success("LR финально подтвердил замечание, подрядчику доступен только статус A");
+                              message.success("LR подтвердил замечание директивно — подрядчику доступен только статус A");
                               await onCreated();
                             }}
                           >
-                            Финально подтвердить (LR)
+                            Подтвердить (LR)
+                          </Button>
+                        )}
+                        {/* После «I»-ответа LR может также согласиться с
+                            подрядчиком и снять замечание. */}
+                        {active.contractor_status === "I" &&
+                          active.backlog_status !== "LR_FINAL_CONFIRM" &&
+                          active.status !== "REJECTED" && (
+                          <Button
+                            size="small"
+                            danger
+                            onClick={async () => {
+                              await ownerCommentDecision(active.id, { action: "REJECT", note: "LR согласился с подрядчиком" });
+                              message.success("Замечание снято — LR согласился с подрядчиком");
+                              await onCreated();
+                            }}
+                          >
+                            Согласиться (отклонить)
                           </Button>
                         )}
                       </>
