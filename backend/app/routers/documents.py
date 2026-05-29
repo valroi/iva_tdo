@@ -2832,7 +2832,11 @@ def owner_comment_decision(
             event_types=["TDO_SENT_TO_OWNER", "OWNER_COMMENT_CREATED", "CARRY_OVER_DECISION", "NEW_COMMENT"],
         )
     elif payload.action == "REJECT":
-        if comment.in_crs:
+        # in_crs блокирует REJECT, ПОКА подрядчик не ответил. Когда
+        # контрактор ответил «I» (не согласен), LR имеет право
+        # согласиться с ним и снять замечание — это нормальный
+        # сценарий обсуждения, даже если замечание было в CRS-пакете.
+        if comment.in_crs and not contractor_status_is_i:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Remark already added to CRS and cannot be rejected")
         if comment.status == CommentStatus.REJECTED and comment.backlog_status == "REJECTED":
             db.refresh(comment)
