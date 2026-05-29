@@ -859,6 +859,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                                 comment.backlog_status !== "LR_FINAL_CONFIRM" && (
                                 <Button
                                   size="small"
+                                  type="primary"
                                   loading={busyCommentId === comment.id}
                                   onClick={async () => {
                                     try {
@@ -875,7 +876,39 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                                     }
                                   }}
                                 >
-                                  Финально подтвердить (LR)
+                                  Подтвердить (LR)
+                                </Button>
+                              )}
+                              {/* После «I»-ответа подрядчика LR может либо
+                                  финально подтвердить (директивно вернуть в
+                                  работу), либо согласиться с подрядчиком и
+                                  отклонить замечание — оно перестаёт быть
+                                  обязательным к исправлению. */}
+                              {isLatestRow &&
+                                comment.parent_id === null &&
+                                comment.contractor_status === "I" &&
+                                comment.backlog_status !== "LR_FINAL_CONFIRM" &&
+                                comment.status !== "REJECTED" && (
+                                <Button
+                                  size="small"
+                                  danger
+                                  loading={busyCommentId === comment.id}
+                                  onClick={async () => {
+                                    try {
+                                      setBusyCommentId(comment.id);
+                                      message.loading({ content: "Отклонение замечания...", key: `withdraw_i_${comment.id}` });
+                                      await ownerCommentDecision(comment.id, { action: "REJECT", note: "LR согласился с подрядчиком" });
+                                      message.success({ content: "Замечание снято (LR согласился)", key: `withdraw_i_${comment.id}` });
+                                      await loadCard();
+                                    } catch (error: unknown) {
+                                      const text = error instanceof Error ? error.message : "Не удалось отклонить замечание";
+                                      message.error({ content: text, key: `withdraw_i_${comment.id}` });
+                                    } finally {
+                                      setBusyCommentId(null);
+                                    }
+                                  }}
+                                >
+                                  Согласиться (отклонить)
                                 </Button>
                               )}
                             </Space>
