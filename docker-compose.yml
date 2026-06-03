@@ -38,6 +38,13 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:3000"]}
     ports:
       - "8000:8000"
+    volumes:
+      # Все загруженные PDF и доп. файлы лежат в /tmp/tdo_uploads внутри
+      # контейнера. Без persistent volume они пропадают при каждой
+      # пересборке/пересоздании контейнера — БД остаётся с битыми
+      # file_path, PDF возвращает 404. Закрепляем директорию за
+      # named volume, чтобы апдейты бэка не теряли пользовательские файлы.
+      - tdo_uploads:/tmp/tdo_uploads
     depends_on:
       - db
       - redis
@@ -55,3 +62,4 @@ services:
 volumes:
   postgres_data:
   minio_data:
+  tdo_uploads:
