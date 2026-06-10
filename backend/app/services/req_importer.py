@@ -198,22 +198,40 @@ def parse_req(path: str, filename: str) -> dict:
             acol("document no", "doc"),
             acol("rev"),
         )
+        rows_raw = []
         for r in att[1:]:
             if not any(r):
                 continue
             desc = r[a_desc] if a_desc is not None and a_desc < len(r) else ""
             if not desc or desc.lower() in ("description",):
                 continue
-            cat = _guess_owner_category(desc)
-            owner_items.append(
+            rows_raw.append(
                 {
-                    "att_no": (r[a_no] if a_no is not None and a_no < len(r) else "") or None,
-                    "category": cat,
+                    "att_no": (r[a_no] if a_no is not None and a_no < len(r) else "").strip() or None,
                     "title": desc,
                     "doc_number": (r[a_doc] if a_doc is not None and a_doc < len(r) else "") or None,
                     "rev": (r[a_rev] if a_rev is not None and a_rev < len(r) else "") or None,
-                    "is_required": True,
-                    "allow_questions": cat in ("DATASHEET", "SPEC", "DRAWING"),
+                }
+            )
+        # Группа-заголовок: att_no без точки, у которого есть дочерние
+        # позиции вида "{att_no}.N". На такие нельзя грузить файл.
+        all_nos = [row["att_no"] for row in rows_raw if row["att_no"]]
+        for row in rows_raw:
+            ano = row["att_no"] or ""
+            is_group = bool(ano) and "." not in ano and any(
+                other != ano and other.startswith(ano + ".") for other in all_nos
+            )
+            cat = _guess_owner_category(row["title"])
+            owner_items.append(
+                {
+                    "att_no": row["att_no"],
+                    "category": cat,
+                    "title": row["title"],
+                    "doc_number": row["doc_number"],
+                    "rev": row["rev"],
+                    "is_required": not is_group,
+                    "allow_questions": (not is_group) and cat in ("DATASHEET", "SPEC", "DRAWING"),
+                    "is_group": is_group,
                 }
             )
 

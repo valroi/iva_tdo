@@ -446,7 +446,7 @@ export interface MrOwnerFile { id:number; owner_item_id:number; file_name:string
 export interface MrOwnerItem {
   id:number; mr_id:number; order_index:number; att_no:string|null; category:MrOwnerCategory;
   title:string; doc_number:string|null; rev:string|null; is_required:boolean; allow_questions:boolean;
-  created_at:string; files:MrOwnerFile[];
+  is_group:boolean; created_at:string; files:MrOwnerFile[];
 }
 export type MrVendorSection = "BID_INCLUSION"|"BID_NOTES"|"RFD";
 export interface MrVendorItem {

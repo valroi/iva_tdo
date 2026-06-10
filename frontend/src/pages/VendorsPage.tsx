@@ -143,36 +143,47 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
 
   const ownerColumns: ColumnsType<MrOwnerItem> = [
     { title: "№", dataIndex: "att_no", key: "att_no", width: 70, render: (v) => v ?? "—" },
-    { title: "Документ", dataIndex: "title", key: "title", ellipsis: true },
-    { title: "Doc No", dataIndex: "doc_number", key: "doc", width: 150, ellipsis: true, render: (v) => v ?? "—" },
-    { title: "Рев", dataIndex: "rev", key: "rev", width: 60, render: (v) => v ?? "—" },
+    {
+      title: "Документ",
+      dataIndex: "title",
+      key: "title",
+      ellipsis: true,
+      render: (v, row) => (row.is_group ? <Typography.Text strong>{v}</Typography.Text> : v),
+    },
+    { title: "Doc No", dataIndex: "doc_number", key: "doc", width: 150, ellipsis: true, render: (v, row) => (row.is_group ? "" : v ?? "—") },
+    { title: "Рев", dataIndex: "rev", key: "rev", width: 60, render: (v, row) => (row.is_group ? "" : v ?? "—") },
     {
       title: "Файлы",
       key: "files",
       width: 220,
-      render: (_, row) => (
-        <Space direction="vertical" size={2} style={{ width: "100%" }}>
-          {row.files.map((f) => (
-            <Space key={f.id} size={4}>
-              <Tag color="green" style={{ maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis" }}>{f.file_name}</Tag>
-              <Button size="small" type="link" danger onClick={async () => {
-                if (selectedMrId === null) return;
-                await deleteMrOwnerFile(selectedMrId, f.id); await reload();
-              }}>✕</Button>
-            </Space>
-          ))}
-          <Upload
-            showUploadList={false}
-            beforeUpload={(file) => {
-              if (selectedMrId === null) return false;
-              void uploadMrOwnerFile(selectedMrId, row.id, file).then(reload).catch((e) => message.error(e.message));
-              return false;
-            }}
-          >
-            <Button size="small" icon={<UploadOutlined />}>Загрузить</Button>
-          </Upload>
-        </Space>
-      ),
+      render: (_, row) => {
+        // Группа-заголовок (Technical Documents / Specifications / Drawings) —
+        // это раздел, на него файл не грузится. Загрузка только на листья.
+        if (row.is_group) return <Typography.Text type="secondary" italic>раздел</Typography.Text>;
+        return (
+          <Space direction="vertical" size={2} style={{ width: "100%" }}>
+            {row.files.map((f) => (
+              <Space key={f.id} size={4}>
+                <Tag color="green" style={{ maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis" }}>{f.file_name}</Tag>
+                <Button size="small" type="link" danger onClick={async () => {
+                  if (selectedMrId === null) return;
+                  await deleteMrOwnerFile(selectedMrId, f.id); await reload();
+                }}>✕</Button>
+              </Space>
+            ))}
+            <Upload
+              showUploadList={false}
+              beforeUpload={(file) => {
+                if (selectedMrId === null) return false;
+                void uploadMrOwnerFile(selectedMrId, row.id, file).then(reload).catch((e) => message.error(e.message));
+                return false;
+              }}
+            >
+              <Button size="small" icon={<UploadOutlined />}>Загрузить</Button>
+            </Upload>
+          </Space>
+        );
+      },
     },
     {
       title: "",

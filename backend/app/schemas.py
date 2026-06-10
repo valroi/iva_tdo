@@ -813,6 +813,7 @@ class MrOwnerItemCreate(BaseModel):
     rev: str | None = None
     is_required: bool = True
     allow_questions: bool = False
+    is_group: bool = False
     order_index: int = 0
 
 
@@ -838,6 +839,7 @@ class MrOwnerItemRead(BaseModel):
     rev: str | None
     is_required: bool
     allow_questions: bool
+    is_group: bool = False
     created_at: datetime
     files: list[MrOwnerFileRead] = []
 

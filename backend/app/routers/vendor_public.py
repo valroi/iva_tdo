@@ -53,6 +53,19 @@ def _load_invitation(db: Session, invitation_id: int) -> VendorInvitation:
     return inv
 
 
+def _ensure_mr_accepting(db: Session, mr_id: int) -> MaterialRequisition:
+    """Портал подрядчика доступен ТОЛЬКО пока MR в статусе OPEN и дедлайн не
+    прошёл. В любом другом статусе (черновик/закрыт/победитель выбран) ссылка
+    не открывается — вход и просмотр запрещены."""
+    mr = db.query(MaterialRequisition).filter(MaterialRequisition.id == mr_id).first()
+    if mr is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    accepting = mr.status == MrStatus.OPEN and (mr.deadline_at is None or datetime.utcnow() <= mr.deadline_at)
+    if not accepting:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="MR is not accepting submissions")
+    return mr
+
+
 @router.post("/public/vendor/{invitation_id}/request-code")
 def request_code(
     invitation_id: int,
@@ -64,6 +77,7 @@ def request_code(
     генерируем код и шлём на привязанный email. Защита от перебора —
     failed_attempts + lockout."""
     inv = _load_invitation(db, invitation_id)
+    _ensure_mr_accepting(db, inv.mr_id)
     if vendor_invitations.is_locked(inv):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -104,6 +118,7 @@ def verify_code(
 ):
     """Шаг 2: проверяем токен + email-код, выдаём гостевую сессию."""
     inv = _load_invitation(db, invitation_id)
+    _ensure_mr_accepting(db, inv.mr_id)
     if vendor_invitations.is_locked(inv):
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many attempts, try later")
     token_ok = vendor_invitations.verify_secret(payload.token, inv.token_hash)
@@ -137,9 +152,7 @@ def vendor_me(
 ):
     """Состав MR глазами подрядчика: теги + документы (read-only) + дедлайн.
     Цены/вопросы/загрузки — PR-4."""
-    mr = db.query(MaterialRequisition).filter(MaterialRequisition.id == inv.mr_id).first()
-    if mr is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    mr = _ensure_mr_accepting(db, inv.mr_id)
     tags = (
         db.query(MrTag)
         .filter(MrTag.mr_id == mr.id)

@@ -351,6 +351,7 @@ def create_owner_item(
         rev=payload.rev,
         is_required=payload.is_required,
         allow_questions=payload.allow_questions,
+        is_group=payload.is_group,
         order_index=payload.order_index,
     )
     db.add(item)
@@ -730,6 +731,7 @@ def import_req(
                 mr_id=mr.id, order_index=i, att_no=o.get("att_no"), category=cat,
                 title=(o.get("title") or "")[:500], doc_number=o.get("doc_number"), rev=o.get("rev"),
                 is_required=bool(o.get("is_required", True)), allow_questions=bool(o.get("allow_questions", False)),
+                is_group=bool(o.get("is_group", False)),
             )
         )
     for v in parsed.get("vendor_items", []):

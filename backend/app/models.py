@@ -520,6 +520,10 @@ class MrOwnerItem(Base):
     rev: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     is_required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     allow_questions: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Группа-заголовок (Technical Documents / Specifications / Drawings):
+    # на неё нельзя грузить файл — это раздел, у которого есть дочерние
+    # позиции (10 → 10.1, 10.2). Загрузка только на листовые пункты.
+    is_group: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 

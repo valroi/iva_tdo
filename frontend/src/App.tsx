@@ -42,6 +42,8 @@ import ReportingPage from "./pages/ReportingPage";
 import DocCheckerPage from "./pages/DocCheckerPage";
 import VendorsPage from "./pages/VendorsPage";
 import VendorPortalPage from "./pages/VendorPortalPage";
+import { I18nProvider } from "./i18n";
+import LanguageSwitcher from "./components/LanguageSwitcher";
 import type { DocumentItem, MDRRecord, NotificationItem, ProjectItem, User, WorkflowStatus } from "./types";
 
 const { Header, Sider, Content } = Layout;
@@ -62,7 +64,7 @@ type Section =
   | "admin"
   | "help"
   | "docchecker";
-type AppModule = "dcc" | "docchecker";
+type AppModule = "dcc" | "vendors" | "docchecker";
 
 class UiErrorBoundary extends Component<{ children: JSX.Element }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -114,12 +116,18 @@ export default function App(): JSX.Element {
   const vendorPortal = parseVendorPortal();
   if (vendorPortal) {
     return (
-      <UiErrorBoundary>
-        <VendorPortalPage invitationId={vendorPortal.invitationId} token={vendorPortal.token} />
-      </UiErrorBoundary>
+      <I18nProvider>
+        <UiErrorBoundary>
+          <VendorPortalPage invitationId={vendorPortal.invitationId} token={vendorPortal.token} />
+        </UiErrorBoundary>
+      </I18nProvider>
     );
   }
-  return <MainApp />;
+  return (
+    <I18nProvider>
+      <MainApp />
+    </I18nProvider>
+  );
 }
 
 function MainApp(): JSX.Element {
@@ -159,7 +167,8 @@ function MainApp(): JSX.Element {
     ];
     const section = (validSections as string[]).includes(seg) ? (seg as Section) : "dashboard";
     const revisionId = section === "revision_card" && arg ? Number(arg) || null : null;
-    const module: AppModule = section === "docchecker" ? "docchecker" : "dcc";
+    const module: AppModule =
+      section === "docchecker" ? "docchecker" : section === "vendors" ? "vendors" : "dcc";
     return { section, module, revisionId };
   };
   const initialHash = parseHash();
@@ -279,7 +288,6 @@ function MainApp(): JSX.Element {
     const items = [
       { key: "dashboard", icon: <HomeOutlined />, label: "Обзор" },
       { key: "projects", icon: <ProjectOutlined />, label: "Проекты" },
-      { key: "vendors", icon: <ShopOutlined />, label: "Вендоры" },
       { key: "notifications", icon: <BellOutlined />, label: `Уведомления${unreadNotificationsCount ? ` (${unreadNotificationsCount})` : ""}` },
       { key: "sessions", icon: <SafetyOutlined />, label: "Сессии" },
       { key: "help", icon: <QuestionCircleOutlined />, label: "Инструкция" },
@@ -340,12 +348,13 @@ function MainApp(): JSX.Element {
               value={activeModule}
               options={[
                 { label: "DCC", value: "dcc" },
+                { label: "Закупки", value: "vendors" },
                 { label: "DOCchecker", value: "docchecker" },
               ]}
               onChange={(value) => {
                 const next = value as AppModule;
                 setActiveModule(next);
-                setActiveSection(next === "docchecker" ? "docchecker" : "dashboard");
+                setActiveSection(next === "docchecker" ? "docchecker" : next === "vendors" ? "vendors" : "dashboard");
               }}
             />
           </div>
@@ -355,13 +364,20 @@ function MainApp(): JSX.Element {
             items={
               activeModule === "docchecker"
                 ? [{ key: "docchecker", icon: <FileSearchOutlined />, label: "DOCchecker" }]
+                : activeModule === "vendors"
+                ? [{ key: "vendors", icon: <ShopOutlined />, label: "Вендоры" }]
                 : menuItems
             }
-            selectedKeys={[activeModule === "docchecker" ? "docchecker" : activeSection]}
+            selectedKeys={[activeModule === "docchecker" ? "docchecker" : activeModule === "vendors" ? "vendors" : activeSection]}
             onSelect={(item) => {
               if (item.key === "docchecker") {
                 setActiveModule("docchecker");
                 setActiveSection("docchecker");
+                return;
+              }
+              if (item.key === "vendors") {
+                setActiveModule("vendors");
+                setActiveSection("vendors");
                 return;
               }
               setActiveModule("dcc");
@@ -385,7 +401,7 @@ function MainApp(): JSX.Element {
                 <Breadcrumb
                   style={{ marginBottom: 2 }}
                   items={[
-                    { title: activeModule === "docchecker" ? "DOCchecker" : "DCC" },
+                    { title: activeModule === "docchecker" ? "DOCchecker" : activeModule === "vendors" ? "Закупки" : "DCC" },
                     { title: sectionTitleMap[activeSection] },
                   ]}
                 />
@@ -393,16 +409,19 @@ function MainApp(): JSX.Element {
                   {sectionTitleMap[activeSection]}
                 </Typography.Title>
               </div>
-              <Button
-                icon={<LogoutOutlined />}
-                size="small"
-                onClick={() => {
-                  clearTokens();
-                  setAuthenticated(false);
-                }}
-              >
-                Выйти
-              </Button>
+              <Space>
+                <LanguageSwitcher />
+                <Button
+                  icon={<LogoutOutlined />}
+                  size="small"
+                  onClick={() => {
+                    clearTokens();
+                    setAuthenticated(false);
+                  }}
+                >
+                  Выйти
+                </Button>
+              </Space>
             </Space>
           </Header>
 
