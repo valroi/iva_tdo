@@ -418,3 +418,185 @@ class SystemSetting(Base):
         onupdate=datetime.utcnow,
         nullable=False,
     )
+
+
+# =====================================================================
+#  Модуль Vendors (VQM) — отработка предложений подрядчиков по поставке
+#  оборудования. Иерархия: Project → MR → Tag. Подрядчики приходят по
+#  изолированным приглашениям (vendor_invitation), видят только свой MR.
+# =====================================================================
+
+
+class MrStatus(str, enum.Enum):
+    DRAFT = "DRAFT"          # формируется заказчиком, подрядчикам не видна
+    OPEN = "OPEN"            # приём заявок открыт (до дедлайна)
+    CLOSED = "CLOSED"        # дедлайн прошёл / закрыта вручную, write запрещён
+    AWARDED = "AWARDED"      # победитель выбран (этап отчёта)
+
+
+class MrQuestionVisibility(str, enum.Enum):
+    PRIVATE = "PRIVATE"      # видит только автор-подрядчик и заказчик
+    PUBLIC = "PUBLIC"        # LR/admin сделал публичным — видят все подрядчики MR
+
+
+class MaterialRequisition(Base):
+    """MR — самостоятельная сущность со ссылкой на проект. Авторизация
+    управления НЕ наследуется от проекта автоматически: явный lr_user_id +
+    created_by_id + admin. Проверяется в _can_manage_mr()."""
+
+    __tablename__ = "material_requisitions"
+    __table_args__ = (UniqueConstraint("code", name="uq_mr_code"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    code: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[MrStatus] = mapped_column(Enum(MrStatus), nullable=False, default=MrStatus.DRAFT)
+    # Ответственный заказчика (LR по этой MR) — кому летят вопросы подрядчиков.
+    lr_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    deadline_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    currency: Mapped[str] = mapped_column(String(10), nullable=False, default="RUB")
+    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+
+class MrTag(Base):
+    """Позиция спецификации внутри MR (тег оборудования/поставки).
+    Подрядчик проставляет цену именно по тегам."""
+
+    __tablename__ = "mr_tags"
+    __table_args__ = (UniqueConstraint("mr_id", "tag_code", name="uq_mr_tag_code"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    mr_id: Mapped[int] = mapped_column(ForeignKey("material_requisitions.id"), nullable=False, index=True)
+    order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    tag_code: Mapped[str] = mapped_column(String(120), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    quantity: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    unit: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class MrDocument(Base):
+    """Документ заказчика, приложенный к MR (тех. требования, опросные
+    листы и т.п.). Видны подрядчикам по ссылке только на чтение."""
+
+    __tablename__ = "mr_documents"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    mr_id: Mapped[int] = mapped_column(ForeignKey("material_requisitions.id"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    mime: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    uploaded_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class VendorInvitation(Base):
+    """Одно приглашение = один подрядчик на один MR. Сам токен НЕ хранится —
+    только argon2/bcrypt-хэш. Изоляция подрядчиков строится на проверке
+    invitation_id во ВСЕХ гостевых endpoint'ах."""
+
+    __tablename__ = "vendor_invitations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    mr_id: Mapped[int] = mapped_column(ForeignKey("material_requisitions.id"), nullable=False, index=True)
+    vendor_company_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    vendor_contact_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Email-код подтверждения (хэш) и срок его жизни — для входа подрядчика.
+    email_code_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    email_code_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    email_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    failed_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_seen_ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class VendorQuote(Base):
+    """Цена подрядчика по конкретному тегу MR. Одна строка на пару
+    (invitation, tag)."""
+
+    __tablename__ = "vendor_quotes"
+    __table_args__ = (UniqueConstraint("invitation_id", "tag_id", name="uq_vendor_quote"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    invitation_id: Mapped[int] = mapped_column(ForeignKey("vendor_invitations.id"), nullable=False, index=True)
+    tag_id: Mapped[int] = mapped_column(ForeignKey("mr_tags.id"), nullable=False, index=True)
+    price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    currency: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+
+class VendorUpload(Base):
+    """Документ, загруженный подрядчиком. Хранится в отдельном volume
+    vendor_uploads, привязан к invitation (изоляция)."""
+
+    __tablename__ = "vendor_uploads"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    invitation_id: Mapped[int] = mapped_column(ForeignKey("vendor_invitations.id"), nullable=False, index=True)
+    file_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    mime: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class MrQuestion(Base):
+    """Вопрос подрядчика по MR / ответ заказчика. Ответы могут быть
+    сделаны публичными (видны всем подрядчикам этого MR)."""
+
+    __tablename__ = "mr_questions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    mr_id: Mapped[int] = mapped_column(ForeignKey("material_requisitions.id"), nullable=False, index=True)
+    # Автор-подрядчик (invitation). У ответа заказчика — parent_id заполнен.
+    invitation_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("vendor_invitations.id"), nullable=True, index=True
+    )
+    parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("mr_questions.id"), nullable=True, index=True)
+    # Опционально — привязка вопроса к конкретному документу заказчика.
+    mr_document_id: Mapped[Optional[int]] = mapped_column(ForeignKey("mr_documents.id"), nullable=True)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    visibility: Mapped[MrQuestionVisibility] = mapped_column(
+        Enum(MrQuestionVisibility), nullable=False, default=MrQuestionVisibility.PRIVATE
+    )
+    answered_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    answered_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class VendorAuditLog(Base):
+    """Аудит всех действий в модуле Vendors (guest + LR): кто, когда,
+    с какого IP, что сделал. Для расследований и комплаенса."""
+
+    __tablename__ = "vendor_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    mr_id: Mapped[Optional[int]] = mapped_column(ForeignKey("material_requisitions.id"), nullable=True, index=True)
+    invitation_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("vendor_invitations.id"), nullable=True, index=True
+    )
+    actor_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    action: Mapped[str] = mapped_column(String(100), nullable=False)
+    ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    payload_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)

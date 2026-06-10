@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.routers import auth, documents, mdr, notifications, projects, smart_upload, users, workflow
+from app.routers import auth, documents, mdr, notifications, projects, smart_upload, users, vendors, workflow
 
 api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
@@ -11,3 +11,4 @@ api_router.include_router(documents.router, tags=["documents"])
 api_router.include_router(smart_upload.router, tags=["smart-upload"])
 api_router.include_router(workflow.router, prefix="/workflow", tags=["workflow"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
+api_router.include_router(vendors.router, tags=["vendors"])

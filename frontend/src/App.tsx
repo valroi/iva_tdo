@@ -8,6 +8,7 @@ import {
   ProjectOutlined,
   QuestionCircleOutlined,
   SafetyOutlined,
+  ShopOutlined,
   TeamOutlined,
   UnorderedListOutlined,
 } from "@ant-design/icons";
@@ -39,6 +40,7 @@ import DocumentsRegistryPage from "./pages/DocumentsRegistryPage";
 import CrsPage from "./pages/CrsPage";
 import ReportingPage from "./pages/ReportingPage";
 import DocCheckerPage from "./pages/DocCheckerPage";
+import VendorsPage from "./pages/VendorsPage";
 import type { DocumentItem, MDRRecord, NotificationItem, ProjectItem, User, WorkflowStatus } from "./types";
 
 const { Header, Sider, Content } = Layout;
@@ -54,6 +56,7 @@ type Section =
   | "revision_card"
   | "notifications"
   | "tdo_queue"
+  | "vendors"
   | "sessions"
   | "admin"
   | "help"
@@ -111,6 +114,7 @@ export default function App(): JSX.Element {
     const validSections: Section[] = [
       "dashboard",
       "projects",
+      "vendors",
       "documents_registry",
       "revisions",
       "trm",
@@ -246,6 +250,7 @@ export default function App(): JSX.Element {
     const items = [
       { key: "dashboard", icon: <HomeOutlined />, label: "Обзор" },
       { key: "projects", icon: <ProjectOutlined />, label: "Проекты" },
+      { key: "vendors", icon: <ShopOutlined />, label: "Вендоры" },
       { key: "notifications", icon: <BellOutlined />, label: `Уведомления${unreadNotificationsCount ? ` (${unreadNotificationsCount})` : ""}` },
       { key: "sessions", icon: <SafetyOutlined />, label: "Сессии" },
       { key: "help", icon: <QuestionCircleOutlined />, label: "Инструкция" },
@@ -276,6 +281,7 @@ export default function App(): JSX.Element {
   const sectionTitleMap: Record<Section, string> = {
     dashboard: "Обзор",
     projects: "Проекты",
+    vendors: "Вендоры",
     documents_registry: "Документы",
     revisions: "Ревизии",
     trm: "TRM",
@@ -407,6 +413,7 @@ export default function App(): JSX.Element {
                   onReload={loadInitialData}
                 />
               )}
+              {activeSection === "vendors" && user && <VendorsPage currentUser={user} />}
               {activeSection === "revisions" && user && (
                 <RevisionsPage
                   currentUser={user}

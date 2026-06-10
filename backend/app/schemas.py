@@ -699,3 +699,95 @@ class FileUploadResponse(BaseModel):
     file_path: str
     content_type: str
     file_size: int
+
+
+# =====================================================================
+#  Модуль Vendors (VQM)
+# =====================================================================
+
+from app.models import MrStatus, MrQuestionVisibility  # noqa: E402
+
+
+class MrCreate(BaseModel):
+    project_id: int
+    code: str
+    title: str
+    description: str | None = None
+    lr_user_id: int | None = None
+    deadline_at: datetime | None = None
+    currency: str = "RUB"
+
+
+class MrUpdate(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    lr_user_id: int | None = None
+    deadline_at: datetime | None = None
+    currency: str | None = None
+    status: MrStatus | None = None
+
+
+class MrRead(BaseModel):
+    id: int
+    project_id: int
+    code: str
+    title: str
+    description: str | None
+    status: MrStatus
+    lr_user_id: int | None
+    lr_user_name: str | None = None
+    deadline_at: datetime | None
+    currency: str
+    created_by_id: int
+    created_at: datetime
+    updated_at: datetime
+    tags_count: int = 0
+    documents_count: int = 0
+    invitations_count: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MrTagCreate(BaseModel):
+    tag_code: str
+    name: str
+    quantity: float | None = None
+    unit: str | None = None
+    note: str | None = None
+    order_index: int = 0
+
+
+class MrTagUpdate(BaseModel):
+    tag_code: str | None = None
+    name: str | None = None
+    quantity: float | None = None
+    unit: str | None = None
+    note: str | None = None
+    order_index: int | None = None
+
+
+class MrTagRead(BaseModel):
+    id: int
+    mr_id: int
+    order_index: int
+    tag_code: str
+    name: str
+    quantity: float | None
+    unit: str | None
+    note: str | None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MrDocumentRead(BaseModel):
+    id: int
+    mr_id: int
+    title: str
+    file_name: str
+    mime: str | None
+    size_bytes: int | None
+    uploaded_by_id: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

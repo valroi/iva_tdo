@@ -27,6 +27,10 @@ import type {
   UserPermissions,
   UserRole,
   WorkflowStatus,
+  MrItem,
+  MrTagItem,
+  MrDocumentItem,
+  MrStatus,
 } from "./types";
 
 const API_URL =
@@ -930,4 +934,85 @@ export function deleteReviewMatrixItem(itemId: number): Promise<void> {
   return request<void>(`/projects/review-matrix/${itemId}`, {
     method: "DELETE",
   });
+}
+
+// =====================================================================
+//  Модуль Vendors (VQM)
+// =====================================================================
+
+export function listMr(projectId?: number): Promise<MrItem[]> {
+  const q = projectId ? `?project_id=${projectId}` : "";
+  return request<MrItem[]>(`/mr${q}`);
+}
+
+export function getMr(mrId: number): Promise<MrItem> {
+  return request<MrItem>(`/mr/${mrId}`);
+}
+
+export function createMr(payload: {
+  project_id: number;
+  code: string;
+  title: string;
+  description?: string | null;
+  lr_user_id?: number | null;
+  deadline_at?: string | null;
+  currency?: string;
+}): Promise<MrItem> {
+  return request<MrItem>("/mr", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function updateMr(
+  mrId: number,
+  payload: Partial<{
+    title: string;
+    description: string | null;
+    lr_user_id: number | null;
+    deadline_at: string | null;
+    currency: string;
+    status: MrStatus;
+  }>,
+): Promise<MrItem> {
+  return request<MrItem>(`/mr/${mrId}`, { method: "PATCH", body: JSON.stringify(payload) });
+}
+
+export function deleteMr(mrId: number): Promise<void> {
+  return request<void>(`/mr/${mrId}`, { method: "DELETE" });
+}
+
+export function listMrTags(mrId: number): Promise<MrTagItem[]> {
+  return request<MrTagItem[]>(`/mr/${mrId}/tags`);
+}
+
+export function createMrTag(
+  mrId: number,
+  payload: { tag_code: string; name: string; quantity?: number | null; unit?: string | null; note?: string | null; order_index?: number },
+): Promise<MrTagItem> {
+  return request<MrTagItem>(`/mr/${mrId}/tags`, { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function updateMrTag(
+  mrId: number,
+  tagId: number,
+  payload: Partial<{ tag_code: string; name: string; quantity: number | null; unit: string | null; note: string | null; order_index: number }>,
+): Promise<MrTagItem> {
+  return request<MrTagItem>(`/mr/${mrId}/tags/${tagId}`, { method: "PATCH", body: JSON.stringify(payload) });
+}
+
+export function deleteMrTag(mrId: number, tagId: number): Promise<void> {
+  return request<void>(`/mr/${mrId}/tags/${tagId}`, { method: "DELETE" });
+}
+
+export function listMrDocuments(mrId: number): Promise<MrDocumentItem[]> {
+  return request<MrDocumentItem[]>(`/mr/${mrId}/documents`);
+}
+
+export function uploadMrDocument(mrId: number, file: File, title?: string): Promise<MrDocumentItem> {
+  const form = new FormData();
+  form.append("file", file);
+  const q = title ? `?title=${encodeURIComponent(title)}` : "";
+  return request<MrDocumentItem>(`/mr/${mrId}/documents${q}`, { method: "POST", body: form });
+}
+
+export function deleteMrDocument(mrId: number, docId: number): Promise<void> {
+  return request<void>(`/mr/${mrId}/documents/${docId}`, { method: "DELETE" });
 }

@@ -411,3 +411,48 @@ export interface ReviewMatrixMember {
   user_full_name?: string | null;
   created_at: string;
 }
+
+// --- Модуль Vendors (VQM) ---
+export type MrStatus = "DRAFT" | "OPEN" | "CLOSED" | "AWARDED";
+
+export interface MrItem {
+  id: number;
+  project_id: number;
+  code: string;
+  title: string;
+  description: string | null;
+  status: MrStatus;
+  lr_user_id: number | null;
+  lr_user_name: string | null;
+  deadline_at: string | null;
+  currency: string;
+  created_by_id: number;
+  created_at: string;
+  updated_at: string;
+  tags_count: number;
+  documents_count: number;
+  invitations_count: number;
+}
+
+export interface MrTagItem {
+  id: number;
+  mr_id: number;
+  order_index: number;
+  tag_code: string;
+  name: string;
+  quantity: number | null;
+  unit: string | null;
+  note: string | null;
+  created_at: string;
+}
+
+export interface MrDocumentItem {
+  id: number;
+  mr_id: number;
+  title: string;
+  file_name: string;
+  mime: string | null;
+  size_bytes: number | null;
+  uploaded_by_id: number;
+  created_at: string;
+}
