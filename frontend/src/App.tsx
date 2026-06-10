@@ -8,6 +8,7 @@ import {
   ProjectOutlined,
   QuestionCircleOutlined,
   SafetyOutlined,
+  ShopOutlined,
   TeamOutlined,
   UnorderedListOutlined,
 } from "@ant-design/icons";
@@ -39,6 +40,10 @@ import DocumentsRegistryPage from "./pages/DocumentsRegistryPage";
 import CrsPage from "./pages/CrsPage";
 import ReportingPage from "./pages/ReportingPage";
 import DocCheckerPage from "./pages/DocCheckerPage";
+import VendorsPage from "./pages/VendorsPage";
+import VendorPortalPage from "./pages/VendorPortalPage";
+import { I18nProvider } from "./i18n";
+import LanguageSwitcher from "./components/LanguageSwitcher";
 import type { DocumentItem, MDRRecord, NotificationItem, ProjectItem, User, WorkflowStatus } from "./types";
 
 const { Header, Sider, Content } = Layout;
@@ -54,11 +59,12 @@ type Section =
   | "revision_card"
   | "notifications"
   | "tdo_queue"
+  | "vendors"
   | "sessions"
   | "admin"
   | "help"
   | "docchecker";
-type AppModule = "dcc" | "docchecker";
+type AppModule = "dcc" | "vendors" | "docchecker";
 
 class UiErrorBoundary extends Component<{ children: JSX.Element }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -90,7 +96,41 @@ class UiErrorBoundary extends Component<{ children: JSX.Element }, { error: Erro
   }
 }
 
+// Гостевой портал подрядчика: #/vendor/<invitationId>?t=<token>.
+// Распознаём ДО логина — внешний подрядчик не входит в основную систему.
+function parseVendorPortal(): { invitationId: number; token: string } | null {
+  if (typeof window === "undefined") return null;
+  const hash = window.location.hash.replace(/^#\/?/, "");
+  const [path] = hash.split("?");
+  const segments = path.split("/");
+  if (segments[0] !== "vendor" || !segments[1]) return null;
+  const invitationId = Number(segments[1]);
+  if (!Number.isFinite(invitationId)) return null;
+  const search = new URLSearchParams(window.location.hash.split("?")[1] ?? "");
+  const token = search.get("t") ?? "";
+  if (!token) return null;
+  return { invitationId, token };
+}
+
 export default function App(): JSX.Element {
+  const vendorPortal = parseVendorPortal();
+  if (vendorPortal) {
+    return (
+      <I18nProvider>
+        <UiErrorBoundary>
+          <VendorPortalPage invitationId={vendorPortal.invitationId} token={vendorPortal.token} />
+        </UiErrorBoundary>
+      </I18nProvider>
+    );
+  }
+  return (
+    <I18nProvider>
+      <MainApp />
+    </I18nProvider>
+  );
+}
+
+function MainApp(): JSX.Element {
   const [authenticated, setAuthenticated] = useState(hasAccessToken());
   const [loading, setLoading] = useState(false);
   // Активная секция и открытая ревизия сохраняются в URL hash, чтобы F5
@@ -111,6 +151,7 @@ export default function App(): JSX.Element {
     const validSections: Section[] = [
       "dashboard",
       "projects",
+      "vendors",
       "documents_registry",
       "revisions",
       "trm",
@@ -126,7 +167,8 @@ export default function App(): JSX.Element {
     ];
     const section = (validSections as string[]).includes(seg) ? (seg as Section) : "dashboard";
     const revisionId = section === "revision_card" && arg ? Number(arg) || null : null;
-    const module: AppModule = section === "docchecker" ? "docchecker" : "dcc";
+    const module: AppModule =
+      section === "docchecker" ? "docchecker" : section === "vendors" ? "vendors" : "dcc";
     return { section, module, revisionId };
   };
   const initialHash = parseHash();
@@ -276,6 +318,7 @@ export default function App(): JSX.Element {
   const sectionTitleMap: Record<Section, string> = {
     dashboard: "Обзор",
     projects: "Проекты",
+    vendors: "Вендоры",
     documents_registry: "Документы",
     revisions: "Ревизии",
     trm: "TRM",
@@ -305,12 +348,13 @@ export default function App(): JSX.Element {
               value={activeModule}
               options={[
                 { label: "DCC", value: "dcc" },
+                { label: "Закупки", value: "vendors" },
                 { label: "DOCchecker", value: "docchecker" },
               ]}
               onChange={(value) => {
                 const next = value as AppModule;
                 setActiveModule(next);
-                setActiveSection(next === "docchecker" ? "docchecker" : "dashboard");
+                setActiveSection(next === "docchecker" ? "docchecker" : next === "vendors" ? "vendors" : "dashboard");
               }}
             />
           </div>
@@ -320,13 +364,20 @@ export default function App(): JSX.Element {
             items={
               activeModule === "docchecker"
                 ? [{ key: "docchecker", icon: <FileSearchOutlined />, label: "DOCchecker" }]
+                : activeModule === "vendors"
+                ? [{ key: "vendors", icon: <ShopOutlined />, label: "Вендоры" }]
                 : menuItems
             }
-            selectedKeys={[activeModule === "docchecker" ? "docchecker" : activeSection]}
+            selectedKeys={[activeModule === "docchecker" ? "docchecker" : activeModule === "vendors" ? "vendors" : activeSection]}
             onSelect={(item) => {
               if (item.key === "docchecker") {
                 setActiveModule("docchecker");
                 setActiveSection("docchecker");
+                return;
+              }
+              if (item.key === "vendors") {
+                setActiveModule("vendors");
+                setActiveSection("vendors");
                 return;
               }
               setActiveModule("dcc");
@@ -350,7 +401,7 @@ export default function App(): JSX.Element {
                 <Breadcrumb
                   style={{ marginBottom: 2 }}
                   items={[
-                    { title: activeModule === "docchecker" ? "DOCchecker" : "DCC" },
+                    { title: activeModule === "docchecker" ? "DOCchecker" : activeModule === "vendors" ? "Закупки" : "DCC" },
                     { title: sectionTitleMap[activeSection] },
                   ]}
                 />
@@ -358,16 +409,19 @@ export default function App(): JSX.Element {
                   {sectionTitleMap[activeSection]}
                 </Typography.Title>
               </div>
-              <Button
-                icon={<LogoutOutlined />}
-                size="small"
-                onClick={() => {
-                  clearTokens();
-                  setAuthenticated(false);
-                }}
-              >
-                Выйти
-              </Button>
+              <Space>
+                <LanguageSwitcher />
+                <Button
+                  icon={<LogoutOutlined />}
+                  size="small"
+                  onClick={() => {
+                    clearTokens();
+                    setAuthenticated(false);
+                  }}
+                >
+                  Выйти
+                </Button>
+              </Space>
             </Space>
           </Header>
 
@@ -407,6 +461,7 @@ export default function App(): JSX.Element {
                   onReload={loadInitialData}
                 />
               )}
+              {activeSection === "vendors" && user && <VendorsPage currentUser={user} />}
               {activeSection === "revisions" && user && (
                 <RevisionsPage
                   currentUser={user}

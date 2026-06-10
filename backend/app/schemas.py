@@ -699,3 +699,398 @@ class FileUploadResponse(BaseModel):
     file_path: str
     content_type: str
     file_size: int
+
+
+# =====================================================================
+#  Модуль Vendors (VQM)
+# =====================================================================
+
+from app.models import MrStatus, MrQuestionVisibility  # noqa: E402
+
+
+class MrCreate(BaseModel):
+    project_id: int
+    code: str
+    title: str
+    description: str | None = None
+    lr_user_id: int | None = None
+    deadline_at: datetime | None = None
+    currency: str = "RUB"
+
+
+class MrUpdate(BaseModel):
+    title: str | None = None
+    equipment_type: str | None = None
+    description: str | None = None
+    lr_user_id: int | None = None
+    deadline_at: datetime | None = None
+    currency: str | None = None
+    status: MrStatus | None = None
+
+
+class MrRead(BaseModel):
+    id: int
+    project_id: int
+    code: str
+    title: str
+    description: str | None
+    status: MrStatus
+    lr_user_id: int | None
+    lr_user_name: str | None = None
+    deadline_at: datetime | None
+    currency: str
+    created_by_id: int
+    created_at: datetime
+    updated_at: datetime
+    equipment_type: str | None = None
+    req_number: str | None = None
+    req_rev: str | None = None
+    discipline_code: str | None = None
+    tags_count: int = 0
+    owner_items_count: int = 0
+    owner_items_filled: int = 0
+    vendor_items_count: int = 0
+    invitations_count: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MrTagCreate(BaseModel):
+    sr_no: str | None = None
+    item_no: str | None = None
+    tag_code: str
+    name: str
+    quantity: float | None = None
+    unit: str | None = None
+    note: str | None = None
+    order_index: int = 0
+
+
+class MrTagUpdate(BaseModel):
+    tag_code: str | None = None
+    name: str | None = None
+    quantity: float | None = None
+    unit: str | None = None
+    note: str | None = None
+    order_index: int | None = None
+
+
+class MrTagRead(BaseModel):
+    id: int
+    mr_id: int
+    order_index: int
+    sr_no: str | None
+    item_no: str | None
+    tag_code: str
+    name: str
+    quantity: float | None
+    unit: str | None
+    note: str | None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+from app.models import MrOwnerItemCategory, MrVendorItemSection, VendorItemAnswer  # noqa: E402
+
+
+# --- Чек-лист заказчика (owner items + files) ---
+class MrOwnerFileRead(BaseModel):
+    id: int
+    owner_item_id: int
+    file_name: str
+    mime: str | None
+    size_bytes: int | None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MrOwnerItemCreate(BaseModel):
+    att_no: str | None = None
+    category: MrOwnerItemCategory = MrOwnerItemCategory.OTHER
+    title: str
+    doc_number: str | None = None
+    rev: str | None = None
+    is_required: bool = True
+    allow_questions: bool = False
+    is_group: bool = False
+    order_index: int = 0
+
+
+class MrOwnerItemUpdate(BaseModel):
+    att_no: str | None = None
+    category: MrOwnerItemCategory | None = None
+    title: str | None = None
+    doc_number: str | None = None
+    rev: str | None = None
+    is_required: bool | None = None
+    allow_questions: bool | None = None
+    order_index: int | None = None
+
+
+class MrOwnerItemRead(BaseModel):
+    id: int
+    mr_id: int
+    order_index: int
+    att_no: str | None
+    category: MrOwnerItemCategory
+    title: str
+    doc_number: str | None
+    rev: str | None
+    is_required: bool
+    allow_questions: bool
+    is_group: bool = False
+    created_at: datetime
+    files: list[MrOwnerFileRead] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# --- Чек-лист подрядчика (vendor items — шаблон) ---
+class MrVendorItemCreate(BaseModel):
+    section: MrVendorItemSection
+    category: str | None = None
+    code: str | None = None
+    title: str
+    purpose: str | None = None
+    with_bid: bool = False
+    is_required: bool = True
+    allow_questions: bool = False
+    order_index: int = 0
+
+
+class MrVendorItemUpdate(BaseModel):
+    section: MrVendorItemSection | None = None
+    category: str | None = None
+    code: str | None = None
+    title: str | None = None
+    purpose: str | None = None
+    with_bid: bool | None = None
+    is_required: bool | None = None
+    allow_questions: bool | None = None
+    order_index: int | None = None
+
+
+class MrVendorItemRead(BaseModel):
+    id: int
+    mr_id: int
+    order_index: int
+    section: MrVendorItemSection
+    category: str | None
+    code: str | None
+    title: str
+    purpose: str | None
+    with_bid: bool
+    is_required: bool
+    allow_questions: bool
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# --- Импорт REQ (.docx → структура MR) ---
+class ReqImportPreview(BaseModel):
+    title: str
+    equipment_type: str | None
+    req_number: str | None
+    discipline_code: str | None
+    tags: list[dict]
+    owner_items: list[dict]
+    vendor_items: list[dict]
+
+
+class ReqImportResult(BaseModel):
+    mr_id: int
+    code: str
+    tags_created: int
+    owner_items_created: int
+    vendor_items_created: int
+
+
+# --- VQM: приглашения и гостевой портал ---
+
+class VendorInvitationCreate(BaseModel):
+    vendor_company_name: str
+    vendor_contact_email: EmailStr
+    expires_at: datetime | None = None
+
+
+class VendorInvitationRead(BaseModel):
+    id: int
+    mr_id: int
+    vendor_company_name: str
+    vendor_contact_email: str
+    expires_at: datetime | None
+    revoked_at: datetime | None
+    email_verified_at: datetime | None
+    last_seen_at: datetime | None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class VendorInvitationCreated(VendorInvitationRead):
+    # Одноразовая выдача ссылки и токена — только при создании.
+    invitation_link: str
+    token: str
+
+
+class VendorRequestCode(BaseModel):
+    token: str
+
+
+class VendorVerify(BaseModel):
+    token: str
+    code: str
+
+
+class VendorSessionResponse(BaseModel):
+    session_token: str
+    mr_code: str
+    mr_title: str
+
+
+# Гостевое представление MR (read-only состав, без чужих данных).
+class VendorMrTagView(BaseModel):
+    id: int
+    tag_code: str
+    name: str
+    quantity: float | None
+    unit: str | None
+    note: str | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class VendorMrDocumentView(BaseModel):
+    id: int
+    title: str
+    file_name: str
+    size_bytes: int | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class VendorMrChecklistItem(BaseModel):
+    id: int
+    section: str
+    category: str | None
+    code: str | None
+    title: str
+    purpose: str | None
+    with_bid: bool
+    allow_questions: bool
+
+
+class VendorMrView(BaseModel):
+    mr_id: int
+    code: str
+    title: str
+    description: str | None
+    currency: str
+    deadline_at: datetime | None
+    status: MrStatus
+    is_open: bool
+    vendor_company_name: str
+    tags: list[VendorMrTagView]
+    documents: list[VendorMrDocumentView]
+    checklist: list[VendorMrChecklistItem] = []
+    my_quotes: list[VendorMyQuote] = []
+    my_responses: list[VendorMyResponse] = []
+
+
+# --- VQM PR-4b: ответы подрядчика (цены + чек-лист) ---
+class VendorQuoteSet(BaseModel):
+    tag_id: int
+    price: float | None = None
+    currency: str | None = None
+    note: str | None = None
+
+
+class VendorChecklistAnswerSet(BaseModel):
+    vendor_item_id: int
+    answer: VendorItemAnswer | None = None
+    note: str | None = None
+
+
+class VendorMyQuote(BaseModel):
+    tag_id: int
+    price: float | None
+    currency: str | None
+    note: str | None
+
+
+class VendorMyResponse(BaseModel):
+    vendor_item_id: int
+    answer: VendorItemAnswer | None
+    note: str | None
+    file_name: str | None = None
+    upload_id: int | None = None
+
+
+# --- VQM PR-5: сводный отчёт теги × подрядчики × цены ---
+class VendorReportVendor(BaseModel):
+    invitation_id: int
+    company_name: str
+    submitted: bool          # вошёл ли (email_verified) — есть ли участие
+    total_price: float | None
+
+
+class VendorReportCell(BaseModel):
+    invitation_id: int
+    price: float | None
+    note: str | None
+
+
+class VendorReportRow(BaseModel):
+    tag_id: int
+    sr_no: str | None
+    item_no: str | None
+    name: str
+    quantity: float | None
+    unit: str | None
+    cells: list[VendorReportCell]
+    min_invitation_id: int | None    # подрядчик с минимальной ценой (подсветка)
+
+
+class VendorReport(BaseModel):
+    mr_id: int
+    code: str
+    currency: str
+    vendors: list[VendorReportVendor]
+    rows: list[VendorReportRow]
+
+
+# --- VQM PR-4c: вопросы/ответы (Q&A) ---
+class VendorQuestionCreate(BaseModel):
+    body: str
+    mr_owner_item_id: int | None = None
+    mr_vendor_item_id: int | None = None
+
+
+class QuestionAnswerCreate(BaseModel):
+    body: str
+
+
+class QuestionVisibilitySet(BaseModel):
+    public: bool
+
+
+class MrQuestionReply(BaseModel):
+    id: int
+    body: str
+    is_owner: bool                 # ответ заказчика (LR) или реплика подрядчика
+    author_label: str              # «Заказчик» / название компании / «Поставщик»
+    created_at: datetime
+
+
+class MrQuestionRead(BaseModel):
+    id: int
+    body: str
+    author_label: str
+    is_public: bool
+    mr_owner_item_id: int | None
+    mr_vendor_item_id: int | None
+    created_at: datetime
+    replies: list[MrQuestionReply] = []

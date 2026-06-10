@@ -31,6 +31,26 @@ class Settings(BaseSettings):
     main_admin_email: str = "admin@ivamaris.io"
     seed_demo_users: bool = False
 
+    # --- Модуль Vendors (VQM) ---
+    # SMTP для email-кодов подтверждения подрядчиков. Если smtp_host пуст —
+    # сервис писем работает в режиме лог-заглушки (код пишется в backend-лог).
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = "no-reply@ivamaris.io"
+    smtp_use_tls: bool = True
+    # Базовый URL фронта для ссылок-приглашений в письмах.
+    public_base_url: str = "http://localhost:3000"
+    # Корень хранилища документов подрядчиков (отдельный volume).
+    vendor_uploads_root: str = "/data/vendor_uploads"
+    # Время жизни email-кода подтверждения, минут.
+    vendor_email_code_ttl_minutes: int = 15
+    # Время жизни гостевой сессии подрядчика, минут.
+    vendor_session_ttl_minutes: int = 60 * 8
+    # Макс. число подрядчиков на один MR (бизнес-ограничение).
+    vendor_max_invitations_per_mr: int = 5
+
 
 @lru_cache
 def get_settings() -> Settings:

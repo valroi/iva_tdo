@@ -411,3 +411,141 @@ export interface ReviewMatrixMember {
   user_full_name?: string | null;
   created_at: string;
 }
+
+// --- Модуль Vendors (VQM) ---
+export type MrStatus = "DRAFT" | "OPEN" | "CLOSED" | "AWARDED";
+
+export interface MrItem {
+  id: number;
+  project_id: number;
+  code: string;
+  title: string;
+  description: string | null;
+  status: MrStatus;
+  lr_user_id: number | null;
+  lr_user_name: string | null;
+  deadline_at: string | null;
+  currency: string;
+  created_by_id: number;
+  created_at: string;
+  updated_at: string;
+  equipment_type: string | null;
+  req_number: string | null;
+  req_rev: string | null;
+  discipline_code: string | null;
+  tags_count: number;
+  owner_items_count: number;
+  owner_items_filled: number;
+  vendor_items_count: number;
+  invitations_count: number;
+}
+
+export type MrOwnerCategory = "CHECKLIST_FORM"|"RFD"|"SPARE"|"INSPECTION"|"PROCEDURE"|"DATASHEET"|"SPEC"|"DRAWING"|"OTHER";
+
+export interface MrOwnerFile { id:number; owner_item_id:number; file_name:string; mime:string|null; size_bytes:number|null; created_at:string; }
+export interface MrOwnerItem {
+  id:number; mr_id:number; order_index:number; att_no:string|null; category:MrOwnerCategory;
+  title:string; doc_number:string|null; rev:string|null; is_required:boolean; allow_questions:boolean;
+  is_group:boolean; created_at:string; files:MrOwnerFile[];
+}
+export type MrVendorSection = "BID_INCLUSION"|"BID_NOTES"|"RFD";
+export interface MrVendorItem {
+  id:number; mr_id:number; order_index:number; section:MrVendorSection; category:string|null;
+  code:string|null; title:string; purpose:string|null; with_bid:boolean; is_required:boolean;
+  allow_questions:boolean; created_at:string;
+}
+export interface ReqImportResult { mr_id:number; code:string; tags_created:number; owner_items_created:number; vendor_items_created:number; }
+
+export interface MrTagItem {
+  id: number;
+  mr_id: number;
+  order_index: number;
+  sr_no: string | null;
+  item_no: string | null;
+  tag_code: string;
+  name: string;
+  quantity: number | null;
+  unit: string | null;
+  note: string | null;
+  created_at: string;
+}
+
+export interface MrDocumentItem {
+  id: number;
+  mr_id: number;
+  title: string;
+  file_name: string;
+  mime: string | null;
+  size_bytes: number | null;
+  uploaded_by_id: number;
+  created_at: string;
+}
+
+export interface VendorInvitationItem {
+  id: number;
+  mr_id: number;
+  vendor_company_name: string;
+  vendor_contact_email: string;
+  expires_at: string | null;
+  revoked_at: string | null;
+  email_verified_at: string | null;
+  last_seen_at: string | null;
+  created_at: string;
+}
+
+export interface VendorInvitationCreated extends VendorInvitationItem {
+  invitation_link: string;
+  token: string;
+}
+
+export interface VendorMrTagView {
+  id: number;
+  tag_code: string;
+  name: string;
+  quantity: number | null;
+  unit: string | null;
+  note: string | null;
+}
+
+export interface VendorMrDocumentView {
+  id: number;
+  title: string;
+  file_name: string;
+  size_bytes: number | null;
+}
+export interface VendorMrChecklistItem {
+  id:number; section:MrVendorSection; category:string|null; code:string|null;
+  title:string; purpose:string|null; with_bid:boolean; allow_questions:boolean;
+}
+
+export interface VendorMrView {
+  mr_id: number;
+  code: string;
+  title: string;
+  description: string | null;
+  currency: string;
+  deadline_at: string | null;
+  status: MrStatus;
+  is_open: boolean;
+  vendor_company_name: string;
+  tags: VendorMrTagView[];
+  documents: VendorMrDocumentView[];
+  checklist: VendorMrChecklistItem[];
+  my_quotes: VendorMyQuote[];
+  my_responses: VendorMyResponse[];
+}
+
+export type VendorAnswer = "YES" | "NO" | "NA";
+export interface VendorMyQuote { tag_id:number; price:number|null; currency:string|null; note:string|null; }
+export interface VendorMyResponse { vendor_item_id:number; answer:VendorAnswer|null; note:string|null; file_name:string|null; upload_id:number|null; }
+
+export interface VendorReportVendor { invitation_id:number; company_name:string; submitted:boolean; total_price:number|null; }
+export interface VendorReportCell { invitation_id:number; price:number|null; note:string|null; }
+export interface VendorReportRow { tag_id:number; sr_no:string|null; item_no:string|null; name:string; quantity:number|null; unit:string|null; cells:VendorReportCell[]; min_invitation_id:number|null; }
+export interface VendorReport { mr_id:number; code:string; currency:string; vendors:VendorReportVendor[]; rows:VendorReportRow[]; }
+
+export interface MrQuestionReply { id:number; body:string; is_owner:boolean; author_label:string; created_at:string; }
+export interface MrQuestionItem {
+  id:number; body:string; author_label:string; is_public:boolean;
+  mr_owner_item_id:number|null; mr_vendor_item_id:number|null; created_at:string; replies:MrQuestionReply[];
+}

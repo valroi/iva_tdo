@@ -27,6 +27,9 @@ import type {
   UserPermissions,
   UserRole,
   WorkflowStatus,
+  MrItem,
+  MrTagItem,
+  MrStatus,
 } from "./types";
 
 const API_URL =
@@ -930,4 +933,242 @@ export function deleteReviewMatrixItem(itemId: number): Promise<void> {
   return request<void>(`/projects/review-matrix/${itemId}`, {
     method: "DELETE",
   });
+}
+
+// =====================================================================
+//  Модуль Vendors (VQM)
+// =====================================================================
+
+export function listMr(projectId?: number): Promise<MrItem[]> {
+  const q = projectId ? `?project_id=${projectId}` : "";
+  return request<MrItem[]>(`/mr${q}`);
+}
+
+export function getMr(mrId: number): Promise<MrItem> {
+  return request<MrItem>(`/mr/${mrId}`);
+}
+
+export function createMr(payload: {
+  project_id: number;
+  code: string;
+  title: string;
+  description?: string | null;
+  lr_user_id?: number | null;
+  deadline_at?: string | null;
+  currency?: string;
+}): Promise<MrItem> {
+  return request<MrItem>("/mr", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function updateMr(
+  mrId: number,
+  payload: Partial<{
+    title: string;
+    equipment_type: string | null;
+    description: string | null;
+    lr_user_id: number | null;
+    deadline_at: string | null;
+    currency: string;
+    status: MrStatus;
+  }>,
+): Promise<MrItem> {
+  return request<MrItem>(`/mr/${mrId}`, { method: "PATCH", body: JSON.stringify(payload) });
+}
+
+export function deleteMr(mrId: number): Promise<void> {
+  return request<void>(`/mr/${mrId}`, { method: "DELETE" });
+}
+
+export function listMrTags(mrId: number): Promise<MrTagItem[]> {
+  return request<MrTagItem[]>(`/mr/${mrId}/tags`);
+}
+
+export function createMrTag(
+  mrId: number,
+  payload: { tag_code: string; name: string; quantity?: number | null; unit?: string | null; note?: string | null; order_index?: number },
+): Promise<MrTagItem> {
+  return request<MrTagItem>(`/mr/${mrId}/tags`, { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function updateMrTag(
+  mrId: number,
+  tagId: number,
+  payload: Partial<{ tag_code: string; name: string; quantity: number | null; unit: string | null; note: string | null; order_index: number }>,
+): Promise<MrTagItem> {
+  return request<MrTagItem>(`/mr/${mrId}/tags/${tagId}`, { method: "PATCH", body: JSON.stringify(payload) });
+}
+
+export function deleteMrTag(mrId: number, tagId: number): Promise<void> {
+  return request<void>(`/mr/${mrId}/tags/${tagId}`, { method: "DELETE" });
+}
+
+// Owner checklist (attachments)
+export function listMrOwnerItems(mrId: number): Promise<import("./types").MrOwnerItem[]> {
+  return request<import("./types").MrOwnerItem[]>(`/mr/${mrId}/owner-items`);
+}
+export function createMrOwnerItem(mrId:number, payload:{att_no?:string|null; category?:string; title:string; doc_number?:string|null; rev?:string|null; is_required?:boolean; allow_questions?:boolean; order_index?:number}): Promise<import("./types").MrOwnerItem> {
+  return request(`/mr/${mrId}/owner-items`, { method:"POST", body:JSON.stringify(payload) });
+}
+export function deleteMrOwnerItem(mrId:number, itemId:number): Promise<void> {
+  return request<void>(`/mr/${mrId}/owner-items/${itemId}`, { method:"DELETE" });
+}
+export function uploadMrOwnerFile(mrId:number, itemId:number, file:File): Promise<import("./types").MrOwnerItem> {
+  const form=new FormData(); form.append("file", file);
+  return request(`/mr/${mrId}/owner-items/${itemId}/files`, { method:"POST", body:form });
+}
+export function deleteMrOwnerFile(mrId:number, fileId:number): Promise<void> {
+  return request<void>(`/mr/${mrId}/owner-files/${fileId}`, { method:"DELETE" });
+}
+
+// Vendor checklist (template)
+export function listMrVendorItems(mrId:number): Promise<import("./types").MrVendorItem[]> {
+  return request<import("./types").MrVendorItem[]>(`/mr/${mrId}/vendor-items`);
+}
+export function createMrVendorItem(mrId:number, payload:{section:string; category?:string|null; code?:string|null; title:string; purpose?:string|null; with_bid?:boolean; is_required?:boolean; allow_questions?:boolean; order_index?:number}): Promise<import("./types").MrVendorItem> {
+  return request(`/mr/${mrId}/vendor-items`, { method:"POST", body:JSON.stringify(payload) });
+}
+export function deleteMrVendorItem(mrId:number, itemId:number): Promise<void> {
+  return request<void>(`/mr/${mrId}/vendor-items/${itemId}`, { method:"DELETE" });
+}
+
+// REQ import (.docx)
+export function importReq(projectId:number, file:File): Promise<import("./types").ReqImportResult> {
+  const form=new FormData(); form.append("file", file);
+  return request(`/mr/import?project_id=${projectId}`, { method:"POST", body:form });
+}
+
+// --- VQM: приглашения (внутренний API) ---
+export function listMrInvitations(mrId: number): Promise<import("./types").VendorInvitationItem[]> {
+  return request<import("./types").VendorInvitationItem[]>(`/mr/${mrId}/invitations`);
+}
+
+export function createMrInvitation(
+  mrId: number,
+  payload: { vendor_company_name: string; vendor_contact_email: string; expires_at?: string | null },
+): Promise<import("./types").VendorInvitationCreated> {
+  return request<import("./types").VendorInvitationCreated>(`/mr/${mrId}/invitations`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function revokeMrInvitation(mrId: number, invitationId: number): Promise<import("./types").VendorInvitationItem> {
+  return request<import("./types").VendorInvitationItem>(`/mr/${mrId}/invitations/${invitationId}/revoke`, {
+    method: "POST",
+  });
+}
+
+// --- VQM: гостевой портал подрядчика (отдельная сессия, без основного JWT) ---
+const VENDOR_SESSION_KEY = "tdo_vendor_session";
+
+export function getVendorSession(): string | null {
+  return typeof window !== "undefined" ? sessionStorage.getItem(VENDOR_SESSION_KEY) : null;
+}
+
+export function setVendorSession(token: string): void {
+  sessionStorage.setItem(VENDOR_SESSION_KEY, token);
+}
+
+export function clearVendorSession(): void {
+  sessionStorage.removeItem(VENDOR_SESSION_KEY);
+}
+
+async function vendorRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers ?? {});
+  const session = getVendorSession();
+  if (session) headers.set("Authorization", `Bearer ${session}`);
+  if (!(init.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  const response = await fetch(`${PREFIX}${path}`, { ...init, headers });
+  if (!response.ok) {
+    const rawText = await response.text();
+    let msg = rawText || "Request failed";
+    try {
+      const parsed = JSON.parse(rawText) as { detail?: string };
+      if (parsed?.detail) msg = parsed.detail;
+    } catch {
+      // keep raw
+    }
+    throw new Error(msg);
+  }
+  if (response.status === 204) return undefined as T;
+  return (await response.json()) as T;
+}
+
+export function vendorRequestCode(invitationId: number, token: string): Promise<{ status: string; email_masked: string }> {
+  return vendorRequest(`/public/vendor/${invitationId}/request-code`, {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}
+
+export async function vendorVerifyCode(
+  invitationId: number,
+  token: string,
+  code: string,
+): Promise<{ session_token: string; mr_code: string; mr_title: string }> {
+  const res = await vendorRequest<{ session_token: string; mr_code: string; mr_title: string }>(
+    `/public/vendor/${invitationId}/verify`,
+    { method: "POST", body: JSON.stringify({ token, code }) },
+  );
+  setVendorSession(res.session_token);
+  return res;
+}
+
+export function vendorGetMr(): Promise<import("./types").VendorMrView> {
+  return vendorRequest<import("./types").VendorMrView>(`/public/vendor/me`);
+}
+
+// VQM PR-4b: ответы подрядчика в портале
+export function vendorSetQuote(payload: { tag_id:number; price:number|null; currency?:string|null; note?:string|null }): Promise<{status:string}> {
+  return vendorRequest(`/public/vendor/quote`, { method:"POST", body:JSON.stringify(payload) });
+}
+export function vendorSetChecklistAnswer(payload: { vendor_item_id:number; answer:string|null; note?:string|null }): Promise<{status:string}> {
+  return vendorRequest(`/public/vendor/checklist`, { method:"POST", body:JSON.stringify(payload) });
+}
+export function vendorUploadChecklistFile(vendorItemId:number, file:File): Promise<{status:string; file_name:string}> {
+  const form=new FormData(); form.append("file", file);
+  return vendorRequest(`/public/vendor/checklist/${vendorItemId}/file`, { method:"POST", body:form });
+}
+
+// VQM PR-5: сводный отчёт
+export function getMrReport(mrId:number): Promise<import("./types").VendorReport> {
+  return request<import("./types").VendorReport>(`/mr/${mrId}/report`);
+}
+export async function downloadMrReportXlsx(mrId:number, code:string): Promise<void> {
+  const blob = await requestBlob(`/mr/${mrId}/report.xlsx`);
+  downloadBlob(blob, `report_${code}.xlsx`);
+}
+
+// VQM PR-4c: Q&A — портал подрядчика
+export function vendorListQuestions(): Promise<import("./types").MrQuestionItem[]> {
+  return vendorRequest<import("./types").MrQuestionItem[]>(`/public/vendor/questions`);
+}
+export function vendorAskQuestion(payload:{ body:string; mr_owner_item_id?:number|null; mr_vendor_item_id?:number|null }): Promise<import("./types").MrQuestionItem> {
+  return vendorRequest(`/public/vendor/questions`, { method:"POST", body:JSON.stringify(payload) });
+}
+// VQM PR-4c: Q&A — сторона заказчика
+export function listMrQuestions(mrId:number): Promise<import("./types").MrQuestionItem[]> {
+  return request<import("./types").MrQuestionItem[]>(`/mr/${mrId}/questions`);
+}
+export function answerMrQuestion(mrId:number, qid:number, body:string): Promise<import("./types").MrQuestionItem> {
+  return request(`/mr/${mrId}/questions/${qid}/answer`, { method:"POST", body:JSON.stringify({ body }) });
+}
+export function setMrQuestionVisibility(mrId:number, qid:number, isPublic:boolean): Promise<import("./types").MrQuestionItem> {
+  return request(`/mr/${mrId}/questions/${qid}/visibility`, { method:"POST", body:JSON.stringify({ public:isPublic }) });
+}
+
+// VQM: скачивание документа заказчика подрядчиком (через vendor-сессию)
+export async function vendorDownloadOwnerFile(fileId: number, fileName: string): Promise<void> {
+  const session = getVendorSession();
+  const headers = new Headers();
+  if (session) headers.set("Authorization", `Bearer ${session}`);
+  const response = await fetch(`${PREFIX}/public/vendor/owner-files/${fileId}`, { headers });
+  if (!response.ok) {
+    const txt = await response.text();
+    throw new Error(txt || "Не удалось скачать файл");
+  }
+  const blob = await response.blob();
+  downloadBlob(blob, fileName);
 }

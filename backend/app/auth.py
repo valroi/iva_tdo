@@ -45,6 +45,32 @@ def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+# --- Модуль Vendors: гостевые сессии подрядчиков ---
+# Тип токена "vendor" ИЗОЛИРОВАН от "access"/"refresh": обычный JWT
+# пользователя не пройдёт vendor-проверку и наоборот. Внутри — id
+# приглашения, а не пользователя.
+
+def create_vendor_session_token(invitation_id: int) -> str:
+    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.vendor_session_ttl_minutes)
+    to_encode = {"sub": f"vendor:{invitation_id}", "type": "vendor", "inv": invitation_id, "exp": expire}
+    return jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
+
+
+def decode_vendor_session_token(token: str) -> int:
+    """Возвращает invitation_id из гостевого токена. Поднимает TokenError,
+    если токен не vendor-типа, протух или повреждён."""
+    try:
+        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+    except JWTError as exc:
+        raise TokenError("Invalid vendor token") from exc
+    if payload.get("type") != "vendor":
+        raise TokenError("Invalid token type")
+    inv = payload.get("inv")
+    if not isinstance(inv, int):
+        raise TokenError("Invalid vendor token subject")
+    return inv
+
+
 def decode_token(token: str, expected_type: str) -> str:
     payload = decode_token_payload(token, expected_type=expected_type)
     return str(payload.get("sub"))

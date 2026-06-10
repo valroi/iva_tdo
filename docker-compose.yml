@@ -36,6 +36,18 @@ services:
       MAIN_ADMIN_EMAIL: ${MAIN_ADMIN_EMAIL:-admin@ivamaris.io}
       SEED_DEMO_USERS: ${SEED_DEMO_USERS:-false}
       CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:3000"]}
+      # Модуль Vendors: SMTP для отправки email-кодов подтверждения
+      # подрядчикам. Все значения — из окружения прода, дефолты пустые
+      # (если SMTP_HOST пуст, сервис уходит в режим лог-заглушки).
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-no-reply@ivamaris.io}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+      # Базовый URL фронта — нужен, чтобы собрать ссылку-приглашение
+      # подрядчику в письме (например https://tdo.company.ru).
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
     ports:
       - "8000:8000"
     volumes:
@@ -45,6 +57,10 @@ services:
       # file_path, PDF возвращает 404. Закрепляем директорию за
       # named volume, чтобы апдейты бэка не теряли пользовательские файлы.
       - tdo_uploads:/tmp/tdo_uploads
+      # Модуль Vendors: документы подрядчиков хранятся ОТДЕЛЬНО от
+      # проектных файлов — свой named volume. Изоляция + защита от
+      # потери при апдейтах (как и tdo_uploads).
+      - vendor_uploads:/data/vendor_uploads
     depends_on:
       - db
       - redis
@@ -63,3 +79,4 @@ volumes:
   postgres_data:
   minio_data:
   tdo_uploads:
+  vendor_uploads:
