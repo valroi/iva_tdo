@@ -77,6 +77,8 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
   const [report, setReport] = useState<VendorReport | null>(null);
   const [questions, setQuestions] = useState<MrQuestionItem[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editForm] = Form.useForm();
   const [importOpen, setImportOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [createdLink, setCreatedLink] = useState<string | null>(null);
@@ -274,6 +276,15 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
           title={`MR: ${selectedMr.code}`}
           extra={
             <Space>
+              <Button size="small" onClick={() => {
+                editForm.setFieldsValue({
+                  title: selectedMr.title,
+                  equipment_type: selectedMr.equipment_type ?? "",
+                  deadline_at: selectedMr.deadline_at ? dayjs(selectedMr.deadline_at) : null,
+                  currency: selectedMr.currency,
+                });
+                setEditOpen(true);
+              }}>{t("vend.editMr")}</Button>
               <Select<MrStatus>
                 size="small"
                 value={selectedMr.status}
@@ -504,6 +515,34 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
           <Space size={12}>
             <Form.Item name="deadline_at" label="Дедлайн"><DatePicker format="DD.MM.YYYY" /></Form.Item>
             <Form.Item name="currency" label="Валюта" initialValue="RUB">
+              <Select style={{ width: 100 }} options={["RUB", "USD", "EUR", "CNY"].map((v) => ({ value: v, label: v }))} />
+            </Form.Item>
+          </Space>
+        </Form>
+      </Modal>
+
+      {/* Edit MR modal */}
+      <Modal open={editOpen} title={t("vend.editTitle")} okText={t("vend.save")} cancelText={t("vend.cancel")}
+        onCancel={() => setEditOpen(false)} onOk={() => editForm.submit()}>
+        <Form form={editForm} layout="vertical" onFinish={async (values) => {
+          if (!selectedMr) return;
+          try {
+            await updateMr(selectedMr.id, {
+              title: values.title,
+              equipment_type: values.equipment_type || null,
+              deadline_at: values.deadline_at ? dayjs(values.deadline_at).hour(12).minute(0).second(0).toISOString() : null,
+              currency: values.currency || "RUB",
+            });
+            setEditOpen(false);
+            await loadMr();
+            message.success(t("vend.save"));
+          } catch (e) { message.error(e instanceof Error ? e.message : "Error"); }
+        }}>
+          <Form.Item name="title" label={t("vend.fTitle")} rules={[{ required: true }]}><Input /></Form.Item>
+          <Form.Item name="equipment_type" label={t("vend.fEquip")}><Input placeholder="Electrical Heater" /></Form.Item>
+          <Space size={12}>
+            <Form.Item name="deadline_at" label={t("vend.fDeadline")}><DatePicker format="DD.MM.YYYY" /></Form.Item>
+            <Form.Item name="currency" label={t("vend.fCurrency")}>
               <Select style={{ width: 100 }} options={["RUB", "USD", "EUR", "CNY"].map((v) => ({ value: v, label: v }))} />
             </Form.Item>
           </Space>

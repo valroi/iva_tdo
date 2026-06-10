@@ -179,6 +179,8 @@ def update_mr(
     ensure_can_manage_mr(db, user=current_user, mr=mr)
     if payload.title is not None:
         mr.title = payload.title.strip()
+    if payload.equipment_type is not None:
+        mr.equipment_type = payload.equipment_type.strip() or None
     if payload.description is not None:
         mr.description = payload.description
     if payload.lr_user_id is not None:

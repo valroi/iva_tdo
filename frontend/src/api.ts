@@ -964,6 +964,7 @@ export function updateMr(
   mrId: number,
   payload: Partial<{
     title: string;
+    equipment_type: string | null;
     description: string | null;
     lr_user_id: number | null;
     deadline_at: string | null;

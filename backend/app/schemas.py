@@ -720,6 +720,7 @@ class MrCreate(BaseModel):
 
 class MrUpdate(BaseModel):
     title: str | None = None
+    equipment_type: str | None = None
     description: str | None = None
     lr_user_id: int | None = None
     deadline_at: datetime | None = None
