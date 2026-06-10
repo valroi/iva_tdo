@@ -1,4 +1,4 @@
-import { App, Button, Card, DatePicker, Form, Input, Modal, Progress, Select, Space, Table, Tag, Typography, Upload } from "antd";
+import { App, Button, Card, DatePicker, Form, Input, Modal, Progress, Select, Space, Table, Tag, Tooltip, Typography, Upload } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { UploadOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
@@ -363,8 +363,11 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
           {/* Invitations */}
           <Space style={{ width: "100%", justifyContent: "space-between", marginTop: 12, marginBottom: 8 }}>
             <Typography.Text strong>{t("vend.invited")} ({invitations.filter((i) => !i.revoked_at).length}/5)</Typography.Text>
-            <Button size="small" type="primary" disabled={invitations.filter((i) => !i.revoked_at).length >= 5}
-              onClick={() => { inviteForm.resetFields(); setInviteOpen(true); }}>{t("vend.invite")}</Button>
+            <Tooltip title={selectedMr.status !== "OPEN" ? t("vend.inviteNeedsOpen") : ""}>
+              <Button size="small" type="primary"
+                disabled={selectedMr.status !== "OPEN" || invitations.filter((i) => !i.revoked_at).length >= 5}
+                onClick={() => { inviteForm.resetFields(); setInviteOpen(true); }}>{t("vend.invite")}</Button>
+            </Tooltip>
           </Space>
           <Table rowKey="id" size="small" pagination={false} dataSource={invitations} locale={{ emptyText: "—" }}
             columns={[

@@ -105,6 +105,7 @@ const DICT: Dict = {
   "vend.vendorChecklist": { ru: "Чек-лист подрядчика — что предоставить", en: "Vendor checklist — what to provide" },
   "vend.invited": { ru: "Приглашённые подрядчики", en: "Invited vendors" },
   "vend.invite": { ru: "+ Пригласить", en: "+ Invite" },
+  "vend.inviteNeedsOpen": { ru: "Сначала откройте приём заявок (статус «Приём открыт»)", en: "Open the MR for bids first (status «Open for bids»)" },
   "vend.revoke": { ru: "Отозвать", en: "Revoke" },
   "vend.st.invited": { ru: "Приглашён", en: "Invited" },
   "vend.st.entered": { ru: "Вошёл", en: "Signed in" },

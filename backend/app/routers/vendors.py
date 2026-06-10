@@ -593,6 +593,14 @@ def create_invitation(
 ):
     mr = _get_mr_or_404(db, mr_id)
     ensure_can_manage_mr(db, user=current_user, mr=mr)
+    # Приглашать подрядчиков можно только когда приём заявок открыт —
+    # иначе подрядчик получит ссылку, но не сможет войти (портал блокирует
+    # не-OPEN статусы). Сначала откройте приём, затем приглашайте.
+    if mr.status != MrStatus.OPEN:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Open the MR for bids before inviting vendors",
+        )
     # Бизнес-ограничение: не больше N подрядчиков на MR.
     active_count = (
         db.query(VendorInvitation)
