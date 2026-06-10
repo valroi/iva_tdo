@@ -29,7 +29,6 @@ import type {
   WorkflowStatus,
   MrItem,
   MrTagItem,
-  MrDocumentItem,
   MrStatus,
 } from "./types";
 
@@ -1002,19 +1001,39 @@ export function deleteMrTag(mrId: number, tagId: number): Promise<void> {
   return request<void>(`/mr/${mrId}/tags/${tagId}`, { method: "DELETE" });
 }
 
-export function listMrDocuments(mrId: number): Promise<MrDocumentItem[]> {
-  return request<MrDocumentItem[]>(`/mr/${mrId}/documents`);
+// Owner checklist (attachments)
+export function listMrOwnerItems(mrId: number): Promise<import("./types").MrOwnerItem[]> {
+  return request<import("./types").MrOwnerItem[]>(`/mr/${mrId}/owner-items`);
+}
+export function createMrOwnerItem(mrId:number, payload:{att_no?:string|null; category?:string; title:string; doc_number?:string|null; rev?:string|null; is_required?:boolean; allow_questions?:boolean; order_index?:number}): Promise<import("./types").MrOwnerItem> {
+  return request(`/mr/${mrId}/owner-items`, { method:"POST", body:JSON.stringify(payload) });
+}
+export function deleteMrOwnerItem(mrId:number, itemId:number): Promise<void> {
+  return request<void>(`/mr/${mrId}/owner-items/${itemId}`, { method:"DELETE" });
+}
+export function uploadMrOwnerFile(mrId:number, itemId:number, file:File): Promise<import("./types").MrOwnerItem> {
+  const form=new FormData(); form.append("file", file);
+  return request(`/mr/${mrId}/owner-items/${itemId}/files`, { method:"POST", body:form });
+}
+export function deleteMrOwnerFile(mrId:number, fileId:number): Promise<void> {
+  return request<void>(`/mr/${mrId}/owner-files/${fileId}`, { method:"DELETE" });
 }
 
-export function uploadMrDocument(mrId: number, file: File, title?: string): Promise<MrDocumentItem> {
-  const form = new FormData();
-  form.append("file", file);
-  const q = title ? `?title=${encodeURIComponent(title)}` : "";
-  return request<MrDocumentItem>(`/mr/${mrId}/documents${q}`, { method: "POST", body: form });
+// Vendor checklist (template)
+export function listMrVendorItems(mrId:number): Promise<import("./types").MrVendorItem[]> {
+  return request<import("./types").MrVendorItem[]>(`/mr/${mrId}/vendor-items`);
+}
+export function createMrVendorItem(mrId:number, payload:{section:string; category?:string|null; code?:string|null; title:string; purpose?:string|null; with_bid?:boolean; is_required?:boolean; allow_questions?:boolean; order_index?:number}): Promise<import("./types").MrVendorItem> {
+  return request(`/mr/${mrId}/vendor-items`, { method:"POST", body:JSON.stringify(payload) });
+}
+export function deleteMrVendorItem(mrId:number, itemId:number): Promise<void> {
+  return request<void>(`/mr/${mrId}/vendor-items/${itemId}`, { method:"DELETE" });
 }
 
-export function deleteMrDocument(mrId: number, docId: number): Promise<void> {
-  return request<void>(`/mr/${mrId}/documents/${docId}`, { method: "DELETE" });
+// REQ import (.docx)
+export function importReq(projectId:number, file:File): Promise<import("./types").ReqImportResult> {
+  const form=new FormData(); form.append("file", file);
+  return request(`/mr/import?project_id=${projectId}`, { method:"POST", body:form });
 }
 
 // --- VQM: приглашения (внутренний API) ---

@@ -741,14 +741,22 @@ class MrRead(BaseModel):
     created_by_id: int
     created_at: datetime
     updated_at: datetime
+    equipment_type: str | None = None
+    req_number: str | None = None
+    req_rev: str | None = None
+    discipline_code: str | None = None
     tags_count: int = 0
-    documents_count: int = 0
+    owner_items_count: int = 0
+    owner_items_filled: int = 0
+    vendor_items_count: int = 0
     invitations_count: int = 0
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class MrTagCreate(BaseModel):
+    sr_no: str | None = None
+    item_no: str | None = None
     tag_code: str
     name: str
     quantity: float | None = None
@@ -770,6 +778,8 @@ class MrTagRead(BaseModel):
     id: int
     mr_id: int
     order_index: int
+    sr_no: str | None
+    item_no: str | None
     tag_code: str
     name: str
     quantity: float | None
@@ -780,17 +790,119 @@ class MrTagRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class MrDocumentRead(BaseModel):
+from app.models import MrOwnerItemCategory, MrVendorItemSection, VendorItemAnswer  # noqa: E402
+
+
+# --- Чек-лист заказчика (owner items + files) ---
+class MrOwnerFileRead(BaseModel):
     id: int
-    mr_id: int
-    title: str
+    owner_item_id: int
     file_name: str
     mime: str | None
     size_bytes: int | None
-    uploaded_by_id: int
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class MrOwnerItemCreate(BaseModel):
+    att_no: str | None = None
+    category: MrOwnerItemCategory = MrOwnerItemCategory.OTHER
+    title: str
+    doc_number: str | None = None
+    rev: str | None = None
+    is_required: bool = True
+    allow_questions: bool = False
+    order_index: int = 0
+
+
+class MrOwnerItemUpdate(BaseModel):
+    att_no: str | None = None
+    category: MrOwnerItemCategory | None = None
+    title: str | None = None
+    doc_number: str | None = None
+    rev: str | None = None
+    is_required: bool | None = None
+    allow_questions: bool | None = None
+    order_index: int | None = None
+
+
+class MrOwnerItemRead(BaseModel):
+    id: int
+    mr_id: int
+    order_index: int
+    att_no: str | None
+    category: MrOwnerItemCategory
+    title: str
+    doc_number: str | None
+    rev: str | None
+    is_required: bool
+    allow_questions: bool
+    created_at: datetime
+    files: list[MrOwnerFileRead] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# --- Чек-лист подрядчика (vendor items — шаблон) ---
+class MrVendorItemCreate(BaseModel):
+    section: MrVendorItemSection
+    category: str | None = None
+    code: str | None = None
+    title: str
+    purpose: str | None = None
+    with_bid: bool = False
+    is_required: bool = True
+    allow_questions: bool = False
+    order_index: int = 0
+
+
+class MrVendorItemUpdate(BaseModel):
+    section: MrVendorItemSection | None = None
+    category: str | None = None
+    code: str | None = None
+    title: str | None = None
+    purpose: str | None = None
+    with_bid: bool | None = None
+    is_required: bool | None = None
+    allow_questions: bool | None = None
+    order_index: int | None = None
+
+
+class MrVendorItemRead(BaseModel):
+    id: int
+    mr_id: int
+    order_index: int
+    section: MrVendorItemSection
+    category: str | None
+    code: str | None
+    title: str
+    purpose: str | None
+    with_bid: bool
+    is_required: bool
+    allow_questions: bool
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# --- Импорт REQ (.docx → структура MR) ---
+class ReqImportPreview(BaseModel):
+    title: str
+    equipment_type: str | None
+    req_number: str | None
+    discipline_code: str | None
+    tags: list[dict]
+    owner_items: list[dict]
+    vendor_items: list[dict]
+
+
+class ReqImportResult(BaseModel):
+    mr_id: int
+    code: str
+    tags_created: int
+    owner_items_created: int
+    vendor_items_created: int
 
 
 # --- VQM: приглашения и гостевой портал ---
@@ -857,6 +969,17 @@ class VendorMrDocumentView(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class VendorMrChecklistItem(BaseModel):
+    id: int
+    section: str
+    category: str | None
+    code: str | None
+    title: str
+    purpose: str | None
+    with_bid: bool
+    allow_questions: bool
+
+
 class VendorMrView(BaseModel):
     mr_id: int
     code: str
@@ -869,3 +992,4 @@ class VendorMrView(BaseModel):
     vendor_company_name: str
     tags: list[VendorMrTagView]
     documents: list[VendorMrDocumentView]
+    checklist: list[VendorMrChecklistItem] = []

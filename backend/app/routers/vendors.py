@@ -21,9 +21,11 @@ from app.database import get_db
 from app.deps import get_current_user
 from app.models import (
     MaterialRequisition,
-    MrDocument,
+    MrOwnerFile,
+    MrOwnerItem,
     MrStatus,
     MrTag,
+    MrVendorItem,
     Project,
     User,
     UserRole,
@@ -31,12 +33,18 @@ from app.models import (
 )
 from app.schemas import (
     MrCreate,
-    MrDocumentRead,
+    MrOwnerItemCreate,
+    MrOwnerItemRead,
+    MrOwnerItemUpdate,
     MrRead,
     MrTagCreate,
     MrTagRead,
     MrTagUpdate,
     MrUpdate,
+    MrVendorItemCreate,
+    MrVendorItemRead,
+    MrVendorItemUpdate,
+    ReqImportResult,
     VendorInvitationCreate,
     VendorInvitationCreated,
     VendorInvitationRead,
@@ -68,12 +76,21 @@ def _mr_to_read(db: Session, mr: MaterialRequisition) -> MrRead:
         lr = db.query(User).filter(User.id == mr.lr_user_id).first()
         lr_name = lr.full_name if lr else None
     tags_count = db.query(MrTag).filter(MrTag.mr_id == mr.id).count()
-    docs_count = db.query(MrDocument).filter(MrDocument.mr_id == mr.id).count()
+    owner_items = db.query(MrOwnerItem).filter(MrOwnerItem.mr_id == mr.id).all()
+    owner_count = len(owner_items)
+    filled_item_ids = {
+        f.owner_item_id
+        for f in db.query(MrOwnerFile.owner_item_id).filter(MrOwnerFile.mr_id == mr.id).all()
+    }
+    owner_filled = sum(1 for it in owner_items if it.id in filled_item_ids)
+    vendor_count = db.query(MrVendorItem).filter(MrVendorItem.mr_id == mr.id).count()
     inv_count = db.query(VendorInvitation).filter(VendorInvitation.mr_id == mr.id).count()
     data = MrRead.model_validate(mr, from_attributes=True)
     data.lr_user_name = lr_name
     data.tags_count = tags_count
-    data.documents_count = docs_count
+    data.owner_items_count = owner_count
+    data.owner_items_filled = owner_filled
+    data.vendor_items_count = vendor_count
     data.invitations_count = inv_count
     return data
 
@@ -183,7 +200,9 @@ def delete_mr(
             detail="Only a DRAFT MR without invitations can be deleted",
         )
     db.query(MrTag).filter(MrTag.mr_id == mr.id).delete()
-    db.query(MrDocument).filter(MrDocument.mr_id == mr.id).delete()
+    db.query(MrOwnerFile).filter(MrOwnerFile.mr_id == mr.id).delete()
+    db.query(MrOwnerItem).filter(MrOwnerItem.mr_id == mr.id).delete()
+    db.query(MrVendorItem).filter(MrVendorItem.mr_id == mr.id).delete()
     db.delete(mr)
     db.commit()
     return None
@@ -225,6 +244,8 @@ def create_tag(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Tag code already exists in this MR")
     tag = MrTag(
         mr_id=mr.id,
+        sr_no=payload.sr_no,
+        item_no=payload.item_no,
         tag_code=payload.tag_code.strip(),
         name=payload.name.strip(),
         quantity=payload.quantity,
@@ -285,70 +306,243 @@ def delete_tag(
     return None
 
 
-# --------------------------------------------------------------------- Documents
-@router.get("/mr/{mr_id}/documents", response_model=list[MrDocumentRead])
-def list_documents(
+# ------------------------------------------------- Owner checklist (attachments)
+def _owner_item_read(db: Session, item: MrOwnerItem) -> MrOwnerItemRead:
+    files = db.query(MrOwnerFile).filter(MrOwnerFile.owner_item_id == item.id).order_by(MrOwnerFile.id.asc()).all()
+    data = MrOwnerItemRead.model_validate(item, from_attributes=True)
+    from app.schemas import MrOwnerFileRead
+
+    data.files = [MrOwnerFileRead.model_validate(f, from_attributes=True) for f in files]
+    return data
+
+
+@router.get("/mr/{mr_id}/owner-items", response_model=list[MrOwnerItemRead])
+def list_owner_items(
     mr_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     mr = _get_mr_or_404(db, mr_id)
     ensure_can_manage_mr(db, user=current_user, mr=mr)
-    items = db.query(MrDocument).filter(MrDocument.mr_id == mr.id).order_by(MrDocument.id.asc()).all()
-    return [MrDocumentRead.model_validate(item, from_attributes=True) for item in items]
+    items = (
+        db.query(MrOwnerItem)
+        .filter(MrOwnerItem.mr_id == mr.id)
+        .order_by(MrOwnerItem.order_index.asc(), MrOwnerItem.id.asc())
+        .all()
+    )
+    return [_owner_item_read(db, it) for it in items]
 
 
-@router.post("/mr/{mr_id}/documents", response_model=MrDocumentRead, status_code=status.HTTP_201_CREATED)
-def upload_document(
+@router.post("/mr/{mr_id}/owner-items", response_model=MrOwnerItemRead, status_code=status.HTTP_201_CREATED)
+def create_owner_item(
     mr_id: int,
-    title: str | None = None,
+    payload: MrOwnerItemCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    mr = _get_mr_or_404(db, mr_id)
+    ensure_can_manage_mr(db, user=current_user, mr=mr)
+    item = MrOwnerItem(
+        mr_id=mr.id,
+        att_no=payload.att_no,
+        category=payload.category,
+        title=payload.title.strip(),
+        doc_number=payload.doc_number,
+        rev=payload.rev,
+        is_required=payload.is_required,
+        allow_questions=payload.allow_questions,
+        order_index=payload.order_index,
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return _owner_item_read(db, item)
+
+
+@router.patch("/mr/{mr_id}/owner-items/{item_id}", response_model=MrOwnerItemRead)
+def update_owner_item(
+    mr_id: int,
+    item_id: int,
+    payload: MrOwnerItemUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    mr = _get_mr_or_404(db, mr_id)
+    ensure_can_manage_mr(db, user=current_user, mr=mr)
+    item = db.query(MrOwnerItem).filter(MrOwnerItem.id == item_id, MrOwnerItem.mr_id == mr.id).first()
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Owner item not found")
+    for field in ("att_no", "category", "title", "doc_number", "rev", "is_required", "allow_questions", "order_index"):
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(item, field, value)
+    db.commit()
+    db.refresh(item)
+    return _owner_item_read(db, item)
+
+
+@router.delete("/mr/{mr_id}/owner-items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_owner_item(
+    mr_id: int,
+    item_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    mr = _get_mr_or_404(db, mr_id)
+    ensure_can_manage_mr(db, user=current_user, mr=mr)
+    item = db.query(MrOwnerItem).filter(MrOwnerItem.id == item_id, MrOwnerItem.mr_id == mr.id).first()
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Owner item not found")
+    for f in db.query(MrOwnerFile).filter(MrOwnerFile.owner_item_id == item.id).all():
+        try:
+            Path(f.file_path).unlink(missing_ok=True)
+        except OSError:
+            pass
+        db.delete(f)
+    db.delete(item)
+    db.commit()
+    return None
+
+
+@router.post("/mr/{mr_id}/owner-items/{item_id}/files", response_model=MrOwnerItemRead, status_code=status.HTTP_201_CREATED)
+def upload_owner_file(
+    mr_id: int,
+    item_id: int,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     mr = _get_mr_or_404(db, mr_id)
     ensure_can_manage_mr(db, user=current_user, mr=mr)
+    item = db.query(MrOwnerItem).filter(MrOwnerItem.id == item_id, MrOwnerItem.mr_id == mr.id).first()
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Owner item not found")
     raw = file.file.read()
     if len(raw) > MAX_MR_DOC_BYTES:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large")
     original_name = file.filename or "document"
     safe_name = f"{uuid4().hex}_{Path(original_name).name.replace(' ', '_')}"
-    destination_dir = MR_UPLOAD_ROOT / "mr_docs" / str(mr.id)
+    destination_dir = MR_UPLOAD_ROOT / "mr_owner" / str(mr.id) / str(item.id)
     destination_dir.mkdir(parents=True, exist_ok=True)
     destination = destination_dir / safe_name
     destination.write_bytes(raw)
-    doc = MrDocument(
-        mr_id=mr.id,
-        title=(title or original_name).strip(),
-        file_path=str(destination),
-        file_name=original_name,
-        mime=file.content_type,
-        size_bytes=len(raw),
-        uploaded_by_id=current_user.id,
+    db.add(
+        MrOwnerFile(
+            owner_item_id=item.id,
+            mr_id=mr.id,
+            file_path=str(destination),
+            file_name=original_name,
+            mime=file.content_type,
+            size_bytes=len(raw),
+            uploaded_by_id=current_user.id,
+        )
     )
-    db.add(doc)
     db.commit()
-    db.refresh(doc)
-    return MrDocumentRead.model_validate(doc, from_attributes=True)
+    db.refresh(item)
+    return _owner_item_read(db, item)
 
 
-@router.delete("/mr/{mr_id}/documents/{doc_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_document(
+@router.delete("/mr/{mr_id}/owner-files/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_owner_file(
     mr_id: int,
-    doc_id: int,
+    file_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     mr = _get_mr_or_404(db, mr_id)
     ensure_can_manage_mr(db, user=current_user, mr=mr)
-    doc = db.query(MrDocument).filter(MrDocument.id == doc_id, MrDocument.mr_id == mr.id).first()
-    if doc is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    f = db.query(MrOwnerFile).filter(MrOwnerFile.id == file_id, MrOwnerFile.mr_id == mr.id).first()
+    if f is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
     try:
-        Path(doc.file_path).unlink(missing_ok=True)
+        Path(f.file_path).unlink(missing_ok=True)
     except OSError:
         pass
-    db.delete(doc)
+    db.delete(f)
+    db.commit()
+    return None
+
+
+# ------------------------------------------------- Vendor checklist (template)
+@router.get("/mr/{mr_id}/vendor-items", response_model=list[MrVendorItemRead])
+def list_vendor_items(
+    mr_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    mr = _get_mr_or_404(db, mr_id)
+    ensure_can_manage_mr(db, user=current_user, mr=mr)
+    items = (
+        db.query(MrVendorItem)
+        .filter(MrVendorItem.mr_id == mr.id)
+        .order_by(MrVendorItem.order_index.asc(), MrVendorItem.id.asc())
+        .all()
+    )
+    return [MrVendorItemRead.model_validate(it, from_attributes=True) for it in items]
+
+
+@router.post("/mr/{mr_id}/vendor-items", response_model=MrVendorItemRead, status_code=status.HTTP_201_CREATED)
+def create_vendor_item(
+    mr_id: int,
+    payload: MrVendorItemCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    mr = _get_mr_or_404(db, mr_id)
+    ensure_can_manage_mr(db, user=current_user, mr=mr)
+    item = MrVendorItem(
+        mr_id=mr.id,
+        section=payload.section,
+        category=payload.category,
+        code=payload.code,
+        title=payload.title.strip(),
+        purpose=payload.purpose,
+        with_bid=payload.with_bid,
+        is_required=payload.is_required,
+        allow_questions=payload.allow_questions,
+        order_index=payload.order_index,
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return MrVendorItemRead.model_validate(item, from_attributes=True)
+
+
+@router.patch("/mr/{mr_id}/vendor-items/{item_id}", response_model=MrVendorItemRead)
+def update_vendor_item(
+    mr_id: int,
+    item_id: int,
+    payload: MrVendorItemUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    mr = _get_mr_or_404(db, mr_id)
+    ensure_can_manage_mr(db, user=current_user, mr=mr)
+    item = db.query(MrVendorItem).filter(MrVendorItem.id == item_id, MrVendorItem.mr_id == mr.id).first()
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vendor item not found")
+    for field in ("section", "category", "code", "title", "purpose", "with_bid", "is_required", "allow_questions", "order_index"):
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(item, field, value)
+    db.commit()
+    db.refresh(item)
+    return MrVendorItemRead.model_validate(item, from_attributes=True)
+
+
+@router.delete("/mr/{mr_id}/vendor-items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_vendor_item(
+    mr_id: int,
+    item_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    mr = _get_mr_or_404(db, mr_id)
+    ensure_can_manage_mr(db, user=current_user, mr=mr)
+    item = db.query(MrVendorItem).filter(MrVendorItem.id == item_id, MrVendorItem.mr_id == mr.id).first()
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vendor item not found")
+    db.delete(item)
     db.commit()
     return None
 
@@ -465,3 +659,96 @@ def revoke_invitation(
         request=request,
     )
     return VendorInvitationRead.model_validate(inv, from_attributes=True)
+
+
+# --------------------------------------------------------------------- REQ import
+@router.post("/mr/import", response_model=ReqImportResult, status_code=status.HTTP_201_CREATED)
+def import_req(
+    project_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Импорт REQ (.docx) → создаёт MR со структурой (теги, чек-лист
+    заказчика, чек-лист подрядчика). Файлы и приглашения добавляются
+    отдельно. Всё созданное редактируемо (корректировки)."""
+    from app.services.req_importer import parse_req
+
+    if current_user.role != UserRole.admin and current_user.company_type and current_user.company_type.value == "contractor":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Contractors cannot import REQ")
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+
+    raw = file.file.read()
+    tmp = MR_UPLOAD_ROOT / "req_import" / (uuid4().hex + ".docx")
+    tmp.parent.mkdir(parents=True, exist_ok=True)
+    tmp.write_bytes(raw)
+    try:
+        parsed = parse_req(str(tmp), file.filename or "req.docx")
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    code = parsed.get("req_number") or f"MR-{uuid4().hex[:8].upper()}"
+    # Уникальность кода MR
+    if db.query(MaterialRequisition).filter(MaterialRequisition.code == code).first():
+        code = f"{code}-{uuid4().hex[:4]}"
+
+    mr = MaterialRequisition(
+        project_id=project_id,
+        code=code,
+        title=parsed.get("title") or "Requisition",
+        equipment_type=parsed.get("equipment_type"),
+        req_number=parsed.get("req_number"),
+        discipline_code=parsed.get("discipline_code"),
+        status=MrStatus.DRAFT,
+        created_by_id=current_user.id,
+    )
+    db.add(mr)
+    db.flush()
+
+    for i, t in enumerate(parsed.get("tags", [])):
+        db.add(
+            MrTag(
+                mr_id=mr.id, order_index=i, sr_no=t.get("sr_no"), item_no=t.get("item_no"),
+                tag_code=(t.get("tag_code") or t.get("name") or "TAG")[:120], name=(t.get("name") or "")[:255],
+                quantity=t.get("quantity"), unit=t.get("unit"), note=t.get("note"),
+            )
+        )
+    from app.models import MrOwnerItemCategory as _OIC, MrVendorItemSection as _VIS
+
+    for i, o in enumerate(parsed.get("owner_items", [])):
+        try:
+            cat = _OIC(o.get("category", "OTHER"))
+        except ValueError:
+            cat = _OIC.OTHER
+        db.add(
+            MrOwnerItem(
+                mr_id=mr.id, order_index=i, att_no=o.get("att_no"), category=cat,
+                title=(o.get("title") or "")[:500], doc_number=o.get("doc_number"), rev=o.get("rev"),
+                is_required=bool(o.get("is_required", True)), allow_questions=bool(o.get("allow_questions", False)),
+            )
+        )
+    for v in parsed.get("vendor_items", []):
+        try:
+            sec = _VIS(v.get("section", "RFD"))
+        except ValueError:
+            sec = _VIS.RFD
+        db.add(
+            MrVendorItem(
+                mr_id=mr.id, order_index=v.get("order_index", 0), section=sec, category=v.get("category"),
+                code=v.get("code"), title=(v.get("title") or "")[:500], purpose=v.get("purpose"),
+                with_bid=bool(v.get("with_bid", False)), is_required=bool(v.get("is_required", True)),
+                allow_questions=bool(v.get("allow_questions", False)),
+            )
+        )
+    db.commit()
+    return ReqImportResult(
+        mr_id=mr.id, code=code,
+        tags_created=len(parsed.get("tags", [])),
+        owner_items_created=len(parsed.get("owner_items", [])),
+        vendor_items_created=len(parsed.get("vendor_items", [])),
+    )

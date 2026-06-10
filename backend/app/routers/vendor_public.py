@@ -24,9 +24,11 @@ from app.auth import create_vendor_session_token
 from app.database import get_db
 from app.models import (
     MaterialRequisition,
-    MrDocument,
+    MrOwnerFile,
+    MrOwnerItem,
     MrStatus,
     MrTag,
+    MrVendorItem,
     VendorInvitation,
 )
 from app.schemas import (
@@ -144,7 +146,34 @@ def vendor_me(
         .order_by(MrTag.order_index.asc(), MrTag.id.asc())
         .all()
     )
-    docs = db.query(MrDocument).filter(MrDocument.mr_id == mr.id).order_by(MrDocument.id.asc()).all()
+    # Документы заказчика = загруженные файлы по слотам чек-листа (read-only).
+    owner_items = {it.id: it for it in db.query(MrOwnerItem).filter(MrOwnerItem.mr_id == mr.id).all()}
+    owner_files = db.query(MrOwnerFile).filter(MrOwnerFile.mr_id == mr.id).order_by(MrOwnerFile.id.asc()).all()
+    documents = [
+        VendorMrDocumentView(
+            id=f.id,
+            title=(owner_items.get(f.owner_item_id).title if owner_items.get(f.owner_item_id) else f.file_name),
+            file_name=f.file_name,
+            size_bytes=f.size_bytes,
+        )
+        for f in owner_files
+    ]
+    # Чек-лист, который подрядчик должен заполнить (шаблон). Ответы — PR-4.
+    from app.schemas import VendorMrChecklistItem
+
+    vendor_items = (
+        db.query(MrVendorItem)
+        .filter(MrVendorItem.mr_id == mr.id)
+        .order_by(MrVendorItem.order_index.asc(), MrVendorItem.id.asc())
+        .all()
+    )
+    checklist = [
+        VendorMrChecklistItem(
+            id=v.id, section=v.section.value, category=v.category, code=v.code,
+            title=v.title, purpose=v.purpose, with_bid=v.with_bid, allow_questions=v.allow_questions,
+        )
+        for v in vendor_items
+    ]
     is_open = mr.status == MrStatus.OPEN and (mr.deadline_at is None or datetime.utcnow() <= mr.deadline_at)
     return VendorMrView(
         mr_id=mr.id,
@@ -157,7 +186,8 @@ def vendor_me(
         is_open=is_open,
         vendor_company_name=inv.vendor_company_name,
         tags=[VendorMrTagView.model_validate(t, from_attributes=True) for t in tags],
-        documents=[VendorMrDocumentView.model_validate(d, from_attributes=True) for d in docs],
+        documents=documents,
+        checklist=checklist,
     )
 
 

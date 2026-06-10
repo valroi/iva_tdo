@@ -429,15 +429,39 @@ export interface MrItem {
   created_by_id: number;
   created_at: string;
   updated_at: string;
+  equipment_type: string | null;
+  req_number: string | null;
+  req_rev: string | null;
+  discipline_code: string | null;
   tags_count: number;
-  documents_count: number;
+  owner_items_count: number;
+  owner_items_filled: number;
+  vendor_items_count: number;
   invitations_count: number;
 }
+
+export type MrOwnerCategory = "CHECKLIST_FORM"|"RFD"|"SPARE"|"INSPECTION"|"PROCEDURE"|"DATASHEET"|"SPEC"|"DRAWING"|"OTHER";
+
+export interface MrOwnerFile { id:number; owner_item_id:number; file_name:string; mime:string|null; size_bytes:number|null; created_at:string; }
+export interface MrOwnerItem {
+  id:number; mr_id:number; order_index:number; att_no:string|null; category:MrOwnerCategory;
+  title:string; doc_number:string|null; rev:string|null; is_required:boolean; allow_questions:boolean;
+  created_at:string; files:MrOwnerFile[];
+}
+export type MrVendorSection = "BID_INCLUSION"|"BID_NOTES"|"RFD";
+export interface MrVendorItem {
+  id:number; mr_id:number; order_index:number; section:MrVendorSection; category:string|null;
+  code:string|null; title:string; purpose:string|null; with_bid:boolean; is_required:boolean;
+  allow_questions:boolean; created_at:string;
+}
+export interface ReqImportResult { mr_id:number; code:string; tags_created:number; owner_items_created:number; vendor_items_created:number; }
 
 export interface MrTagItem {
   id: number;
   mr_id: number;
   order_index: number;
+  sr_no: string | null;
+  item_no: string | null;
   tag_code: string;
   name: string;
   quantity: number | null;
@@ -489,6 +513,10 @@ export interface VendorMrDocumentView {
   file_name: string;
   size_bytes: number | null;
 }
+export interface VendorMrChecklistItem {
+  id:number; section:MrVendorSection; category:string|null; code:string|null;
+  title:string; purpose:string|null; with_bid:boolean; allow_questions:boolean;
+}
 
 export interface VendorMrView {
   mr_id: number;
@@ -502,4 +530,5 @@ export interface VendorMrView {
   vendor_company_name: string;
   tags: VendorMrTagView[];
   documents: VendorMrDocumentView[];
+  checklist: VendorMrChecklistItem[];
 }

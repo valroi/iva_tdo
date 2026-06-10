@@ -452,6 +452,11 @@ class MaterialRequisition(Base):
     code: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Из шапки REQ: тип оборудования, № документа REQ, ревизия, дисциплина.
+    equipment_type: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    req_number: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    req_rev: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    discipline_code: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     status: Mapped[MrStatus] = mapped_column(Enum(MrStatus), nullable=False, default=MrStatus.DRAFT)
     # Ответственный заказчика (LR по этой MR) — кому летят вопросы подрядчиков.
     lr_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
@@ -465,7 +470,7 @@ class MaterialRequisition(Base):
 
 
 class MrTag(Base):
-    """Позиция спецификации внутри MR (тег оборудования/поставки).
+    """Позиция Material Summary List внутри MR (тег оборудования/поставки).
     Подрядчик проставляет цену именно по тегам."""
 
     __tablename__ = "mr_tags"
@@ -474,6 +479,8 @@ class MrTag(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     mr_id: Mapped[int] = mapped_column(ForeignKey("material_requisitions.id"), nullable=False, index=True)
     order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    sr_no: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)   # Sr. No из таблицы
+    item_no: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)  # Item No (HE-1001)
     tag_code: Mapped[str] = mapped_column(String(120), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     quantity: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
@@ -482,21 +489,108 @@ class MrTag(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
-class MrDocument(Base):
-    """Документ заказчика, приложенный к MR (тех. требования, опросные
-    листы и т.п.). Видны подрядчикам по ссылке только на чтение."""
+class MrOwnerItemCategory(str, enum.Enum):
+    CHECKLIST_FORM = "CHECKLIST_FORM"   # Bid Check List, Letter of Conformity
+    RFD = "RFD"                         # Requirement for Documents (форма)
+    SPARE = "SPARE"                     # Spare parts / SPIR
+    INSPECTION = "INSPECTION"           # Scope of Inspection
+    PROCEDURE = "PROCEDURE"             # Coordination / Numbering procedures
+    DATASHEET = "DATASHEET"             # Технические даташиты (дисциплина)
+    SPEC = "SPEC"                       # Спецификации (дисциплина)
+    DRAWING = "DRAWING"                 # Чертежи (дисциплина)
+    OTHER = "OTHER"
 
-    __tablename__ = "mr_documents"
+
+class MrOwnerItem(Base):
+    """Слот чек-листа ЗАКАЗЧИКА (List of Attachments): что нужно загрузить
+    для полноты MR. Карточка показывает «загружено X/Y». Файл(ы) — в
+    MrOwnerFile."""
+
+    __tablename__ = "mr_owner_items"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     mr_id: Mapped[int] = mapped_column(ForeignKey("material_requisitions.id"), nullable=False, index=True)
-    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    att_no: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    category: Mapped[MrOwnerItemCategory] = mapped_column(
+        Enum(MrOwnerItemCategory), nullable=False, default=MrOwnerItemCategory.OTHER
+    )
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    doc_number: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    rev: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    is_required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    allow_questions: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class MrOwnerFile(Base):
+    """Загруженный заказчиком файл, привязан к слоту чек-листа MrOwnerItem.
+    Один слот может иметь несколько файлов (многостраничные приложения)."""
+
+    __tablename__ = "mr_owner_files"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    owner_item_id: Mapped[int] = mapped_column(ForeignKey("mr_owner_items.id"), nullable=False, index=True)
+    mr_id: Mapped[int] = mapped_column(ForeignKey("material_requisitions.id"), nullable=False, index=True)
     file_path: Mapped[str] = mapped_column(String(500), nullable=False)
     file_name: Mapped[str] = mapped_column(String(255), nullable=False)
     mime: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     uploaded_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class MrVendorItemSection(str, enum.Enum):
+    BID_INCLUSION = "BID_INCLUSION"   # Bid Check List п.1 «Включили в КП»
+    BID_NOTES = "BID_NOTES"           # Bid Check List п.2 «Учли Requisition Notes»
+    RFD = "RFD"                       # Requirement for Documents (строки)
+
+
+class MrVendorItem(Base):
+    """Строка чек-листа ПОДРЯДЧИКА (шаблон). Bid Check List (YES/NO/NA) и
+    RFD-документы. Ответы подрядчиков — в VendorItemResponse (per invitation)."""
+
+    __tablename__ = "mr_vendor_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    mr_id: Mapped[int] = mapped_column(ForeignKey("material_requisitions.id"), nullable=False, index=True)
+    order_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    section: Mapped[MrVendorItemSection] = mapped_column(Enum(MrVendorItemSection), nullable=False)
+    category: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)  # scheduling/quality/technical
+    code: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)       # PN01, QC02, 1.1...
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    purpose: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)     # R/I/A (для RFD)
+    with_bid: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_required: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    allow_questions: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class VendorItemAnswer(str, enum.Enum):
+    YES = "YES"
+    NO = "NO"
+    NA = "NA"
+
+
+class VendorItemResponse(Base):
+    """Ответ конкретного подрядчика на пункт чек-листа MrVendorItem:
+    YES/NO/NA + прикреплённый файл + примечание. Одна строка на пару
+    (invitation, vendor_item)."""
+
+    __tablename__ = "vendor_item_responses"
+    __table_args__ = (
+        UniqueConstraint("invitation_id", "vendor_item_id", name="uq_vendor_item_response"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    invitation_id: Mapped[int] = mapped_column(ForeignKey("vendor_invitations.id"), nullable=False, index=True)
+    vendor_item_id: Mapped[int] = mapped_column(ForeignKey("mr_vendor_items.id"), nullable=False, index=True)
+    answer: Mapped[Optional[VendorItemAnswer]] = mapped_column(Enum(VendorItemAnswer), nullable=True)
+    upload_id: Mapped[Optional[int]] = mapped_column(ForeignKey("vendor_uploads.id"), nullable=True)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
 
 
 class VendorInvitation(Base):
@@ -572,8 +666,11 @@ class MrQuestion(Base):
         ForeignKey("vendor_invitations.id"), nullable=True, index=True
     )
     parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("mr_questions.id"), nullable=True, index=True)
-    # Опционально — привязка вопроса к конкретному документу заказчика.
-    mr_document_id: Mapped[Optional[int]] = mapped_column(ForeignKey("mr_documents.id"), nullable=True)
+    # Привязка вопроса к конкретному пункту чек-листа: документу заказчика
+    # (owner item) или требованию к подрядчику (vendor item). Оба опциональны
+    # — может быть общий вопрос по MR.
+    mr_owner_item_id: Mapped[Optional[int]] = mapped_column(ForeignKey("mr_owner_items.id"), nullable=True)
+    mr_vendor_item_id: Mapped[Optional[int]] = mapped_column(ForeignKey("mr_vendor_items.id"), nullable=True)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     visibility: Mapped[MrQuestionVisibility] = mapped_column(
         Enum(MrQuestionVisibility), nullable=False, default=MrQuestionVisibility.PRIVATE
