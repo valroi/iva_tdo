@@ -32,6 +32,7 @@ import {
   uploadMrOwnerFile,
 } from "../api";
 import ProcessHint from "../components/ProcessHint";
+import { useI18n } from "../i18n";
 import type {
   MrItem,
   MrOwnerItem,
@@ -65,6 +66,7 @@ const SECTION_LABEL: Record<string, string> = {
 
 export default function VendorsPage({ currentUser }: Props): JSX.Element {
   const { message, modal } = App.useApp();
+  const { t } = useI18n();
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [mrList, setMrList] = useState<MrItem[]>([]);
   const [selectedMrId, setSelectedMrId] = useState<number | null>(null);
@@ -144,14 +146,14 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
   }
 
   const mrColumns: ColumnsType<MrItem> = [
-    { title: "Код MR", dataIndex: "code", key: "code", width: 220, ellipsis: true },
-    { title: "Оборудование", dataIndex: "equipment_type", key: "equipment_type", ellipsis: true, render: (v) => v ?? "—" },
-    { title: "Дисц.", dataIndex: "discipline_code", key: "disc", width: 70, render: (v) => v ?? "—" },
-    { title: "Статус", dataIndex: "status", key: "status", width: 160, render: (s: MrStatus) => <Tag color={MR_STATUS_COLOR[s]}>{MR_STATUS_LABEL[s]}</Tag> },
-    { title: "Теги", dataIndex: "tags_count", key: "tags", width: 60 },
-    { title: "Заказчик", key: "owner", width: 90, render: (_, r) => `${r.owner_items_filled}/${r.owner_items_count}` },
-    { title: "Подрядчик", dataIndex: "vendor_items_count", key: "vi", width: 90 },
-    { title: "Подр-ков", dataIndex: "invitations_count", key: "inv", width: 80 },
+    { title: t("vend.col.code"), dataIndex: "code", key: "code", width: 220, ellipsis: true },
+    { title: t("vend.col.equip"), dataIndex: "equipment_type", key: "equipment_type", ellipsis: true, render: (v) => v ?? "—" },
+    { title: t("vend.col.disc"), dataIndex: "discipline_code", key: "disc", width: 70, render: (v) => v ?? "—" },
+    { title: t("vend.col.status"), dataIndex: "status", key: "status", width: 160, render: (s: MrStatus) => <Tag color={MR_STATUS_COLOR[s]}>{t(`st.${s}`)}</Tag> },
+    { title: t("vend.col.tags"), dataIndex: "tags_count", key: "tags", width: 60 },
+    { title: t("vend.col.owner"), key: "owner", width: 90, render: (_, r) => `${r.owner_items_filled}/${r.owner_items_count}` },
+    { title: t("vend.col.vendor"), dataIndex: "vendor_items_count", key: "vi", width: 90 },
+    { title: t("vend.col.vendors"), dataIndex: "invitations_count", key: "inv", width: 80 },
   ];
 
   const ownerColumns: ColumnsType<MrOwnerItem> = [
@@ -172,7 +174,7 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
       render: (_, row) => {
         // Группа-заголовок (Technical Documents / Specifications / Drawings) —
         // это раздел, на него файл не грузится. Загрузка только на листья.
-        if (row.is_group) return <Typography.Text type="secondary" italic>раздел</Typography.Text>;
+        if (row.is_group) return <Typography.Text type="secondary" italic>{t("vend.section")}</Typography.Text>;
         return (
           <Space direction="vertical" size={2} style={{ width: "100%" }}>
             {row.files.map((f) => (
@@ -192,7 +194,7 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
                 return false;
               }}
             >
-              <Button size="small" icon={<UploadOutlined />}>Загрузить</Button>
+              <Button size="small" icon={<UploadOutlined />}>{t("vend.upload")}</Button>
             </Upload>
           </Space>
         );
@@ -238,19 +240,19 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
   return (
     <div>
       <Space style={{ width: "100%", justifyContent: "space-between", marginBottom: 12 }}>
-        <Typography.Title level={4} style={{ margin: 0 }}>Вендоры — заявки на поставку (MR)</Typography.Title>
+        <Typography.Title level={4} style={{ margin: 0 }}>{t("vend.title")}</Typography.Title>
         <Space>
-          <Button onClick={() => { importForm.resetFields(); setImportFile(null); setImportOpen(true); }}>Импорт REQ (.docx)</Button>
-          <Button type="primary" onClick={() => { createForm.resetFields(); setCreateOpen(true); }}>+ Создать MR</Button>
+          <Button onClick={() => { importForm.resetFields(); setImportFile(null); setImportOpen(true); }}>{t("vend.import")}</Button>
+          <Button type="primary" onClick={() => { createForm.resetFields(); setCreateOpen(true); }}>{t("vend.createMr")}</Button>
         </Space>
       </Space>
       <ProcessHint
         style={{ marginBottom: 12 }}
-        title="Как работать с модулем Вендоры"
+        title={t("vend.hintTitle")}
         steps={[
-          "Импортируйте REQ (.docx) — структура MR (теги, чек-листы) создастся автоматически.",
-          "Догрузите документы заказчика по чек-листу, при необходимости поправьте пункты.",
-          "Пригласите подрядчиков (до 5) — каждому уйдёт персональная ссылка.",
+          t("vend.hint1"),
+          t("vend.hint2"),
+          t("vend.hint3"),
         ]}
       />
 
@@ -262,7 +264,7 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
           pagination={{ pageSize: 8 }}
           rowClassName={(row) => (row.id === selectedMrId ? "ant-table-row-selected" : "")}
           onRow={(row) => ({ onClick: () => setSelectedMrId(row.id), style: { cursor: "pointer" } })}
-          locale={{ emptyText: "Нет MR. Импортируйте REQ или создайте вручную." }}
+          locale={{ emptyText: t("vend.emptyMr") }}
           scroll={{ x: "max-content" }}
         />
       </Card>
@@ -276,14 +278,14 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
                 size="small"
                 value={selectedMr.status}
                 style={{ width: 200 }}
-                options={(Object.keys(MR_STATUS_LABEL) as MrStatus[]).map((s) => ({ value: s, label: MR_STATUS_LABEL[s] }))}
+                options={(Object.keys(MR_STATUS_LABEL) as MrStatus[]).map((s) => ({ value: s, label: t(`st.${s}`) }))}
                 onChange={async (status) => { await updateMr(selectedMr.id, { status }); await loadMr(); message.success("Статус обновлён"); }}
               />
               {selectedMr.status === "DRAFT" && selectedMr.invitations_count === 0 && (
                 <Button size="small" danger onClick={() => modal.confirm({
                   title: "Удалить MR?", okText: "Удалить", okButtonProps: { danger: true }, cancelText: "Отмена",
                   onOk: async () => { await deleteMr(selectedMr.id); setSelectedMrId(null); await loadMr(); message.success("Удалено"); },
-                })}>Удалить MR</Button>
+                })}>{t("vend.deleteMr")}</Button>
               )}
             </Space>
           }
@@ -291,17 +293,17 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
           <Space direction="vertical" size={4} style={{ width: "100%", marginBottom: 16 }}>
             <Typography.Text strong style={{ fontSize: 15 }}>{selectedMr.equipment_type ?? selectedMr.title}</Typography.Text>
             <Typography.Text type="secondary">
-              Проект: {projects.find((p) => p.id === selectedMr.project_id)?.code ?? selectedMr.project_id}
-              {" · "}Дисциплина: {selectedMr.discipline_code ?? "—"}
-              {" · "}Валюта: {selectedMr.currency}
-              {" · "}Дедлайн: {formatDeadlineRu(selectedMr.deadline_at)}
+              {t("vend.project")}: {projects.find((p) => p.id === selectedMr.project_id)?.code ?? selectedMr.project_id}
+              {" · "}{t("vend.discipline")}: {selectedMr.discipline_code ?? "—"}
+              {" · "}{t("vend.currency")}: {selectedMr.currency}
+              {" · "}{t("vend.deadline")}: {formatDeadlineRu(selectedMr.deadline_at)}
             </Typography.Text>
           </Space>
 
           {/* Material Summary */}
           <Space style={{ width: "100%", justifyContent: "space-between", marginBottom: 8 }}>
-            <Typography.Text strong>Material Summary — позиции ({tags.length})</Typography.Text>
-            <Button size="small" onClick={() => addTag()}>+ Тег</Button>
+            <Typography.Text strong>{t("vend.matSummary")} ({tags.length})</Typography.Text>
+            <Button size="small" onClick={() => addTag()}>{t("vend.addTag")}</Button>
           </Space>
           <Table rowKey="id" size="small" pagination={false} dataSource={tags} style={{ marginBottom: 20 }}
             locale={{ emptyText: "Нет позиций" }}
@@ -320,28 +322,28 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
           {/* Owner checklist */}
           <Space style={{ width: "100%", justifyContent: "space-between", marginBottom: 8 }}>
             <Space>
-              <Typography.Text strong>Чек-лист заказчика — что загрузить</Typography.Text>
+              <Typography.Text strong>{t("vend.ownerChecklist")}</Typography.Text>
               <Progress
                 type="circle" size={28}
                 percent={selectedMr.owner_items_count ? Math.round((selectedMr.owner_items_filled / selectedMr.owner_items_count) * 100) : 0}
               />
               <Typography.Text type="secondary">{selectedMr.owner_items_filled}/{selectedMr.owner_items_count}</Typography.Text>
             </Space>
-            <Button size="small" onClick={() => addOwnerItem()}>+ Пункт</Button>
+            <Button size="small" onClick={() => addOwnerItem()}>{t("vend.addItem")}</Button>
           </Space>
           <Table rowKey="id" size="small" pagination={{ pageSize: 10 }} dataSource={ownerItems} columns={ownerColumns}
             style={{ marginBottom: 20 }} locale={{ emptyText: "Нет пунктов" }} scroll={{ x: "max-content" }} />
 
           {/* Vendor checklist */}
           <Space style={{ width: "100%", justifyContent: "space-between", marginBottom: 8 }}>
-            <Typography.Text strong>Чек-лист подрядчика — что предоставить ({vendorItems.length})</Typography.Text>
-            <Button size="small" onClick={() => addVendorItem()}>+ Пункт</Button>
+            <Typography.Text strong>{t("vend.vendorChecklist")} ({vendorItems.length})</Typography.Text>
+            <Button size="small" onClick={() => addVendorItem()}>{t("vend.addItem")}</Button>
           </Space>
           {Object.keys(vendorBySection).length === 0 && <Typography.Text type="secondary">Нет пунктов</Typography.Text>}
           {(["BID_INCLUSION", "BID_NOTES", "RFD"] as const).map((sec) =>
             vendorBySection[sec]?.length ? (
               <div key={sec} style={{ marginBottom: 16 }}>
-                <Typography.Text type="secondary" style={{ display: "block", marginBottom: 4 }}>{SECTION_LABEL[sec]}</Typography.Text>
+                <Typography.Text type="secondary" style={{ display: "block", marginBottom: 4 }}>{t(`vsec.${sec}`)}</Typography.Text>
                 <Table rowKey="id" size="small" pagination={false} dataSource={vendorBySection[sec]} columns={vendorColumns} scroll={{ x: "max-content" }} />
               </div>
             ) : null,
@@ -349,17 +351,17 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
 
           {/* Invitations */}
           <Space style={{ width: "100%", justifyContent: "space-between", marginTop: 12, marginBottom: 8 }}>
-            <Typography.Text strong>Приглашённые подрядчики ({invitations.filter((i) => !i.revoked_at).length}/5)</Typography.Text>
+            <Typography.Text strong>{t("vend.invited")} ({invitations.filter((i) => !i.revoked_at).length}/5)</Typography.Text>
             <Button size="small" type="primary" disabled={invitations.filter((i) => !i.revoked_at).length >= 5}
-              onClick={() => { inviteForm.resetFields(); setInviteOpen(true); }}>+ Пригласить</Button>
+              onClick={() => { inviteForm.resetFields(); setInviteOpen(true); }}>{t("vend.invite")}</Button>
           </Space>
-          <Table rowKey="id" size="small" pagination={false} dataSource={invitations} locale={{ emptyText: "Никто не приглашён" }}
+          <Table rowKey="id" size="small" pagination={false} dataSource={invitations} locale={{ emptyText: "—" }}
             columns={[
               { title: "Компания", dataIndex: "vendor_company_name", key: "c", ellipsis: true },
               { title: "Email", dataIndex: "vendor_contact_email", key: "e", ellipsis: true },
-              { title: "Статус", key: "s", width: 140, render: (_, r: VendorInvitationItem) => r.revoked_at ? <Tag color="error">Отозвано</Tag> : r.email_verified_at ? <Tag color="success">Вошёл</Tag> : <Tag color="processing">Приглашён</Tag> },
+              { title: "Статус", key: "s", width: 140, render: (_, r: VendorInvitationItem) => r.revoked_at ? <Tag color="error">{t("vend.st.revoked")}</Tag> : r.email_verified_at ? <Tag color="success">{t("vend.st.entered")}</Tag> : <Tag color="processing">{t("vend.st.invited")}</Tag> },
               { title: "", key: "a", width: 100, render: (_, r: VendorInvitationItem) => r.revoked_at ? null : (
-                <Button size="small" danger onClick={async () => { if (selectedMrId===null) return; await revokeMrInvitation(selectedMrId, r.id); await reload(); message.success("Отозвано"); }}>Отозвать</Button>
+                <Button size="small" danger onClick={async () => { if (selectedMrId===null) return; await revokeMrInvitation(selectedMrId, r.id); await reload(); message.success(t("vend.st.revoked")); }}>{t("vend.revoke")}</Button>
               ) },
             ]}
           />
@@ -368,10 +370,8 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
           {report && report.vendors.length > 0 && tags.length > 0 && (
             <>
               <Space style={{ width: "100%", justifyContent: "space-between", marginTop: 20, marginBottom: 8 }}>
-                <Typography.Text strong>Сводное сравнение цен ({selectedMr.currency})</Typography.Text>
-                <Button size="small" onClick={() => void downloadMrReportXlsx(selectedMr.id, selectedMr.code)}>
-                  Экспорт в Excel
-                </Button>
+                <Typography.Text strong>{t("vend.report")} ({selectedMr.currency})</Typography.Text>
+                <Button size="small" onClick={() => void downloadMrReportXlsx(selectedMr.id, selectedMr.code)}>{t("vend.exportXlsx")}</Button>
               </Space>
               <Table
                 rowKey="tag_id"
@@ -402,7 +402,7 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
                   <Table.Summary fixed>
                     <Table.Summary.Row>
                       <Table.Summary.Cell index={0} colSpan={2}>
-                        <Typography.Text strong>ИТОГО</Typography.Text>
+                        <Typography.Text strong>{t("vend.total")}</Typography.Text>
                       </Table.Summary.Cell>
                       {report.vendors.map((v, i) => (
                         <Table.Summary.Cell index={i + 2} key={v.invitation_id}>
@@ -416,22 +416,22 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
                 )}
               />
               <Typography.Text type="secondary" style={{ display: "block", marginTop: 4 }}>
-                Зелёным выделена минимальная цена по позиции.
+                {t("vend.minHint")}
               </Typography.Text>
             </>
           )}
 
           {/* Вопросы подрядчиков (Q&A) */}
           <Typography.Text strong style={{ display: "block", marginTop: 20, marginBottom: 8 }}>
-            Вопросы подрядчиков ({questions.length})
+            {t("vend.questions")} ({questions.length})
           </Typography.Text>
-          {questions.length === 0 && <Typography.Text type="secondary">Вопросов пока нет.</Typography.Text>}
+          {questions.length === 0 && <Typography.Text type="secondary">{t("vend.noQuestions")}</Typography.Text>}
           <Space direction="vertical" size={10} style={{ width: "100%" }}>
             {questions.map((q) => (
               <div key={q.id} style={{ borderLeft: "3px solid #d9d9d9", paddingLeft: 10 }}>
                 <Space size={6} wrap>
                   <Typography.Text strong>{q.author_label}</Typography.Text>
-                  {q.is_public ? <Tag color="blue">Публичный</Tag> : <Tag>Приватный</Tag>}
+                  {q.is_public ? <Tag color="blue">{t("vend.qPublic")}</Tag> : <Tag>{t("vend.qPrivate")}</Tag>}
                 </Space>
                 <Typography.Paragraph style={{ margin: "2px 0" }}>{q.body}</Typography.Paragraph>
                 {q.replies.map((r) => (
@@ -441,12 +441,12 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
                   </div>
                 ))}
                 <Space size={6} style={{ marginTop: 4 }}>
-                  <Button size="small" onClick={() => answerQuestion(q.id)}>Ответить</Button>
+                  <Button size="small" onClick={() => answerQuestion(q.id)}>{t("vend.reply")}</Button>
                   <Button size="small" onClick={async () => {
                     if (selectedMrId === null) return;
                     await setMrQuestionVisibility(selectedMrId, q.id, !q.is_public);
                     await reload();
-                  }}>{q.is_public ? "Сделать приватным" : "Сделать публичным"}</Button>
+                  }}>{q.is_public ? t("vend.makePrivate") : t("vend.makePublic")}</Button>
                 </Space>
               </div>
             ))}
@@ -594,7 +594,7 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
       content: (
         <Space direction="vertical" style={{ width: "100%" }}>
           <Select defaultValue="RFD" style={{ width: "100%" }} onChange={(v) => (section = v)}
-            options={Object.entries(SECTION_LABEL).map(([v, l]) => ({ value: v, label: l }))} />
+            options={Object.keys(SECTION_LABEL).map((v) => ({ value: v, label: t(`vsec.${v}`) }))} />
           <Input placeholder="Требование / документ" onChange={(e) => (title = e.target.value)} />
         </Space>
       ),
