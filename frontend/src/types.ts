@@ -538,3 +538,8 @@ export interface VendorMrView {
 export type VendorAnswer = "YES" | "NO" | "NA";
 export interface VendorMyQuote { tag_id:number; price:number|null; currency:string|null; note:string|null; }
 export interface VendorMyResponse { vendor_item_id:number; answer:VendorAnswer|null; note:string|null; file_name:string|null; upload_id:number|null; }
+
+export interface VendorReportVendor { invitation_id:number; company_name:string; submitted:boolean; total_price:number|null; }
+export interface VendorReportCell { invitation_id:number; price:number|null; note:string|null; }
+export interface VendorReportRow { tag_id:number; sr_no:string|null; item_no:string|null; name:string; quantity:number|null; unit:string|null; cells:VendorReportCell[]; min_invitation_id:number|null; }
+export interface VendorReport { mr_id:number; code:string; currency:string; vendors:VendorReportVendor[]; rows:VendorReportRow[]; }

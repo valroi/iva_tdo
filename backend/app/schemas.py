@@ -1026,3 +1026,36 @@ class VendorMyResponse(BaseModel):
     note: str | None
     file_name: str | None = None
     upload_id: int | None = None
+
+
+# --- VQM PR-5: сводный отчёт теги × подрядчики × цены ---
+class VendorReportVendor(BaseModel):
+    invitation_id: int
+    company_name: str
+    submitted: bool          # вошёл ли (email_verified) — есть ли участие
+    total_price: float | None
+
+
+class VendorReportCell(BaseModel):
+    invitation_id: int
+    price: float | None
+    note: str | None
+
+
+class VendorReportRow(BaseModel):
+    tag_id: int
+    sr_no: str | None
+    item_no: str | None
+    name: str
+    quantity: float | None
+    unit: str | None
+    cells: list[VendorReportCell]
+    min_invitation_id: int | None    # подрядчик с минимальной ценой (подсветка)
+
+
+class VendorReport(BaseModel):
+    mr_id: int
+    code: str
+    currency: str
+    vendors: list[VendorReportVendor]
+    rows: list[VendorReportRow]

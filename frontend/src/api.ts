@@ -1130,3 +1130,12 @@ export function vendorUploadChecklistFile(vendorItemId:number, file:File): Promi
   const form=new FormData(); form.append("file", file);
   return vendorRequest(`/public/vendor/checklist/${vendorItemId}/file`, { method:"POST", body:form });
 }
+
+// VQM PR-5: сводный отчёт
+export function getMrReport(mrId:number): Promise<import("./types").VendorReport> {
+  return request<import("./types").VendorReport>(`/mr/${mrId}/report`);
+}
+export async function downloadMrReportXlsx(mrId:number, code:string): Promise<void> {
+  const blob = await requestBlob(`/mr/${mrId}/report.xlsx`);
+  downloadBlob(blob, `report_${code}.xlsx`);
+}

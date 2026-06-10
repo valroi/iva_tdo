@@ -15,6 +15,8 @@ import {
   deleteMrOwnerItem,
   deleteMrTag,
   deleteMrVendorItem,
+  downloadMrReportXlsx,
+  getMrReport,
   importReq,
   listMr,
   listMrInvitations,
@@ -36,6 +38,7 @@ import type {
   ProjectItem,
   User,
   VendorInvitationItem,
+  VendorReport,
 } from "../types";
 import { formatDeadlineRu } from "../utils/datetime";
 
@@ -65,6 +68,7 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
   const [ownerItems, setOwnerItems] = useState<MrOwnerItem[]>([]);
   const [vendorItems, setVendorItems] = useState<MrVendorItem[]>([]);
   const [invitations, setInvitations] = useState<VendorInvitationItem[]>([]);
+  const [report, setReport] = useState<VendorReport | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -95,21 +99,23 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
   }, []);
 
   const loadDetails = async (mrId: number) => {
-    const [t, o, v, inv] = await Promise.all([
+    const [t, o, v, inv, rep] = await Promise.all([
       listMrTags(mrId),
       listMrOwnerItems(mrId),
       listMrVendorItems(mrId),
       listMrInvitations(mrId),
+      getMrReport(mrId).catch(() => null),
     ]);
     setTags(t);
     setOwnerItems(o);
     setVendorItems(v);
     setInvitations(inv);
+    setReport(rep);
   };
 
   useEffect(() => {
     if (selectedMrId === null) {
-      setTags([]); setOwnerItems([]); setVendorItems([]); setInvitations([]);
+      setTags([]); setOwnerItems([]); setVendorItems([]); setInvitations([]); setReport(null);
       return;
     }
     void loadDetails(selectedMrId).catch(() => undefined);
@@ -350,6 +356,63 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
               ) },
             ]}
           />
+
+          {/* Сводный отчёт теги × подрядчики × цены */}
+          {report && report.vendors.length > 0 && tags.length > 0 && (
+            <>
+              <Space style={{ width: "100%", justifyContent: "space-between", marginTop: 20, marginBottom: 8 }}>
+                <Typography.Text strong>Сводное сравнение цен ({selectedMr.currency})</Typography.Text>
+                <Button size="small" onClick={() => void downloadMrReportXlsx(selectedMr.id, selectedMr.code)}>
+                  Экспорт в Excel
+                </Button>
+              </Space>
+              <Table
+                rowKey="tag_id"
+                size="small"
+                pagination={false}
+                dataSource={report.rows}
+                scroll={{ x: "max-content" }}
+                columns={[
+                  { title: "Item No", dataIndex: "item_no", key: "item", width: 130, render: (v) => v ?? "—" },
+                  { title: "Наименование", dataIndex: "name", key: "name", ellipsis: true },
+                  ...report.vendors.map((v) => ({
+                    title: v.company_name,
+                    key: `v_${v.invitation_id}`,
+                    width: 140,
+                    render: (_: unknown, row: VendorReport["rows"][number]) => {
+                      const cell = row.cells.find((c) => c.invitation_id === v.invitation_id);
+                      const isMin = row.min_invitation_id === v.invitation_id;
+                      if (cell?.price == null) return <Typography.Text type="secondary">—</Typography.Text>;
+                      return (
+                        <Typography.Text strong={isMin} style={isMin ? { color: "#389e0d" } : undefined}>
+                          {cell.price.toLocaleString("ru-RU")}
+                        </Typography.Text>
+                      );
+                    },
+                  })),
+                ]}
+                summary={() => (
+                  <Table.Summary fixed>
+                    <Table.Summary.Row>
+                      <Table.Summary.Cell index={0} colSpan={2}>
+                        <Typography.Text strong>ИТОГО</Typography.Text>
+                      </Table.Summary.Cell>
+                      {report.vendors.map((v, i) => (
+                        <Table.Summary.Cell index={i + 2} key={v.invitation_id}>
+                          <Typography.Text strong>
+                            {v.total_price != null ? v.total_price.toLocaleString("ru-RU") : "—"}
+                          </Typography.Text>
+                        </Table.Summary.Cell>
+                      ))}
+                    </Table.Summary.Row>
+                  </Table.Summary>
+                )}
+              />
+              <Typography.Text type="secondary" style={{ display: "block", marginTop: 4 }}>
+                Зелёным выделена минимальная цена по позиции.
+              </Typography.Text>
+            </>
+          )}
         </Card>
       )}
 

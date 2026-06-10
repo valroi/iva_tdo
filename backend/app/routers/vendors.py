@@ -30,6 +30,7 @@ from app.models import (
     User,
     UserRole,
     VendorInvitation,
+    VendorQuote,
 )
 from app.schemas import (
     MrCreate,
@@ -48,6 +49,10 @@ from app.schemas import (
     VendorInvitationCreate,
     VendorInvitationCreated,
     VendorInvitationRead,
+    VendorReport,
+    VendorReportCell,
+    VendorReportRow,
+    VendorReportVendor,
 )
 from app.services import vendor_email, vendor_invitations
 from app.services.vendor_security import (
@@ -753,4 +758,130 @@ def import_req(
         tags_created=len(parsed.get("tags", [])),
         owner_items_created=len(parsed.get("owner_items", [])),
         vendor_items_created=len(parsed.get("vendor_items", [])),
+    )
+
+
+# --------------------------------------------------------------------- Report
+def _build_report(db: Session, mr: MaterialRequisition) -> VendorReport:
+    """Сводка теги × подрядчики × цены. Только активные приглашения."""
+    invitations = (
+        db.query(VendorInvitation)
+        .filter(VendorInvitation.mr_id == mr.id, VendorInvitation.revoked_at.is_(None))
+        .order_by(VendorInvitation.id.asc())
+        .all()
+    )
+    tags = (
+        db.query(MrTag)
+        .filter(MrTag.mr_id == mr.id)
+        .order_by(MrTag.order_index.asc(), MrTag.id.asc())
+        .all()
+    )
+    # quotes[invitation_id][tag_id] = VendorQuote
+    inv_ids = [i.id for i in invitations]
+    quotes = (
+        db.query(VendorQuote)
+        .filter(VendorQuote.invitation_id.in_(inv_ids))
+        .all()
+        if inv_ids
+        else []
+    )
+    qmap: dict[tuple[int, int], VendorQuote] = {(q.invitation_id, q.tag_id): q for q in quotes}
+
+    # Итог по подрядчику = сумма его цен по всем тегам (где есть цена).
+    totals: dict[int, float | None] = {}
+    for inv in invitations:
+        vals = [qmap[(inv.id, t.id)].price for t in tags if qmap.get((inv.id, t.id)) and qmap[(inv.id, t.id)].price is not None]
+        totals[inv.id] = round(sum(vals), 2) if vals else None
+
+    vendors = [
+        VendorReportVendor(
+            invitation_id=inv.id,
+            company_name=inv.vendor_company_name,
+            submitted=inv.email_verified_at is not None,
+            total_price=totals.get(inv.id),
+        )
+        for inv in invitations
+    ]
+
+    rows: list[VendorReportRow] = []
+    for t in tags:
+        cells = []
+        prices_with_inv = []
+        for inv in invitations:
+            q = qmap.get((inv.id, t.id))
+            price = q.price if q else None
+            note = q.note if q else None
+            cells.append(VendorReportCell(invitation_id=inv.id, price=price, note=note))
+            if price is not None:
+                prices_with_inv.append((price, inv.id))
+        min_inv = min(prices_with_inv)[1] if prices_with_inv else None
+        rows.append(
+            VendorReportRow(
+                tag_id=t.id, sr_no=t.sr_no, item_no=t.item_no, name=t.name,
+                quantity=t.quantity, unit=t.unit, cells=cells, min_invitation_id=min_inv,
+            )
+        )
+    return VendorReport(mr_id=mr.id, code=mr.code, currency=mr.currency, vendors=vendors, rows=rows)
+
+
+@router.get("/mr/{mr_id}/report", response_model=VendorReport)
+def get_report(
+    mr_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    mr = _get_mr_or_404(db, mr_id)
+    ensure_can_manage_mr(db, user=current_user, mr=mr)
+    return _build_report(db, mr)
+
+
+@router.get("/mr/{mr_id}/report.xlsx")
+def export_report_xlsx(
+    mr_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from io import BytesIO
+
+    from fastapi.responses import StreamingResponse
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+
+    mr = _get_mr_or_404(db, mr_id)
+    ensure_can_manage_mr(db, user=current_user, mr=mr)
+    report = _build_report(db, mr)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Сравнение"
+    bold = Font(bold=True)
+    green = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+
+    header = ["Sr", "Item No", "Наименование", "Кол-во", "Ед."] + [v.company_name for v in report.vendors]
+    ws.append(header)
+    for c in ws[1]:
+        c.font = bold
+
+    for row in report.rows:
+        line = [row.sr_no or "", row.item_no or "", row.name, row.quantity, row.unit or ""]
+        line += [next((c.price for c in row.cells if c.invitation_id == v.invitation_id), None) for v in report.vendors]
+        ws.append(line)
+        # подсветка минимальной цены
+        if row.min_invitation_id is not None:
+            col = 5 + [v.invitation_id for v in report.vendors].index(row.min_invitation_id) + 1
+            ws.cell(row=ws.max_row, column=col).fill = green
+
+    total_line = ["", "", "ИТОГО", "", ""] + [v.total_price for v in report.vendors]
+    ws.append(total_line)
+    for c in ws[ws.max_row]:
+        c.font = bold
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    fname = f"report_{mr.code}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
