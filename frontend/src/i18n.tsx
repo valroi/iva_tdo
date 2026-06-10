@@ -54,6 +54,16 @@ const DICT: Dict = {
   "col.size": { ru: "Размер", en: "Size" },
   "col.code": { ru: "Код", en: "Code" },
   "col.requirement": { ru: "Требование", en: "Requirement" },
+  "col.price": { ru: "Цена", en: "Price" },
+  "col.answer": { ru: "Ответ", en: "Answer" },
+  "col.attach": { ru: "Документ", en: "Document" },
+  "ans.yes": { ru: "Да", en: "Yes" },
+  "ans.no": { ru: "Нет", en: "No" },
+  "ans.na": { ru: "Н/П", en: "N/A" },
+  "portal.priceHint": { ru: "Укажите цену по каждой позиции и сохраните.", en: "Enter a price for each item and save." },
+  "portal.saved": { ru: "Сохранено", en: "Saved" },
+  "portal.upload": { ru: "Загрузить", en: "Upload" },
+  "portal.notePlaceholder": { ru: "Примечание", en: "Note" },
 };
 
 interface I18nValue {

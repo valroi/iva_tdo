@@ -531,4 +531,10 @@ export interface VendorMrView {
   tags: VendorMrTagView[];
   documents: VendorMrDocumentView[];
   checklist: VendorMrChecklistItem[];
+  my_quotes: VendorMyQuote[];
+  my_responses: VendorMyResponse[];
 }
+
+export type VendorAnswer = "YES" | "NO" | "NA";
+export interface VendorMyQuote { tag_id:number; price:number|null; currency:string|null; note:string|null; }
+export interface VendorMyResponse { vendor_item_id:number; answer:VendorAnswer|null; note:string|null; file_name:string|null; upload_id:number|null; }

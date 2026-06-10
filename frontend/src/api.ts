@@ -1118,3 +1118,15 @@ export async function vendorVerifyCode(
 export function vendorGetMr(): Promise<import("./types").VendorMrView> {
   return vendorRequest<import("./types").VendorMrView>(`/public/vendor/me`);
 }
+
+// VQM PR-4b: ответы подрядчика в портале
+export function vendorSetQuote(payload: { tag_id:number; price:number|null; currency?:string|null; note?:string|null }): Promise<{status:string}> {
+  return vendorRequest(`/public/vendor/quote`, { method:"POST", body:JSON.stringify(payload) });
+}
+export function vendorSetChecklistAnswer(payload: { vendor_item_id:number; answer:string|null; note?:string|null }): Promise<{status:string}> {
+  return vendorRequest(`/public/vendor/checklist`, { method:"POST", body:JSON.stringify(payload) });
+}
+export function vendorUploadChecklistFile(vendorItemId:number, file:File): Promise<{status:string; file_name:string}> {
+  const form=new FormData(); form.append("file", file);
+  return vendorRequest(`/public/vendor/checklist/${vendorItemId}/file`, { method:"POST", body:form });
+}

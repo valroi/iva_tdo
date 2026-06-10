@@ -995,3 +995,34 @@ class VendorMrView(BaseModel):
     tags: list[VendorMrTagView]
     documents: list[VendorMrDocumentView]
     checklist: list[VendorMrChecklistItem] = []
+    my_quotes: list[VendorMyQuote] = []
+    my_responses: list[VendorMyResponse] = []
+
+
+# --- VQM PR-4b: ответы подрядчика (цены + чек-лист) ---
+class VendorQuoteSet(BaseModel):
+    tag_id: int
+    price: float | None = None
+    currency: str | None = None
+    note: str | None = None
+
+
+class VendorChecklistAnswerSet(BaseModel):
+    vendor_item_id: int
+    answer: VendorItemAnswer | None = None
+    note: str | None = None
+
+
+class VendorMyQuote(BaseModel):
+    tag_id: int
+    price: float | None
+    currency: str | None
+    note: str | None
+
+
+class VendorMyResponse(BaseModel):
+    vendor_item_id: int
+    answer: VendorItemAnswer | None
+    note: str | None
+    file_name: str | None = None
+    upload_id: int | None = None

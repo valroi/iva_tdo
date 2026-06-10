@@ -22,6 +22,12 @@ from sqlalchemy.orm import Session
 
 from app.auth import create_vendor_session_token
 from app.database import get_db
+from pathlib import Path
+from uuid import uuid4
+
+from fastapi import File, UploadFile
+
+from app.config import get_settings
 from app.models import (
     MaterialRequisition,
     MrOwnerFile,
@@ -30,17 +36,28 @@ from app.models import (
     MrTag,
     MrVendorItem,
     VendorInvitation,
+    VendorItemResponse,
+    VendorQuote,
+    VendorUpload,
 )
 from app.schemas import (
+    VendorChecklistAnswerSet,
     VendorMrDocumentView,
     VendorMrTagView,
     VendorMrView,
+    VendorMyQuote,
+    VendorMyResponse,
+    VendorQuoteSet,
     VendorRequestCode,
     VendorSessionResponse,
     VendorVerify,
 )
 from app.services import vendor_email, vendor_invitations
-from app.services.vendor_security import require_vendor_session, write_audit
+from app.services.vendor_security import ensure_mr_open, require_vendor_session, write_audit
+
+_settings = get_settings()
+_VENDOR_ROOT = Path(_settings.vendor_uploads_root)
+_MAX_VENDOR_FILE = 50 * 1024 * 1024
 
 router = APIRouter()
 
@@ -187,6 +204,22 @@ def vendor_me(
         )
         for v in vendor_items
     ]
+    # Сохранённые ответы ЭТОГО подрядчика (изоляция по invitation_id).
+    my_quotes = [
+        VendorMyQuote(tag_id=q.tag_id, price=q.price, currency=q.currency, note=q.note)
+        for q in db.query(VendorQuote).filter(VendorQuote.invitation_id == inv.id).all()
+    ]
+    uploads = {u.id: u for u in db.query(VendorUpload).filter(VendorUpload.invitation_id == inv.id).all()}
+    my_responses = [
+        VendorMyResponse(
+            vendor_item_id=r.vendor_item_id,
+            answer=r.answer,
+            note=r.note,
+            upload_id=r.upload_id,
+            file_name=(uploads.get(r.upload_id).file_name if r.upload_id and uploads.get(r.upload_id) else None),
+        )
+        for r in db.query(VendorItemResponse).filter(VendorItemResponse.invitation_id == inv.id).all()
+    ]
     is_open = mr.status == MrStatus.OPEN and (mr.deadline_at is None or datetime.utcnow() <= mr.deadline_at)
     return VendorMrView(
         mr_id=mr.id,
@@ -201,7 +234,115 @@ def vendor_me(
         tags=[VendorMrTagView.model_validate(t, from_attributes=True) for t in tags],
         documents=documents,
         checklist=checklist,
+        my_quotes=my_quotes,
+        my_responses=my_responses,
     )
+
+
+# ------------------------------------------------- PR-4b: ответы подрядчика
+@router.post("/public/vendor/quote")
+def set_quote(
+    payload: VendorQuoteSet,
+    request: Request,
+    db: Session = Depends(get_db),
+    inv: VendorInvitation = Depends(require_vendor_session),
+):
+    """Подрядчик ставит/обновляет цену по тегу. Только в статусе приёма."""
+    mr = _ensure_mr_accepting(db, inv.mr_id)
+    ensure_mr_open(mr)
+    tag = db.query(MrTag).filter(MrTag.id == payload.tag_id, MrTag.mr_id == mr.id).first()
+    if tag is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    quote = (
+        db.query(VendorQuote)
+        .filter(VendorQuote.invitation_id == inv.id, VendorQuote.tag_id == tag.id)
+        .first()
+    )
+    if quote is None:
+        quote = VendorQuote(invitation_id=inv.id, tag_id=tag.id)
+        db.add(quote)
+    quote.price = payload.price
+    quote.currency = (payload.currency or mr.currency)
+    quote.note = payload.note
+    db.commit()
+    write_audit(db, action="vendor_quote_set", mr_id=mr.id, invitation_id=inv.id, request=request, summary=f"tag={tag.id}")
+    return {"status": "ok"}
+
+
+@router.post("/public/vendor/checklist")
+def set_checklist_answer(
+    payload: VendorChecklistAnswerSet,
+    request: Request,
+    db: Session = Depends(get_db),
+    inv: VendorInvitation = Depends(require_vendor_session),
+):
+    """Подрядчик отвечает на пункт чек-листа (YES/NO/NA + примечание)."""
+    mr = _ensure_mr_accepting(db, inv.mr_id)
+    ensure_mr_open(mr)
+    item = db.query(MrVendorItem).filter(MrVendorItem.id == payload.vendor_item_id, MrVendorItem.mr_id == mr.id).first()
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    resp = (
+        db.query(VendorItemResponse)
+        .filter(VendorItemResponse.invitation_id == inv.id, VendorItemResponse.vendor_item_id == item.id)
+        .first()
+    )
+    if resp is None:
+        resp = VendorItemResponse(invitation_id=inv.id, vendor_item_id=item.id)
+        db.add(resp)
+    resp.answer = payload.answer
+    resp.note = payload.note
+    db.commit()
+    write_audit(db, action="vendor_checklist_answer", mr_id=mr.id, invitation_id=inv.id, request=request, summary=f"item={item.id}")
+    return {"status": "ok"}
+
+
+@router.post("/public/vendor/checklist/{vendor_item_id}/file")
+def upload_checklist_file(
+    vendor_item_id: int,
+    request: Request,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    inv: VendorInvitation = Depends(require_vendor_session),
+):
+    """Подрядчик прикрепляет документ к пункту чек-листа (RFD-документ и т.п.)."""
+    mr = _ensure_mr_accepting(db, inv.mr_id)
+    ensure_mr_open(mr)
+    item = db.query(MrVendorItem).filter(MrVendorItem.id == vendor_item_id, MrVendorItem.mr_id == mr.id).first()
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    raw = file.file.read()
+    if len(raw) > _MAX_VENDOR_FILE:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large")
+    safe = f"{uuid4().hex}_{Path(file.filename or 'doc').name.replace(' ', '_')}"
+    dest_dir = _VENDOR_ROOT / "vendor_files" / str(inv.id)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / safe
+    dest.write_bytes(raw)
+    import hashlib
+
+    upload = VendorUpload(
+        invitation_id=inv.id,
+        file_path=str(dest),
+        file_name=file.filename or "doc",
+        mime=file.content_type,
+        size_bytes=len(raw),
+        sha256=hashlib.sha256(raw).hexdigest(),
+    )
+    db.add(upload)
+    db.flush()
+    resp = (
+        db.query(VendorItemResponse)
+        .filter(VendorItemResponse.invitation_id == inv.id, VendorItemResponse.vendor_item_id == item.id)
+        .first()
+    )
+    if resp is None:
+        resp = VendorItemResponse(invitation_id=inv.id, vendor_item_id=item.id)
+        db.add(resp)
+    resp.upload_id = upload.id
+    db.commit()
+    write_audit(db, action="vendor_file_uploaded", mr_id=mr.id, invitation_id=inv.id, request=request, summary=f"item={item.id}")
+    return {"status": "ok", "file_name": upload.file_name}
 
 
 def _mask_email(email: str) -> str:
