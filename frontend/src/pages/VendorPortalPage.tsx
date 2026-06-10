@@ -9,6 +9,7 @@ import {
   vendorAskQuestion,
   vendorDownloadOwnerFile,
   vendorGetMr,
+  vendorSubmit,
   vendorListQuestions,
   vendorRequestCode,
   vendorSetChecklistAnswer,
@@ -46,7 +47,7 @@ type Step = "request" | "verify" | "portal";
  * свой MR, использует отдельную vendor-сессию (sessionStorage).
  */
 export default function VendorPortalPage({ invitationId, token }: Props): JSX.Element {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const { t, lang } = useI18n();
   const [step, setStep] = useState<Step>(getVendorSession() ? "portal" : "request");
   const [emailMasked, setEmailMasked] = useState<string>("");
@@ -250,6 +251,21 @@ export default function VendorPortalPage({ invitationId, token }: Props): JSX.El
       message.success(t("portal.saved"));
     } catch (e) { message.error(e instanceof Error ? e.message : "Error"); }
   };
+  const submitProposal = async () => {
+    try {
+      const res = await vendorSubmit();
+      if (res.status === "submitted") {
+        message.success(t("portal.submitOk"));
+        await loadMr();
+      } else {
+        // Неполные данные — показываем чего не хватает.
+        const parts: string[] = [];
+        if (res.missing_prices.length) parts.push(`${t("portal.missPrices")}: ${res.missing_prices.join(", ")}`);
+        if (res.missing_required.length) parts.push(`${t("portal.missReq")}: ${res.missing_required.join(", ")}`);
+        message.warning(`${t("portal.incomplete")} ${parts.join(" · ")}`);
+      }
+    } catch (e) { message.error(e instanceof Error ? e.message : "Error"); }
+  };
 
   // Цена по тегу — редактируемая колонка (когда приём открыт).
   const priceTagColumns: ColumnsType<VendorMrTagView> = [
@@ -346,7 +362,7 @@ export default function VendorPortalPage({ invitationId, token }: Props): JSX.El
 
       <Card title={t("portal.specItems")}>
         {editable && <Typography.Text type="secondary" style={{ display: "block", marginBottom: 8 }}>{t("portal.priceHint")}</Typography.Text>}
-        <Table rowKey="id" size="small" columns={editable ? priceTagColumns : tagColumns} dataSource={mr.tags} pagination={false} locale={{ emptyText: "—" }} scroll={{ x: "max-content" }} />
+        <Table rowKey="id" size="small" columns={editable ? priceTagColumns : tagColumns} dataSource={mr.tags} pagination={false} locale={{ emptyText: "—" }} />
       </Card>
 
       <Card title={t("portal.ownerDocs")}>
@@ -358,7 +374,7 @@ export default function VendorPortalPage({ invitationId, token }: Props): JSX.El
           checklistBySection(sec).length ? (
             <div key={sec} style={{ marginBottom: 12 }}>
               <Typography.Text type="secondary" style={{ display: "block", marginBottom: 4 }}>{SECTION_LABEL[sec][lang]}</Typography.Text>
-              <Table rowKey="id" size="small" columns={answerColumns} dataSource={checklistBySection(sec)} pagination={false} scroll={{ x: "max-content" }} />
+              <Table rowKey="id" size="small" columns={answerColumns} dataSource={checklistBySection(sec)} pagination={false} />
             </div>
           ) : null,
         )}
@@ -394,6 +410,32 @@ export default function VendorPortalPage({ invitationId, token }: Props): JSX.El
             </div>
           ))}
         </Space>
+      </Card>
+
+      {/* Финальная отправка предложения */}
+      <Card>
+        {mr.submitted ? (
+          <Result status="success" title={t("portal.submitted")} />
+        ) : (
+          <Space direction="vertical" size={8} style={{ width: "100%" }} align="center">
+            <Button
+              type="primary"
+              size="large"
+              disabled={!editable}
+              onClick={() => {
+                modal.confirm({
+                  title: t("portal.submit"),
+                  content: t("portal.submitConfirm"),
+                  okText: t("portal.submit"),
+                  cancelText: "✕",
+                  onOk: submitProposal,
+                });
+              }}
+            >
+              {t("portal.submit")}
+            </Button>
+          </Space>
+        )}
       </Card>
     </Space>,
   );

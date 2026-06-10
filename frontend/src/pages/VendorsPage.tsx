@@ -26,6 +26,7 @@ import {
   listMrTags,
   listMrVendorItems,
   listProjects,
+  listUsers,
   revokeMrInvitation,
   setMrQuestionVisibility,
   updateMr,
@@ -68,6 +69,7 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
   const { message, modal } = App.useApp();
   const { t } = useI18n();
   const [projects, setProjects] = useState<ProjectItem[]>([]);
+  const [ownerUsers, setOwnerUsers] = useState<{ value: number; label: string }[]>([]);
   const [mrList, setMrList] = useState<MrItem[]>([]);
   const [selectedMrId, setSelectedMrId] = useState<number | null>(null);
   const [tags, setTags] = useState<MrTagItem[]>([]);
@@ -104,6 +106,15 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
   useEffect(() => {
     void loadMr();
     listProjects().then(setProjects).catch(() => setProjects([]));
+    listUsers()
+      .then((us) =>
+        setOwnerUsers(
+          us
+            .filter((u) => u.company_type === "owner" || u.role === "admin")
+            .map((u) => ({ value: u.id, label: `${u.full_name} (${u.email})` })),
+        ),
+      )
+      .catch(() => setOwnerUsers([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -267,7 +278,7 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
           rowClassName={(row) => (row.id === selectedMrId ? "ant-table-row-selected" : "")}
           onRow={(row) => ({ onClick: () => setSelectedMrId(row.id), style: { cursor: "pointer" } })}
           locale={{ emptyText: t("vend.emptyMr") }}
-          scroll={{ x: "max-content" }}
+         
         />
       </Card>
 
@@ -280,6 +291,7 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
                 editForm.setFieldsValue({
                   title: selectedMr.title,
                   equipment_type: selectedMr.equipment_type ?? "",
+                  lr_user_id: selectedMr.lr_user_id ?? undefined,
                   deadline_at: selectedMr.deadline_at ? dayjs(selectedMr.deadline_at) : null,
                   currency: selectedMr.currency,
                 });
@@ -343,7 +355,7 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
             <Button size="small" onClick={() => addOwnerItem()}>{t("vend.addItem")}</Button>
           </Space>
           <Table rowKey="id" size="small" pagination={{ pageSize: 10 }} dataSource={ownerItems} columns={ownerColumns}
-            style={{ marginBottom: 20 }} locale={{ emptyText: "Нет пунктов" }} scroll={{ x: "max-content" }} />
+            style={{ marginBottom: 20 }} locale={{ emptyText: "Нет пунктов" }} />
 
           {/* Vendor checklist */}
           <Space style={{ width: "100%", justifyContent: "space-between", marginBottom: 8 }}>
@@ -355,7 +367,7 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
             vendorBySection[sec]?.length ? (
               <div key={sec} style={{ marginBottom: 16 }}>
                 <Typography.Text type="secondary" style={{ display: "block", marginBottom: 4 }}>{t(`vsec.${sec}`)}</Typography.Text>
-                <Table rowKey="id" size="small" pagination={false} dataSource={vendorBySection[sec]} columns={vendorColumns} scroll={{ x: "max-content" }} />
+                <Table rowKey="id" size="small" pagination={false} dataSource={vendorBySection[sec]} columns={vendorColumns} />
               </div>
             ) : null,
           )}
@@ -392,7 +404,7 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
                 size="small"
                 pagination={false}
                 dataSource={report.rows}
-                scroll={{ x: "max-content" }}
+               
                 columns={[
                   { title: "Item No", dataIndex: "item_no", key: "item", width: 130, render: (v) => v ?? "—" },
                   { title: "Наименование", dataIndex: "name", key: "name", ellipsis: true },
@@ -533,6 +545,7 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
             await updateMr(selectedMr.id, {
               title: values.title,
               equipment_type: values.equipment_type || null,
+              lr_user_id: values.lr_user_id ?? null,
               deadline_at: values.deadline_at ? dayjs(values.deadline_at).hour(12).minute(0).second(0).toISOString() : null,
               currency: values.currency || "RUB",
             });
@@ -543,6 +556,9 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
         }}>
           <Form.Item name="title" label={t("vend.fTitle")} rules={[{ required: true }]}><Input /></Form.Item>
           <Form.Item name="equipment_type" label={t("vend.fEquip")}><Input placeholder="Electrical Heater" /></Form.Item>
+          <Form.Item name="lr_user_id" label={t("vend.fLr")}>
+            <Select allowClear showSearch optionFilterProp="label" options={ownerUsers} placeholder={t("vend.fLrPlaceholder")} />
+          </Form.Item>
           <Space size={12}>
             <Form.Item name="deadline_at" label={t("vend.fDeadline")}><DatePicker format="DD.MM.YYYY" /></Form.Item>
             <Form.Item name="currency" label={t("vend.fCurrency")}>

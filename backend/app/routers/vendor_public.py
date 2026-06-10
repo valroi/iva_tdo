@@ -56,6 +56,7 @@ from app.schemas import (
     VendorQuoteSet,
     VendorRequestCode,
     VendorSessionResponse,
+    VendorSubmitResult,
     VendorVerify,
 )
 from app.services import vendor_email, vendor_invitations
@@ -87,6 +88,12 @@ def _ensure_mr_accepting(db: Session, mr_id: int) -> MaterialRequisition:
     if not accepting:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="MR is not accepting submissions")
     return mr
+
+
+def _ensure_not_submitted(inv: VendorInvitation) -> None:
+    """После финальной отправки предложение нельзя менять."""
+    if inv.submitted_at is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Already submitted — locked")
 
 
 @router.post("/public/vendor/{invitation_id}/request-code")
@@ -226,7 +233,13 @@ def vendor_me(
         )
         for r in db.query(VendorItemResponse).filter(VendorItemResponse.invitation_id == inv.id).all()
     ]
-    is_open = mr.status == MrStatus.OPEN and (mr.deadline_at is None or datetime.utcnow() <= mr.deadline_at)
+    submitted = inv.submitted_at is not None
+    # Редактировать можно пока приём открыт И предложение ещё не отправлено.
+    is_open = (
+        mr.status == MrStatus.OPEN
+        and (mr.deadline_at is None or datetime.utcnow() <= mr.deadline_at)
+        and not submitted
+    )
     return VendorMrView(
         mr_id=mr.id,
         code=mr.code,
@@ -237,6 +250,7 @@ def vendor_me(
         status=mr.status,
         is_open=is_open,
         vendor_company_name=inv.vendor_company_name,
+        submitted=submitted,
         tags=[VendorMrTagView.model_validate(t, from_attributes=True) for t in tags],
         documents=documents,
         checklist=checklist,
@@ -256,6 +270,7 @@ def set_quote(
     """Подрядчик ставит/обновляет цену по тегу. Только в статусе приёма."""
     mr = _ensure_mr_accepting(db, inv.mr_id)
     ensure_mr_open(mr)
+    _ensure_not_submitted(inv)
     tag = db.query(MrTag).filter(MrTag.id == payload.tag_id, MrTag.mr_id == mr.id).first()
     if tag is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -285,6 +300,7 @@ def set_checklist_answer(
     """Подрядчик отвечает на пункт чек-листа (YES/NO/NA + примечание)."""
     mr = _ensure_mr_accepting(db, inv.mr_id)
     ensure_mr_open(mr)
+    _ensure_not_submitted(inv)
     item = db.query(MrVendorItem).filter(MrVendorItem.id == payload.vendor_item_id, MrVendorItem.mr_id == mr.id).first()
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -314,6 +330,7 @@ def upload_checklist_file(
     """Подрядчик прикрепляет документ к пункту чек-листа (RFD-документ и т.п.)."""
     mr = _ensure_mr_accepting(db, inv.mr_id)
     ensure_mr_open(mr)
+    _ensure_not_submitted(inv)
     item = db.query(MrVendorItem).filter(MrVendorItem.id == vendor_item_id, MrVendorItem.mr_id == mr.id).first()
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -480,3 +497,56 @@ def vendor_download_owner_file(
     if not Path(f.file_path).exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing")
     return FileResponse(f.file_path, filename=f.file_name, media_type="application/octet-stream")
+
+
+@router.post("/public/vendor/submit", response_model=VendorSubmitResult)
+def vendor_submit(
+    request: Request,
+    db: Session = Depends(get_db),
+    inv: VendorInvitation = Depends(require_vendor_session),
+):
+    """Финальная отправка предложения подрядчиком. Автопроверка: все теги
+    с ценой, все обязательные пункты чек-листа отвечены/с файлом. Если чего-то
+    не хватает — возвращаем списки недостающего и НЕ отправляем. Иначе —
+    фиксируем submitted_at, портал становится read-only, уведомляем LR."""
+    mr = _ensure_mr_accepting(db, inv.mr_id)
+    _ensure_not_submitted(inv)
+
+    tags = db.query(MrTag).filter(MrTag.mr_id == mr.id).all()
+    quotes = {q.tag_id: q for q in db.query(VendorQuote).filter(VendorQuote.invitation_id == inv.id).all()}
+    missing_prices = [
+        (t.item_no or t.tag_code) for t in tags
+        if not quotes.get(t.id) or quotes[t.id].price is None
+    ]
+
+    required_items = (
+        db.query(MrVendorItem)
+        .filter(MrVendorItem.mr_id == mr.id, MrVendorItem.is_required.is_(True))
+        .all()
+    )
+    responses = {
+        r.vendor_item_id: r
+        for r in db.query(VendorItemResponse).filter(VendorItemResponse.invitation_id == inv.id).all()
+    }
+    missing_required = []
+    for item in required_items:
+        r = responses.get(item.id)
+        ok = bool(r and (r.answer is not None or r.upload_id is not None))
+        if not ok:
+            missing_required.append(item.code or item.title[:40])
+
+    if missing_prices or missing_required:
+        return VendorSubmitResult(status="incomplete", missing_prices=missing_prices, missing_required=missing_required)
+
+    inv.submitted_at = datetime.utcnow()
+    if mr.lr_user_id:
+        db.add(
+            Notification(
+                user_id=mr.lr_user_id,
+                event_type="VENDOR_SUBMITTED",
+                message=f"Подрядчик {inv.vendor_company_name} отправил предложение по MR {mr.code}",
+            )
+        )
+    db.commit()
+    write_audit(db, action="vendor_submitted", mr_id=mr.id, invitation_id=inv.id, request=request)
+    return VendorSubmitResult(status="submitted")

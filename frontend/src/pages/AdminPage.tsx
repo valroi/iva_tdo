@@ -74,6 +74,7 @@ const permissionFields: { key: keyof UserPermissions; label: string; hint: strin
   { key: "can_publish_comments", label: "Подтверждает замечания в подряд", hint: "Публикация/подтверждение замечаний для отправки подрядчику." },
   { key: "can_edit_workflow_statuses", label: "Редактирование workflow статусов", hint: "Управление справочником статусов процесса (названия, цвета, логика финальности)." },
   { key: "can_process_tdo_queue", label: "Обработка очереди ТДО (TRM/отклонение)", hint: "Группировка ревизий в TRM и отклонение/возврат на доработку." },
+  { key: "can_access_vendors", label: "Доступ к модулю «Закупки» (Vendors)", hint: "Видит верхний модуль «Закупки»: MR, импорт REQ, приглашения подрядчиков, сравнение цен." },
 ];
 
 type PermissionPresetId = "contractor_tdo_lead" | "contractor_developer" | "lr_owner" | "owner_reviewer" | "custom";

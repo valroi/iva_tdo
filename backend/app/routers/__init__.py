@@ -1,4 +1,6 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from app.deps import require_permissions
 
 from app.routers import (
     auth,
@@ -22,6 +24,11 @@ api_router.include_router(documents.router, tags=["documents"])
 api_router.include_router(smart_upload.router, tags=["smart-upload"])
 api_router.include_router(workflow.router, prefix="/workflow", tags=["workflow"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
-api_router.include_router(vendors.router, tags=["vendors"])
-# Гостевой роутер подрядчиков — отдельная изолированная авторизация.
+api_router.include_router(
+    vendors.router,
+    tags=["vendors"],
+    dependencies=[Depends(require_permissions("can_access_vendors"))],
+)
+# Гостевой роутер подрядчиков — отдельная изолированная авторизация
+# (свой vendor-токен, БЕЗ требования can_access_vendors).
 api_router.include_router(vendor_public.router, tags=["vendor-public"])

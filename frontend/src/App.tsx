@@ -348,7 +348,7 @@ function MainApp(): JSX.Element {
               value={activeModule}
               options={[
                 { label: "DCC", value: "dcc" },
-                { label: "Закупки", value: "vendors" },
+                ...(user?.permissions.can_access_vendors ? [{ label: "Закупки", value: "vendors" }] : []),
                 { label: "DOCchecker", value: "docchecker" },
               ]}
               onChange={(value) => {

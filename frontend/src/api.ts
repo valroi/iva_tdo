@@ -1172,3 +1172,7 @@ export async function vendorDownloadOwnerFile(fileId: number, fileName: string):
   const blob = await response.blob();
   downloadBlob(blob, fileName);
 }
+
+export function vendorSubmit(): Promise<import("./types").VendorSubmitResult> {
+  return vendorRequest(`/public/vendor/submit`, { method:"POST" });
+}

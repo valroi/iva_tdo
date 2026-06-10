@@ -619,6 +619,8 @@ class VendorInvitation(Base):
     locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_seen_ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # Финальная отправка предложения подрядчиком — после неё портал read-only.
+    submitted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 

@@ -28,6 +28,7 @@ PERMISSION_KEYS = (
     "can_publish_comments",
     "can_edit_workflow_statuses",
     "can_process_tdo_queue",
+    "can_access_vendors",
 )
 
 

@@ -993,11 +993,18 @@ class VendorMrView(BaseModel):
     status: MrStatus
     is_open: bool
     vendor_company_name: str
+    submitted: bool = False
     tags: list[VendorMrTagView]
     documents: list[VendorMrDocumentView]
     checklist: list[VendorMrChecklistItem] = []
     my_quotes: list[VendorMyQuote] = []
     my_responses: list[VendorMyResponse] = []
+
+
+class VendorSubmitResult(BaseModel):
+    status: str
+    missing_prices: list[str] = []      # коды тегов без цены
+    missing_required: list[str] = []    # требования без ответа/файла
 
 
 # --- VQM PR-4b: ответы подрядчика (цены + чек-лист) ---

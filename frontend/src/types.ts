@@ -16,6 +16,7 @@ export interface UserPermissions {
   can_publish_comments: boolean;
   can_edit_workflow_statuses: boolean;
   can_process_tdo_queue: boolean;
+  can_access_vendors: boolean;
 }
 
 export type CompanyType = "admin" | "owner" | "contractor";
@@ -528,6 +529,7 @@ export interface VendorMrView {
   status: MrStatus;
   is_open: boolean;
   vendor_company_name: string;
+  submitted: boolean;
   tags: VendorMrTagView[];
   documents: VendorMrDocumentView[];
   checklist: VendorMrChecklistItem[];
@@ -549,3 +551,5 @@ export interface MrQuestionItem {
   id:number; body:string; author_label:string; is_public:boolean;
   mr_owner_item_id:number|null; mr_vendor_item_id:number|null; created_at:string; replies:MrQuestionReply[];
 }
+
+export interface VendorSubmitResult { status:string; missing_prices:string[]; missing_required:string[]; }
