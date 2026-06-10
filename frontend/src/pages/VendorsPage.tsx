@@ -13,6 +13,7 @@ import {
   deleteMr,
   deleteMrOwnerFile,
   deleteMrOwnerItem,
+  answerMrQuestion,
   deleteMrTag,
   deleteMrVendorItem,
   downloadMrReportXlsx,
@@ -21,10 +22,12 @@ import {
   listMr,
   listMrInvitations,
   listMrOwnerItems,
+  listMrQuestions,
   listMrTags,
   listMrVendorItems,
   listProjects,
   revokeMrInvitation,
+  setMrQuestionVisibility,
   updateMr,
   uploadMrOwnerFile,
 } from "../api";
@@ -34,6 +37,7 @@ import type {
   MrOwnerItem,
   MrStatus,
   MrTagItem,
+  MrQuestionItem,
   MrVendorItem,
   ProjectItem,
   User,
@@ -69,6 +73,7 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
   const [vendorItems, setVendorItems] = useState<MrVendorItem[]>([]);
   const [invitations, setInvitations] = useState<VendorInvitationItem[]>([]);
   const [report, setReport] = useState<VendorReport | null>(null);
+  const [questions, setQuestions] = useState<MrQuestionItem[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -99,23 +104,25 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
   }, []);
 
   const loadDetails = async (mrId: number) => {
-    const [t, o, v, inv, rep] = await Promise.all([
+    const [t, o, v, inv, rep, q] = await Promise.all([
       listMrTags(mrId),
       listMrOwnerItems(mrId),
       listMrVendorItems(mrId),
       listMrInvitations(mrId),
       getMrReport(mrId).catch(() => null),
+      listMrQuestions(mrId).catch(() => []),
     ]);
     setTags(t);
     setOwnerItems(o);
     setVendorItems(v);
     setInvitations(inv);
     setReport(rep);
+    setQuestions(q);
   };
 
   useEffect(() => {
     if (selectedMrId === null) {
-      setTags([]); setOwnerItems([]); setVendorItems([]); setInvitations([]); setReport(null);
+      setTags([]); setOwnerItems([]); setVendorItems([]); setInvitations([]); setReport(null); setQuestions([]);
       return;
     }
     void loadDetails(selectedMrId).catch(() => undefined);
@@ -413,6 +420,37 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
               </Typography.Text>
             </>
           )}
+
+          {/* Вопросы подрядчиков (Q&A) */}
+          <Typography.Text strong style={{ display: "block", marginTop: 20, marginBottom: 8 }}>
+            Вопросы подрядчиков ({questions.length})
+          </Typography.Text>
+          {questions.length === 0 && <Typography.Text type="secondary">Вопросов пока нет.</Typography.Text>}
+          <Space direction="vertical" size={10} style={{ width: "100%" }}>
+            {questions.map((q) => (
+              <div key={q.id} style={{ borderLeft: "3px solid #d9d9d9", paddingLeft: 10 }}>
+                <Space size={6} wrap>
+                  <Typography.Text strong>{q.author_label}</Typography.Text>
+                  {q.is_public ? <Tag color="blue">Публичный</Tag> : <Tag>Приватный</Tag>}
+                </Space>
+                <Typography.Paragraph style={{ margin: "2px 0" }}>{q.body}</Typography.Paragraph>
+                {q.replies.map((r) => (
+                  <div key={r.id} style={{ marginLeft: 16 }}>
+                    <Typography.Text type={r.is_owner ? "success" : undefined} strong>{r.author_label}: </Typography.Text>
+                    <Typography.Text>{r.body}</Typography.Text>
+                  </div>
+                ))}
+                <Space size={6} style={{ marginTop: 4 }}>
+                  <Button size="small" onClick={() => answerQuestion(q.id)}>Ответить</Button>
+                  <Button size="small" onClick={async () => {
+                    if (selectedMrId === null) return;
+                    await setMrQuestionVisibility(selectedMrId, q.id, !q.is_public);
+                    await reload();
+                  }}>{q.is_public ? "Сделать приватным" : "Сделать публичным"}</Button>
+                </Space>
+              </div>
+            ))}
+          </Space>
         </Card>
       )}
 
@@ -500,6 +538,21 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
       </Modal>
     </div>
   );
+
+  function answerQuestion(qid: number) {
+    let text = "";
+    modal.confirm({
+      title: "Ответ подрядчику",
+      content: <Input.TextArea rows={3} placeholder="Ваш ответ…" onChange={(e) => (text = e.target.value)} />,
+      okText: "Отправить", cancelText: "Отмена",
+      onOk: async () => {
+        if (selectedMrId === null || !text.trim()) return;
+        await answerMrQuestion(selectedMrId, qid, text.trim());
+        await reload();
+        message.success("Ответ отправлен");
+      },
+    });
+  }
 
   function addTag() {
     let code = ""; let name = "";

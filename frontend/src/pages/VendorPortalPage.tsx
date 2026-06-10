@@ -6,7 +6,9 @@ import { useEffect, useState } from "react";
 import {
   clearVendorSession,
   getVendorSession,
+  vendorAskQuestion,
   vendorGetMr,
+  vendorListQuestions,
   vendorRequestCode,
   vendorSetChecklistAnswer,
   vendorSetQuote,
@@ -15,7 +17,7 @@ import {
 } from "../api";
 import LanguageSwitcher from "../components/LanguageSwitcher";
 import { useI18n } from "../i18n";
-import type { MrStatus, VendorMrChecklistItem, VendorMrDocumentView, VendorMrTagView, VendorMrView } from "../types";
+import type { MrQuestionItem, MrStatus, VendorMrChecklistItem, VendorMrDocumentView, VendorMrTagView, VendorMrView } from "../types";
 import { formatDeadlineRu } from "../utils/datetime";
 
 const MR_STATUS_LABEL: Record<MrStatus, string> = {
@@ -52,6 +54,12 @@ export default function VendorPortalPage({ invitationId, token }: Props): JSX.El
   const [mr, setMr] = useState<VendorMrView | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [closed, setClosed] = useState(false);
+  const [questions, setQuestions] = useState<MrQuestionItem[]>([]);
+  const [questionText, setQuestionText] = useState("");
+
+  const loadQuestions = async () => {
+    try { setQuestions(await vendorListQuestions()); } catch { setQuestions([]); }
+  };
 
   const loadMr = async () => {
     try {
@@ -60,6 +68,7 @@ export default function VendorPortalPage({ invitationId, token }: Props): JSX.El
       setStep("portal");
       setLoadError(null);
       setClosed(false);
+      void loadQuestions();
     } catch (error) {
       const msg = error instanceof Error ? error.message : "";
       // MR не в статусе приёма — ссылка не открывается.
@@ -211,6 +220,15 @@ export default function VendorPortalPage({ invitationId, token }: Props): JSX.El
       await loadMr();
     } catch (e) { message.error(e instanceof Error ? e.message : "Error"); }
   };
+  const askQuestion = async () => {
+    if (!questionText.trim()) return;
+    try {
+      await vendorAskQuestion({ body: questionText.trim() });
+      setQuestionText("");
+      await loadQuestions();
+      message.success(t("portal.saved"));
+    } catch (e) { message.error(e instanceof Error ? e.message : "Error"); }
+  };
 
   // Цена по тегу — редактируемая колонка (когда приём открыт).
   const priceTagColumns: ColumnsType<VendorMrTagView> = [
@@ -323,6 +341,38 @@ export default function VendorPortalPage({ invitationId, token }: Props): JSX.El
             </div>
           ) : null,
         )}
+      </Card>
+
+      <Card title={t("portal.questions")}>
+        {editable && (
+          <Space.Compact style={{ width: "100%", marginBottom: 12 }}>
+            <Input
+              placeholder={t("portal.askPlaceholder")}
+              value={questionText}
+              onChange={(e) => setQuestionText(e.target.value)}
+              onPressEnter={askQuestion}
+            />
+            <Button type="primary" onClick={askQuestion} disabled={!questionText.trim()}>{t("portal.ask")}</Button>
+          </Space.Compact>
+        )}
+        {questions.length === 0 && <Typography.Text type="secondary">{t("portal.noQuestions")}</Typography.Text>}
+        <Space direction="vertical" size={10} style={{ width: "100%" }}>
+          {questions.map((q) => (
+            <div key={q.id} style={{ borderLeft: "3px solid #d9d9d9", paddingLeft: 10 }}>
+              <Space size={6}>
+                <Typography.Text strong>{q.author_label}</Typography.Text>
+                {q.is_public && <Tag color="blue">{t("portal.public")}</Tag>}
+              </Space>
+              <Typography.Paragraph style={{ margin: "2px 0" }}>{q.body}</Typography.Paragraph>
+              {q.replies.map((r) => (
+                <div key={r.id} style={{ marginLeft: 16, marginTop: 4 }}>
+                  <Typography.Text type={r.is_owner ? "success" : undefined} strong>{r.author_label}: </Typography.Text>
+                  <Typography.Text>{r.body}</Typography.Text>
+                </div>
+              ))}
+            </div>
+          ))}
+        </Space>
       </Card>
     </Space>,
   );

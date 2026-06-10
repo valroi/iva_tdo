@@ -26,6 +26,8 @@ from app.models import (
     MrStatus,
     MrTag,
     MrVendorItem,
+    MrQuestion,
+    MrQuestionVisibility,
     Project,
     User,
     UserRole,
@@ -42,9 +44,13 @@ from app.schemas import (
     MrTagRead,
     MrTagUpdate,
     MrUpdate,
+    MrQuestionRead,
+    MrQuestionReply,
     MrVendorItemCreate,
     MrVendorItemRead,
     MrVendorItemUpdate,
+    QuestionAnswerCreate,
+    QuestionVisibilitySet,
     ReqImportResult,
     VendorInvitationCreate,
     VendorInvitationCreated,
@@ -885,3 +891,104 @@ def export_report_xlsx(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
+
+
+# --------------------------------------------------------------------- Q&A (owner side)
+def _q_author_label(db: Session, q: MrQuestion) -> str:
+    if q.invitation_id is None:
+        return "Заказчик"
+    inv = db.query(VendorInvitation).filter(VendorInvitation.id == q.invitation_id).first()
+    return inv.vendor_company_name if inv else "Поставщик"
+
+
+def _owner_question_read(db: Session, q: MrQuestion) -> MrQuestionRead:
+    replies = (
+        db.query(MrQuestion).filter(MrQuestion.parent_id == q.id).order_by(MrQuestion.id.asc()).all()
+    )
+    return MrQuestionRead(
+        id=q.id,
+        body=q.body,
+        author_label=_q_author_label(db, q),
+        is_public=q.visibility == MrQuestionVisibility.PUBLIC,
+        mr_owner_item_id=q.mr_owner_item_id,
+        mr_vendor_item_id=q.mr_vendor_item_id,
+        created_at=q.created_at,
+        replies=[
+            MrQuestionReply(
+                id=r.id, body=r.body, is_owner=r.invitation_id is None,
+                author_label=_q_author_label(db, r), created_at=r.created_at,
+            )
+            for r in replies
+        ],
+    )
+
+
+@router.get("/mr/{mr_id}/questions", response_model=list[MrQuestionRead])
+def list_questions(
+    mr_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """LR/admin видит ВСЕ вопросы подрядчиков по MR (с именами компаний)."""
+    mr = _get_mr_or_404(db, mr_id)
+    ensure_can_manage_mr(db, user=current_user, mr=mr)
+    questions = (
+        db.query(MrQuestion)
+        .filter(MrQuestion.mr_id == mr.id, MrQuestion.parent_id.is_(None))
+        .order_by(MrQuestion.id.desc())
+        .all()
+    )
+    return [_owner_question_read(db, q) for q in questions]
+
+
+@router.post("/mr/{mr_id}/questions/{question_id}/answer", response_model=MrQuestionRead)
+def answer_question(
+    mr_id: int,
+    question_id: int,
+    payload: QuestionAnswerCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """LR/admin отвечает на вопрос подрядчика. Уведомление автору."""
+    mr = _get_mr_or_404(db, mr_id)
+    ensure_can_manage_mr(db, user=current_user, mr=mr)
+    q = db.query(MrQuestion).filter(MrQuestion.id == question_id, MrQuestion.mr_id == mr.id, MrQuestion.parent_id.is_(None)).first()
+    if q is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found")
+    body = (payload.body or "").strip()
+    if not body:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty answer")
+    reply = MrQuestion(
+        mr_id=mr.id, invitation_id=None, parent_id=q.id, body=body,
+        visibility=q.visibility, answered_by_id=current_user.id, answered_at=__import__("datetime").datetime.utcnow(),
+    )
+    db.add(reply)
+    db.commit()
+    write_audit(db, action="owner_answered_question", mr_id=mr.id, actor_user_id=current_user.id, request=request, summary=f"q={q.id}")
+    db.refresh(q)
+    return _owner_question_read(db, q)
+
+
+@router.post("/mr/{mr_id}/questions/{question_id}/visibility", response_model=MrQuestionRead)
+def set_question_visibility(
+    mr_id: int,
+    question_id: int,
+    payload: QuestionVisibilitySet,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Сделать вопрос+ответ публичным (виден всем подрядчикам MR) или приватным."""
+    mr = _get_mr_or_404(db, mr_id)
+    ensure_can_manage_mr(db, user=current_user, mr=mr)
+    q = db.query(MrQuestion).filter(MrQuestion.id == question_id, MrQuestion.mr_id == mr.id, MrQuestion.parent_id.is_(None)).first()
+    if q is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found")
+    vis = MrQuestionVisibility.PUBLIC if payload.public else MrQuestionVisibility.PRIVATE
+    q.visibility = vis
+    # Реплики наследуют видимость родителя.
+    for r in db.query(MrQuestion).filter(MrQuestion.parent_id == q.id).all():
+        r.visibility = vis
+    db.commit()
+    db.refresh(q)
+    return _owner_question_read(db, q)

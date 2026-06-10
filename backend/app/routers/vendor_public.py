@@ -32,21 +32,27 @@ from app.models import (
     MaterialRequisition,
     MrOwnerFile,
     MrOwnerItem,
+    MrQuestion,
+    MrQuestionVisibility,
     MrStatus,
     MrTag,
     MrVendorItem,
+    Notification,
     VendorInvitation,
     VendorItemResponse,
     VendorQuote,
     VendorUpload,
 )
 from app.schemas import (
+    MrQuestionRead,
+    MrQuestionReply,
     VendorChecklistAnswerSet,
     VendorMrDocumentView,
     VendorMrTagView,
     VendorMrView,
     VendorMyQuote,
     VendorMyResponse,
+    VendorQuestionCreate,
     VendorQuoteSet,
     VendorRequestCode,
     VendorSessionResponse,
@@ -355,3 +361,103 @@ def _mask_email(email: str) -> str:
         return f"{masked}@{domain}"
     except ValueError:
         return "***"
+
+
+# ------------------------------------------------- PR-4c: вопросы подрядчика
+def _question_replies(db, q) -> list:
+    rows = (
+        db.query(MrQuestion)
+        .filter(MrQuestion.parent_id == q.id)
+        .order_by(MrQuestion.id.asc())
+        .all()
+    )
+    out = []
+    for r in rows:
+        is_owner = r.invitation_id is None
+        out.append(
+            MrQuestionReply(
+                id=r.id,
+                body=r.body,
+                is_owner=is_owner,
+                author_label=("Заказчик" if is_owner else "Поставщик"),
+                created_at=r.created_at,
+            )
+        )
+    return out
+
+
+@router.get("/public/vendor/questions", response_model=list[MrQuestionRead])
+def vendor_list_questions(
+    db: Session = Depends(get_db),
+    inv: VendorInvitation = Depends(require_vendor_session),
+):
+    """Вопросы, видимые этому подрядчику: свои (любые) + публичные от других.
+    Чужие приватные не видны. Авторы чужих публичных — анонимны."""
+    mr = _ensure_mr_accepting(db, inv.mr_id)
+    questions = (
+        db.query(MrQuestion)
+        .filter(MrQuestion.mr_id == mr.id, MrQuestion.parent_id.is_(None))
+        .order_by(MrQuestion.id.desc())
+        .all()
+    )
+    out = []
+    for q in questions:
+        mine = q.invitation_id == inv.id
+        is_public = q.visibility == MrQuestionVisibility.PUBLIC
+        if not (mine or is_public):
+            continue
+        out.append(
+            MrQuestionRead(
+                id=q.id,
+                body=q.body,
+                author_label=("Вы" if mine else "Поставщик"),
+                is_public=is_public,
+                mr_owner_item_id=q.mr_owner_item_id,
+                mr_vendor_item_id=q.mr_vendor_item_id,
+                created_at=q.created_at,
+                replies=_question_replies(db, q),
+            )
+        )
+    return out
+
+
+@router.post("/public/vendor/questions", response_model=MrQuestionRead, status_code=status.HTTP_201_CREATED)
+def vendor_create_question(
+    payload: VendorQuestionCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    inv: VendorInvitation = Depends(require_vendor_session),
+):
+    """Подрядчик задаёт вопрос (общий или по конкретному пункту). Уведомление
+    уходит ответственному LR этой MR."""
+    mr = _ensure_mr_accepting(db, inv.mr_id)
+    body = (payload.body or "").strip()
+    if not body:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty question")
+    q = MrQuestion(
+        mr_id=mr.id,
+        invitation_id=inv.id,
+        parent_id=None,
+        mr_owner_item_id=payload.mr_owner_item_id,
+        mr_vendor_item_id=payload.mr_vendor_item_id,
+        body=body,
+        visibility=MrQuestionVisibility.PRIVATE,
+    )
+    db.add(q)
+    db.flush()
+    # Уведомление LR (если назначен).
+    if mr.lr_user_id:
+        db.add(
+            Notification(
+                user_id=mr.lr_user_id,
+                event_type="VENDOR_QUESTION",
+                message=f"Вопрос поставщика по MR {mr.code}: {body[:120]}",
+            )
+        )
+    db.commit()
+    write_audit(db, action="vendor_question", mr_id=mr.id, invitation_id=inv.id, request=request)
+    return MrQuestionRead(
+        id=q.id, body=q.body, author_label="Вы", is_public=False,
+        mr_owner_item_id=q.mr_owner_item_id, mr_vendor_item_id=q.mr_vendor_item_id,
+        created_at=q.created_at, replies=[],
+    )

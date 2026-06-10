@@ -1139,3 +1139,21 @@ export async function downloadMrReportXlsx(mrId:number, code:string): Promise<vo
   const blob = await requestBlob(`/mr/${mrId}/report.xlsx`);
   downloadBlob(blob, `report_${code}.xlsx`);
 }
+
+// VQM PR-4c: Q&A — портал подрядчика
+export function vendorListQuestions(): Promise<import("./types").MrQuestionItem[]> {
+  return vendorRequest<import("./types").MrQuestionItem[]>(`/public/vendor/questions`);
+}
+export function vendorAskQuestion(payload:{ body:string; mr_owner_item_id?:number|null; mr_vendor_item_id?:number|null }): Promise<import("./types").MrQuestionItem> {
+  return vendorRequest(`/public/vendor/questions`, { method:"POST", body:JSON.stringify(payload) });
+}
+// VQM PR-4c: Q&A — сторона заказчика
+export function listMrQuestions(mrId:number): Promise<import("./types").MrQuestionItem[]> {
+  return request<import("./types").MrQuestionItem[]>(`/mr/${mrId}/questions`);
+}
+export function answerMrQuestion(mrId:number, qid:number, body:string): Promise<import("./types").MrQuestionItem> {
+  return request(`/mr/${mrId}/questions/${qid}/answer`, { method:"POST", body:JSON.stringify({ body }) });
+}
+export function setMrQuestionVisibility(mrId:number, qid:number, isPublic:boolean): Promise<import("./types").MrQuestionItem> {
+  return request(`/mr/${mrId}/questions/${qid}/visibility`, { method:"POST", body:JSON.stringify({ public:isPublic }) });
+}

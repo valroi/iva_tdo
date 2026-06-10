@@ -64,6 +64,12 @@ const DICT: Dict = {
   "portal.saved": { ru: "Сохранено", en: "Saved" },
   "portal.upload": { ru: "Загрузить", en: "Upload" },
   "portal.notePlaceholder": { ru: "Примечание", en: "Note" },
+  "portal.questions": { ru: "Вопросы заказчику", en: "Questions to the owner" },
+  "portal.askPlaceholder": { ru: "Ваш вопрос заказчику…", en: "Your question to the owner…" },
+  "portal.ask": { ru: "Задать вопрос", en: "Ask" },
+  "portal.noQuestions": { ru: "Вопросов пока нет.", en: "No questions yet." },
+  "portal.public": { ru: "Публичный", en: "Public" },
+  "portal.answer": { ru: "Ответ", en: "Answer" },
 };
 
 interface I18nValue {

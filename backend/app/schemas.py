@@ -1059,3 +1059,37 @@ class VendorReport(BaseModel):
     currency: str
     vendors: list[VendorReportVendor]
     rows: list[VendorReportRow]
+
+
+# --- VQM PR-4c: вопросы/ответы (Q&A) ---
+class VendorQuestionCreate(BaseModel):
+    body: str
+    mr_owner_item_id: int | None = None
+    mr_vendor_item_id: int | None = None
+
+
+class QuestionAnswerCreate(BaseModel):
+    body: str
+
+
+class QuestionVisibilitySet(BaseModel):
+    public: bool
+
+
+class MrQuestionReply(BaseModel):
+    id: int
+    body: str
+    is_owner: bool                 # ответ заказчика (LR) или реплика подрядчика
+    author_label: str              # «Заказчик» / название компании / «Поставщик»
+    created_at: datetime
+
+
+class MrQuestionRead(BaseModel):
+    id: int
+    body: str
+    author_label: str
+    is_public: bool
+    mr_owner_item_id: int | None
+    mr_vendor_item_id: int | None
+    created_at: datetime
+    replies: list[MrQuestionReply] = []

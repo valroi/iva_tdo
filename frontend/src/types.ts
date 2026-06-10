@@ -543,3 +543,9 @@ export interface VendorReportVendor { invitation_id:number; company_name:string;
 export interface VendorReportCell { invitation_id:number; price:number|null; note:string|null; }
 export interface VendorReportRow { tag_id:number; sr_no:string|null; item_no:string|null; name:string; quantity:number|null; unit:string|null; cells:VendorReportCell[]; min_invitation_id:number|null; }
 export interface VendorReport { mr_id:number; code:string; currency:string; vendors:VendorReportVendor[]; rows:VendorReportRow[]; }
+
+export interface MrQuestionReply { id:number; body:string; is_owner:boolean; author_label:string; created_at:string; }
+export interface MrQuestionItem {
+  id:number; body:string; author_label:string; is_public:boolean;
+  mr_owner_item_id:number|null; mr_vendor_item_id:number|null; created_at:string; replies:MrQuestionReply[];
+}
