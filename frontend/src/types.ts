@@ -456,3 +456,50 @@ export interface MrDocumentItem {
   uploaded_by_id: number;
   created_at: string;
 }
+
+export interface VendorInvitationItem {
+  id: number;
+  mr_id: number;
+  vendor_company_name: string;
+  vendor_contact_email: string;
+  expires_at: string | null;
+  revoked_at: string | null;
+  email_verified_at: string | null;
+  last_seen_at: string | null;
+  created_at: string;
+}
+
+export interface VendorInvitationCreated extends VendorInvitationItem {
+  invitation_link: string;
+  token: string;
+}
+
+export interface VendorMrTagView {
+  id: number;
+  tag_code: string;
+  name: string;
+  quantity: number | null;
+  unit: string | null;
+  note: string | null;
+}
+
+export interface VendorMrDocumentView {
+  id: number;
+  title: string;
+  file_name: string;
+  size_bytes: number | null;
+}
+
+export interface VendorMrView {
+  mr_id: number;
+  code: string;
+  title: string;
+  description: string | null;
+  currency: string;
+  deadline_at: string | null;
+  status: MrStatus;
+  is_open: boolean;
+  vendor_company_name: string;
+  tags: VendorMrTagView[];
+  documents: VendorMrDocumentView[];
+}

@@ -791,3 +791,81 @@ class MrDocumentRead(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# --- VQM: приглашения и гостевой портал ---
+
+class VendorInvitationCreate(BaseModel):
+    vendor_company_name: str
+    vendor_contact_email: EmailStr
+    expires_at: datetime | None = None
+
+
+class VendorInvitationRead(BaseModel):
+    id: int
+    mr_id: int
+    vendor_company_name: str
+    vendor_contact_email: str
+    expires_at: datetime | None
+    revoked_at: datetime | None
+    email_verified_at: datetime | None
+    last_seen_at: datetime | None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class VendorInvitationCreated(VendorInvitationRead):
+    # Одноразовая выдача ссылки и токена — только при создании.
+    invitation_link: str
+    token: str
+
+
+class VendorRequestCode(BaseModel):
+    token: str
+
+
+class VendorVerify(BaseModel):
+    token: str
+    code: str
+
+
+class VendorSessionResponse(BaseModel):
+    session_token: str
+    mr_code: str
+    mr_title: str
+
+
+# Гостевое представление MR (read-only состав, без чужих данных).
+class VendorMrTagView(BaseModel):
+    id: int
+    tag_code: str
+    name: str
+    quantity: float | None
+    unit: str | None
+    note: str | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class VendorMrDocumentView(BaseModel):
+    id: int
+    title: str
+    file_name: str
+    size_bytes: int | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class VendorMrView(BaseModel):
+    mr_id: int
+    code: str
+    title: str
+    description: str | None
+    currency: str
+    deadline_at: datetime | None
+    status: MrStatus
+    is_open: bool
+    vendor_company_name: str
+    tags: list[VendorMrTagView]
+    documents: list[VendorMrDocumentView]

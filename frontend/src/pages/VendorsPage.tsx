@@ -20,19 +20,30 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   createMr,
+  createMrInvitation,
   createMrTag,
   deleteMr,
   deleteMrDocument,
   deleteMrTag,
   listMr,
   listMrDocuments,
+  listMrInvitations,
   listMrTags,
   listProjects,
+  revokeMrInvitation,
   updateMr,
   uploadMrDocument,
 } from "../api";
 import ProcessHint from "../components/ProcessHint";
-import type { MrDocumentItem, MrItem, MrStatus, MrTagItem, ProjectItem, User } from "../types";
+import type {
+  MrDocumentItem,
+  MrItem,
+  MrStatus,
+  MrTagItem,
+  ProjectItem,
+  User,
+  VendorInvitationItem,
+} from "../types";
 import { formatDeadlineRu } from "../utils/datetime";
 
 interface Props {
@@ -60,10 +71,14 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
   const [selectedMrId, setSelectedMrId] = useState<number | null>(null);
   const [tags, setTags] = useState<MrTagItem[]>([]);
   const [documents, setDocuments] = useState<MrDocumentItem[]>([]);
+  const [invitations, setInvitations] = useState<VendorInvitationItem[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [tagOpen, setTagOpen] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [createdLink, setCreatedLink] = useState<string | null>(null);
   const [createForm] = Form.useForm();
   const [tagForm] = Form.useForm();
+  const [inviteForm] = Form.useForm();
   const [docFile, setDocFile] = useState<File | null>(null);
 
   const isContractor = currentUser.company_type === "contractor";
@@ -98,21 +113,32 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
     }
     void (async () => {
       try {
-        const [t, d] = await Promise.all([listMrTags(selectedMrId), listMrDocuments(selectedMrId)]);
+        const [t, d, inv] = await Promise.all([
+          listMrTags(selectedMrId),
+          listMrDocuments(selectedMrId),
+          listMrInvitations(selectedMrId),
+        ]);
         setTags(t);
         setDocuments(d);
+        setInvitations(inv);
       } catch {
         setTags([]);
         setDocuments([]);
+        setInvitations([]);
       }
     })();
   }, [selectedMrId]);
 
   const reloadDetails = async () => {
     if (selectedMrId === null) return;
-    const [t, d] = await Promise.all([listMrTags(selectedMrId), listMrDocuments(selectedMrId)]);
+    const [t, d, inv] = await Promise.all([
+      listMrTags(selectedMrId),
+      listMrDocuments(selectedMrId),
+      listMrInvitations(selectedMrId),
+    ]);
     setTags(t);
     setDocuments(d);
+    setInvitations(inv);
     await loadMr();
   };
 
@@ -358,8 +384,134 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
             pagination={false}
             locale={{ emptyText: "Нет документов" }}
           />
+
+          <Space style={{ width: "100%", justifyContent: "space-between", marginTop: 20, marginBottom: 8 }}>
+            <Typography.Text strong>Приглашённые подрядчики ({invitations.filter((i) => !i.revoked_at).length}/5)</Typography.Text>
+            <Button
+              size="small"
+              type="primary"
+              disabled={invitations.filter((i) => !i.revoked_at).length >= 5}
+              onClick={() => {
+                inviteForm.resetFields();
+                setInviteOpen(true);
+              }}
+            >
+              + Пригласить подрядчика
+            </Button>
+          </Space>
+          <Table
+            rowKey="id"
+            size="small"
+            pagination={false}
+            dataSource={invitations}
+            locale={{ emptyText: "Пока никто не приглашён" }}
+            columns={[
+              { title: "Компания", dataIndex: "vendor_company_name", key: "company", ellipsis: true },
+              { title: "Email", dataIndex: "vendor_contact_email", key: "email", ellipsis: true },
+              {
+                title: "Статус",
+                key: "status",
+                width: 160,
+                render: (_, row: VendorInvitationItem) =>
+                  row.revoked_at ? (
+                    <Tag color="error">Отозвано</Tag>
+                  ) : row.email_verified_at ? (
+                    <Tag color="success">Вошёл</Tag>
+                  ) : (
+                    <Tag color="processing">Приглашён</Tag>
+                  ),
+              },
+              {
+                title: "Действие",
+                key: "action",
+                width: 110,
+                render: (_, row: VendorInvitationItem) =>
+                  row.revoked_at ? null : (
+                    <Button
+                      size="small"
+                      danger
+                      onClick={async () => {
+                        if (selectedMrId === null) return;
+                        try {
+                          await revokeMrInvitation(selectedMrId, row.id);
+                          message.success("Приглашение отозвано");
+                          await reloadDetails();
+                        } catch (error) {
+                          message.error(error instanceof Error ? error.message : "Не удалось отозвать");
+                        }
+                      }}
+                    >
+                      Отозвать
+                    </Button>
+                  ),
+              },
+            ]}
+          />
         </Card>
       )}
+
+      <Modal
+        open={inviteOpen}
+        title="Пригласить подрядчика"
+        onCancel={() => setInviteOpen(false)}
+        onOk={() => inviteForm.submit()}
+        okText="Создать приглашение"
+        cancelText="Отмена"
+      >
+        <Form
+          form={inviteForm}
+          layout="vertical"
+          onFinish={async (values) => {
+            if (selectedMrId === null) return;
+            try {
+              const created = await createMrInvitation(selectedMrId, {
+                vendor_company_name: values.company,
+                vendor_contact_email: values.email,
+              });
+              setInviteOpen(false);
+              setCreatedLink(created.invitation_link);
+              message.success("Приглашение создано, ссылка отправлена на email");
+              await reloadDetails();
+            } catch (error) {
+              message.error(error instanceof Error ? error.message : "Не удалось создать приглашение");
+            }
+          }}
+        >
+          <Form.Item name="company" label="Название компании" rules={[{ required: true, message: "Введите название" }]}>
+            <Input placeholder="ООО Поставщик" />
+          </Form.Item>
+          <Form.Item name="email" label="Email для входа" rules={[{ required: true, type: "email", message: "Введите корректный email" }]}>
+            <Input placeholder="vendor@example.com" />
+          </Form.Item>
+          <Typography.Text type="secondary">
+            На указанный email уйдёт персональная ссылка. При входе подрядчик подтвердит её кодом из письма.
+          </Typography.Text>
+        </Form>
+      </Modal>
+
+      <Modal
+        open={createdLink !== null}
+        title="Ссылка-приглашение создана"
+        onCancel={() => setCreatedLink(null)}
+        footer={[
+          <Button key="copy" type="primary" onClick={() => { if (createdLink) { void navigator.clipboard.writeText(createdLink); message.success("Скопировано"); } }}>
+            Скопировать ссылку
+          </Button>,
+          <Button key="close" onClick={() => setCreatedLink(null)}>
+            Закрыть
+          </Button>,
+        ]}
+      >
+        <Space direction="vertical" size={8} style={{ width: "100%" }}>
+          <Typography.Text>
+            Ссылка отправлена подрядчику на email. Можете также скопировать её вручную (показывается один раз):
+          </Typography.Text>
+          <Input.TextArea value={createdLink ?? ""} readOnly autoSize={{ minRows: 2, maxRows: 4 }} />
+          <Typography.Text type="warning">
+            Ссылка персональная и даёт доступ только к этой MR. Не публикуйте её.
+          </Typography.Text>
+        </Space>
+      </Modal>
 
       <Modal
         open={createOpen}

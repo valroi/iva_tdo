@@ -41,6 +41,7 @@ import CrsPage from "./pages/CrsPage";
 import ReportingPage from "./pages/ReportingPage";
 import DocCheckerPage from "./pages/DocCheckerPage";
 import VendorsPage from "./pages/VendorsPage";
+import VendorPortalPage from "./pages/VendorPortalPage";
 import type { DocumentItem, MDRRecord, NotificationItem, ProjectItem, User, WorkflowStatus } from "./types";
 
 const { Header, Sider, Content } = Layout;
@@ -93,7 +94,35 @@ class UiErrorBoundary extends Component<{ children: JSX.Element }, { error: Erro
   }
 }
 
+// Гостевой портал подрядчика: #/vendor/<invitationId>?t=<token>.
+// Распознаём ДО логина — внешний подрядчик не входит в основную систему.
+function parseVendorPortal(): { invitationId: number; token: string } | null {
+  if (typeof window === "undefined") return null;
+  const hash = window.location.hash.replace(/^#\/?/, "");
+  const [path] = hash.split("?");
+  const segments = path.split("/");
+  if (segments[0] !== "vendor" || !segments[1]) return null;
+  const invitationId = Number(segments[1]);
+  if (!Number.isFinite(invitationId)) return null;
+  const search = new URLSearchParams(window.location.hash.split("?")[1] ?? "");
+  const token = search.get("t") ?? "";
+  if (!token) return null;
+  return { invitationId, token };
+}
+
 export default function App(): JSX.Element {
+  const vendorPortal = parseVendorPortal();
+  if (vendorPortal) {
+    return (
+      <UiErrorBoundary>
+        <VendorPortalPage invitationId={vendorPortal.invitationId} token={vendorPortal.token} />
+      </UiErrorBoundary>
+    );
+  }
+  return <MainApp />;
+}
+
+function MainApp(): JSX.Element {
   const [authenticated, setAuthenticated] = useState(hasAccessToken());
   const [loading, setLoading] = useState(false);
   // Активная секция и открытая ревизия сохраняются в URL hash, чтобы F5

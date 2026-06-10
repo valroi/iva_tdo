@@ -1016,3 +1016,86 @@ export function uploadMrDocument(mrId: number, file: File, title?: string): Prom
 export function deleteMrDocument(mrId: number, docId: number): Promise<void> {
   return request<void>(`/mr/${mrId}/documents/${docId}`, { method: "DELETE" });
 }
+
+// --- VQM: приглашения (внутренний API) ---
+export function listMrInvitations(mrId: number): Promise<import("./types").VendorInvitationItem[]> {
+  return request<import("./types").VendorInvitationItem[]>(`/mr/${mrId}/invitations`);
+}
+
+export function createMrInvitation(
+  mrId: number,
+  payload: { vendor_company_name: string; vendor_contact_email: string; expires_at?: string | null },
+): Promise<import("./types").VendorInvitationCreated> {
+  return request<import("./types").VendorInvitationCreated>(`/mr/${mrId}/invitations`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function revokeMrInvitation(mrId: number, invitationId: number): Promise<import("./types").VendorInvitationItem> {
+  return request<import("./types").VendorInvitationItem>(`/mr/${mrId}/invitations/${invitationId}/revoke`, {
+    method: "POST",
+  });
+}
+
+// --- VQM: гостевой портал подрядчика (отдельная сессия, без основного JWT) ---
+const VENDOR_SESSION_KEY = "tdo_vendor_session";
+
+export function getVendorSession(): string | null {
+  return typeof window !== "undefined" ? sessionStorage.getItem(VENDOR_SESSION_KEY) : null;
+}
+
+export function setVendorSession(token: string): void {
+  sessionStorage.setItem(VENDOR_SESSION_KEY, token);
+}
+
+export function clearVendorSession(): void {
+  sessionStorage.removeItem(VENDOR_SESSION_KEY);
+}
+
+async function vendorRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers ?? {});
+  const session = getVendorSession();
+  if (session) headers.set("Authorization", `Bearer ${session}`);
+  if (!(init.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  const response = await fetch(`${PREFIX}${path}`, { ...init, headers });
+  if (!response.ok) {
+    const rawText = await response.text();
+    let msg = rawText || "Request failed";
+    try {
+      const parsed = JSON.parse(rawText) as { detail?: string };
+      if (parsed?.detail) msg = parsed.detail;
+    } catch {
+      // keep raw
+    }
+    throw new Error(msg);
+  }
+  if (response.status === 204) return undefined as T;
+  return (await response.json()) as T;
+}
+
+export function vendorRequestCode(invitationId: number, token: string): Promise<{ status: string; email_masked: string }> {
+  return vendorRequest(`/public/vendor/${invitationId}/request-code`, {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}
+
+export async function vendorVerifyCode(
+  invitationId: number,
+  token: string,
+  code: string,
+): Promise<{ session_token: string; mr_code: string; mr_title: string }> {
+  const res = await vendorRequest<{ session_token: string; mr_code: string; mr_title: string }>(
+    `/public/vendor/${invitationId}/verify`,
+    { method: "POST", body: JSON.stringify({ token, code }) },
+  );
+  setVendorSession(res.session_token);
+  return res;
+}
+
+export function vendorGetMr(): Promise<import("./types").VendorMrView> {
+  return vendorRequest<import("./types").VendorMrView>(`/public/vendor/me`);
+}

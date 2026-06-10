@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -37,10 +37,15 @@ from app.schemas import (
     MrTagRead,
     MrTagUpdate,
     MrUpdate,
+    VendorInvitationCreate,
+    VendorInvitationCreated,
+    VendorInvitationRead,
 )
+from app.services import vendor_email, vendor_invitations
 from app.services.vendor_security import (
     can_manage_mr,
     ensure_can_manage_mr,
+    write_audit,
 )
 
 router = APIRouter()
@@ -346,3 +351,117 @@ def delete_document(
     db.delete(doc)
     db.commit()
     return None
+
+
+# --------------------------------------------------------------------- Invitations
+@router.get("/mr/{mr_id}/invitations", response_model=list[VendorInvitationRead])
+def list_invitations(
+    mr_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    mr = _get_mr_or_404(db, mr_id)
+    ensure_can_manage_mr(db, user=current_user, mr=mr)
+    items = (
+        db.query(VendorInvitation)
+        .filter(VendorInvitation.mr_id == mr.id)
+        .order_by(VendorInvitation.id.asc())
+        .all()
+    )
+    return [VendorInvitationRead.model_validate(i, from_attributes=True) for i in items]
+
+
+@router.post(
+    "/mr/{mr_id}/invitations",
+    response_model=VendorInvitationCreated,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_invitation(
+    mr_id: int,
+    payload: VendorInvitationCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    mr = _get_mr_or_404(db, mr_id)
+    ensure_can_manage_mr(db, user=current_user, mr=mr)
+    # Бизнес-ограничение: не больше N подрядчиков на MR.
+    active_count = (
+        db.query(VendorInvitation)
+        .filter(VendorInvitation.mr_id == mr.id, VendorInvitation.revoked_at.is_(None))
+        .count()
+    )
+    if active_count >= settings.vendor_max_invitations_per_mr:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Maximum {settings.vendor_max_invitations_per_mr} vendors per MR",
+        )
+    token = vendor_invitations.generate_invitation_token()
+    inv = VendorInvitation(
+        mr_id=mr.id,
+        vendor_company_name=payload.vendor_company_name.strip(),
+        vendor_contact_email=payload.vendor_contact_email.strip().lower(),
+        token_hash=vendor_invitations.hash_secret(token),
+        expires_at=payload.expires_at or mr.deadline_at,
+        created_by_id=current_user.id,
+    )
+    db.add(inv)
+    db.commit()
+    db.refresh(inv)
+
+    link = vendor_invitations.build_invitation_link(inv.id, token)
+    # Письмо-приглашение со ссылкой (код придёт отдельно при входе).
+    try:
+        vendor_email.send_invitation_link(
+            to=inv.vendor_contact_email,
+            company_name=inv.vendor_company_name,
+            mr_code=mr.code,
+            link=link,
+        )
+    except Exception:  # noqa: BLE001 — письмо не должно ронять создание
+        pass
+    write_audit(
+        db,
+        action="invitation_created",
+        mr_id=mr.id,
+        invitation_id=inv.id,
+        actor_user_id=current_user.id,
+        request=request,
+        summary=f"vendor={inv.vendor_company_name}",
+    )
+
+    base = VendorInvitationRead.model_validate(inv, from_attributes=True)
+    return VendorInvitationCreated(**base.model_dump(), invitation_link=link, token=token)
+
+
+@router.post("/mr/{mr_id}/invitations/{invitation_id}/revoke", response_model=VendorInvitationRead)
+def revoke_invitation(
+    mr_id: int,
+    invitation_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from datetime import datetime as _dt
+
+    mr = _get_mr_or_404(db, mr_id)
+    ensure_can_manage_mr(db, user=current_user, mr=mr)
+    inv = (
+        db.query(VendorInvitation)
+        .filter(VendorInvitation.id == invitation_id, VendorInvitation.mr_id == mr.id)
+        .first()
+    )
+    if inv is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitation not found")
+    inv.revoked_at = _dt.utcnow()
+    db.commit()
+    db.refresh(inv)
+    write_audit(
+        db,
+        action="invitation_revoked",
+        mr_id=mr.id,
+        invitation_id=inv.id,
+        actor_user_id=current_user.id,
+        request=request,
+    )
+    return VendorInvitationRead.model_validate(inv, from_attributes=True)

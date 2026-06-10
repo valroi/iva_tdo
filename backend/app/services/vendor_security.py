@@ -16,16 +16,21 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from app.auth import TokenError, decode_vendor_session_token
+from app.database import get_db
 from app.models import (
     MaterialRequisition,
     MrStatus,
     ReviewMatrixMember,
     User,
     UserRole,
+    VendorAuditLog,
+    VendorInvitation,
 )
+from app.services import vendor_invitations
 
 
 def _is_project_lr(db: Session, *, user: User, project_id: int) -> bool:
@@ -80,3 +85,77 @@ def ensure_mr_open(mr: MaterialRequisition) -> None:
             status_code=status.HTTP_409_CONFLICT,
             detail="MR deadline has passed — submissions are closed",
         )
+
+
+# =====================================================================
+#  Гостевой контекст подрядчика — ПОЛНОСТЬЮ отдельный от пользовательского
+#  JWT. require_vendor_session() декодирует ТОЛЬКО vendor-токены и не
+#  пускает обычных пользователей. Это разделение на уровне dependency.
+# =====================================================================
+
+
+def require_vendor_session(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> VendorInvitation:
+    """Достаёт активное приглашение из vendor-токена (заголовок
+    Authorization: Bearer <vendor_token>). 404 на любую проблему —
+    не подтверждаем существование объектов внешнему наблюдателю."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Vendor session required")
+    token = authorization.split(" ", 1)[1].strip()
+    try:
+        invitation_id = decode_vendor_session_token(token)
+    except TokenError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid vendor session")
+    inv = db.query(VendorInvitation).filter(VendorInvitation.id == invitation_id).first()
+    if inv is None or not vendor_invitations.is_active(inv):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    # Лёгкий аудит присутствия: фиксируем последний визит.
+    inv.last_seen_at = datetime.utcnow()
+    if request.client:
+        inv.last_seen_ip = request.client.host
+    db.commit()
+    return inv
+
+
+def vendor_owns_mr(inv: VendorInvitation, mr: MaterialRequisition) -> None:
+    """Инвариант изоляции: ресурс должен принадлежать MR этого приглашения.
+    Вызывается в каждом guest-endpoint, который работает с MR."""
+    if inv.mr_id != mr.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+
+def write_audit(
+    db: Session,
+    *,
+    action: str,
+    mr_id: int | None = None,
+    invitation_id: int | None = None,
+    actor_user_id: int | None = None,
+    request: Request | None = None,
+    summary: str | None = None,
+) -> None:
+    """Пишет запись в vendor_audit_logs. Аудит не должен ронять запрос —
+    ошибки проглатываются."""
+    try:
+        ip = None
+        ua = None
+        if request is not None:
+            ip = request.client.host if request.client else None
+            ua = request.headers.get("user-agent")
+        db.add(
+            VendorAuditLog(
+                mr_id=mr_id,
+                invitation_id=invitation_id,
+                actor_user_id=actor_user_id,
+                action=action,
+                ip=ip,
+                user_agent=(ua or "")[:255] or None,
+                payload_summary=summary,
+            )
+        )
+        db.commit()
+    except Exception:  # noqa: BLE001
+        db.rollback()
