@@ -63,6 +63,7 @@ const DICT: Dict = {
   "portal.priceHint": { ru: "Укажите цену по каждой позиции и сохраните.", en: "Enter a price for each item and save." },
   "portal.saved": { ru: "Сохранено", en: "Saved" },
   "portal.upload": { ru: "Загрузить", en: "Upload" },
+  "portal.download": { ru: "Скачать", en: "Download" },
   "portal.notePlaceholder": { ru: "Примечание", en: "Note" },
   "portal.questions": { ru: "Вопросы заказчику", en: "Questions to the owner" },
   "portal.askPlaceholder": { ru: "Ваш вопрос заказчику…", en: "Your question to the owner…" },

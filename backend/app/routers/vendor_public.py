@@ -461,3 +461,22 @@ def vendor_create_question(
         mr_owner_item_id=q.mr_owner_item_id, mr_vendor_item_id=q.mr_vendor_item_id,
         created_at=q.created_at, replies=[],
     )
+
+
+@router.get("/public/vendor/owner-files/{file_id}")
+def vendor_download_owner_file(
+    file_id: int,
+    db: Session = Depends(get_db),
+    inv: VendorInvitation = Depends(require_vendor_session),
+):
+    """Скачивание документа заказчика подрядчиком. Только файлы СВОЕЙ MR
+    (изоляция) и только пока приём открыт. Отдаётся как attachment."""
+    from fastapi.responses import FileResponse
+
+    mr = _ensure_mr_accepting(db, inv.mr_id)
+    f = db.query(MrOwnerFile).filter(MrOwnerFile.id == file_id, MrOwnerFile.mr_id == mr.id).first()
+    if f is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    if not Path(f.file_path).exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing")
+    return FileResponse(f.file_path, filename=f.file_name, media_type="application/octet-stream")

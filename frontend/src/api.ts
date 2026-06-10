@@ -1158,3 +1158,17 @@ export function answerMrQuestion(mrId:number, qid:number, body:string): Promise<
 export function setMrQuestionVisibility(mrId:number, qid:number, isPublic:boolean): Promise<import("./types").MrQuestionItem> {
   return request(`/mr/${mrId}/questions/${qid}/visibility`, { method:"POST", body:JSON.stringify({ public:isPublic }) });
 }
+
+// VQM: скачивание документа заказчика подрядчиком (через vendor-сессию)
+export async function vendorDownloadOwnerFile(fileId: number, fileName: string): Promise<void> {
+  const session = getVendorSession();
+  const headers = new Headers();
+  if (session) headers.set("Authorization", `Bearer ${session}`);
+  const response = await fetch(`${PREFIX}/public/vendor/owner-files/${fileId}`, { headers });
+  if (!response.ok) {
+    const txt = await response.text();
+    throw new Error(txt || "Не удалось скачать файл");
+  }
+  const blob = await response.blob();
+  downloadBlob(blob, fileName);
+}

@@ -1,5 +1,5 @@
 import { App, Button, Card, Input, InputNumber, Result, Segmented, Space, Table, Tag, Typography, Upload } from "antd";
-import { UploadOutlined } from "@ant-design/icons";
+import { DownloadOutlined, UploadOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useState } from "react";
 
@@ -7,6 +7,7 @@ import {
   clearVendorSession,
   getVendorSession,
   vendorAskQuestion,
+  vendorDownloadOwnerFile,
   vendorGetMr,
   vendorListQuestions,
   vendorRequestCode,
@@ -137,6 +138,26 @@ export default function VendorPortalPage({ invitationId, token }: Props): JSX.El
       key: "size_bytes",
       width: 110,
       render: (v: number | null) => (v ? `${(v / 1024).toFixed(0)} КБ` : "—"),
+    },
+    {
+      title: "",
+      key: "download",
+      width: 130,
+      render: (_, row) => (
+        <Button
+          size="small"
+          icon={<DownloadOutlined />}
+          onClick={async () => {
+            try {
+              await vendorDownloadOwnerFile(row.id, row.file_name);
+            } catch (e) {
+              message.error(e instanceof Error ? e.message : "Error");
+            }
+          }}
+        >
+          {t("portal.download")}
+        </Button>
+      ),
     },
   ];
 
