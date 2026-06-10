@@ -732,11 +732,22 @@ def import_req(
     db.add(mr)
     db.flush()
 
+    # Коды тегов должны быть уникальны в пределах MR (UNIQUE-констрейнт).
+    # В некоторых REQ позиции дают одинаковый tag_code (обрезанное имя) —
+    # дедуплицируем, добавляя суффикс #N.
+    seen_codes: dict[str, int] = {}
     for i, t in enumerate(parsed.get("tags", [])):
+        base_code = (t.get("tag_code") or t.get("name") or "TAG")[:110].strip() or "TAG"
+        if base_code in seen_codes:
+            seen_codes[base_code] += 1
+            code = f"{base_code}#{seen_codes[base_code]}"
+        else:
+            seen_codes[base_code] = 1
+            code = base_code
         db.add(
             MrTag(
                 mr_id=mr.id, order_index=i, sr_no=t.get("sr_no"), item_no=t.get("item_no"),
-                tag_code=(t.get("tag_code") or t.get("name") or "TAG")[:120], name=(t.get("name") or "")[:255],
+                tag_code=code[:120], name=(t.get("name") or "")[:255],
                 quantity=t.get("quantity"), unit=t.get("unit"), note=t.get("note"),
             )
         )
