@@ -703,3 +703,62 @@ class VendorAuditLog(Base):
     user_agent: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     payload_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+# =====================================================================
+#  Модуль FEED — документация стадии FEED. Структура: Project →
+#  Discipline → FeedDocument (шифр, RU/EN название, класс 1/1А) →
+#  файлы (финальная ревизия; для класса 1А дополнительно ACRS).
+#  Всё в БД + файлы в feed_storage volume — переживает апдейты.
+# =====================================================================
+
+
+class FeedDocClass(str, enum.Enum):
+    C1 = "1"     # класс 1 — только финальная версия документа
+    C1A = "1A"   # класс 1А — документ + ACRS
+
+
+class FeedFileKind(str, enum.Enum):
+    REVISION = "REVISION"  # файл ревизии документа
+    ACRS = "ACRS"          # ACRS-приложение (для класса 1А)
+
+
+class FeedDocument(Base):
+    __tablename__ = "feed_documents"
+    __table_args__ = (UniqueConstraint("project_id", "doc_number", name="uq_feed_doc_number"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    discipline_code: Mapped[str] = mapped_column(String(20), nullable=False, index=True, default="00")
+    # Шифр без суффикса ревизии: IMP-FD-00-00-HM-REQ-262
+    doc_number: Mapped[str] = mapped_column(String(160), nullable=False, index=True)
+    title_en: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    title_ru: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    doc_class: Mapped[FeedDocClass] = mapped_column(Enum(FeedDocClass), nullable=False, default=FeedDocClass.C1)
+    doc_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)   # REQ/DSH/ESS/SDG...
+    latest_rev: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    issue_purpose: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    rev_date: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    # Извлечённый текст для полнотекстового/AI-поиска.
+    search_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+
+class FeedFile(Base):
+    __tablename__ = "feed_files"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    feed_document_id: Mapped[int] = mapped_column(ForeignKey("feed_documents.id"), nullable=False, index=True)
+    kind: Mapped[FeedFileKind] = mapped_column(Enum(FeedFileKind), nullable=False, default=FeedFileKind.REVISION)
+    rev: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    file_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    mime: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    uploaded_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)

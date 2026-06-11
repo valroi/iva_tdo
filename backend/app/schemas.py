@@ -1101,3 +1101,95 @@ class MrQuestionRead(BaseModel):
     mr_vendor_item_id: int | None
     created_at: datetime
     replies: list[MrQuestionReply] = []
+
+
+# =====================================================================
+#  Модуль FEED
+# =====================================================================
+
+from app.models import FeedDocClass, FeedFileKind  # noqa: E402
+
+
+class FeedFileRead(BaseModel):
+    id: int
+    feed_document_id: int
+    kind: FeedFileKind
+    rev: str | None
+    file_name: str
+    mime: str | None
+    size_bytes: int | None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FeedDocumentRead(BaseModel):
+    id: int
+    project_id: int
+    discipline_code: str
+    doc_number: str
+    title_en: str | None
+    title_ru: str | None
+    doc_class: FeedDocClass
+    doc_type: str | None
+    latest_rev: str | None
+    issue_purpose: str | None
+    rev_date: str | None
+    created_at: datetime
+    updated_at: datetime
+    files: list[FeedFileRead] = []
+    has_acrs: bool = False
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FeedDocumentUpdate(BaseModel):
+    discipline_code: str | None = None
+    doc_number: str | None = None
+    title_en: str | None = None
+    title_ru: str | None = None
+    doc_class: FeedDocClass | None = None
+    doc_type: str | None = None
+    latest_rev: str | None = None
+    issue_purpose: str | None = None
+
+
+class FeedUploadItemResult(BaseModel):
+    file_name: str
+    status: str                 # created | updated | failed
+    doc_number: str | None = None
+    document_id: int | None = None
+    detected_from: str | None = None  # stamp | filename | none
+    message: str | None = None
+
+
+class FeedUploadResult(BaseModel):
+    items: list[FeedUploadItemResult]
+    created: int
+    updated: int
+    failed: int
+
+
+class FeedSearchHit(BaseModel):
+    document_id: int
+    doc_number: str
+    title_en: str | None
+    title_ru: str | None
+    discipline_code: str
+    latest_rev: str | None
+    snippet: str | None
+
+
+class FeedAskResult(BaseModel):
+    answer: str
+    mode: str                    # ai | keyword
+    sources: list[FeedSearchHit] = []
+
+
+class MrFeedLink(BaseModel):
+    owner_item_id: int
+    owner_doc_number: str
+    owner_rev: str | None
+    feed_document_id: int | None
+    feed_latest_rev: str | None
+    rev_mismatch: bool

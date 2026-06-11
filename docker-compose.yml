@@ -48,6 +48,11 @@ services:
       # Базовый URL фронта — нужен, чтобы собрать ссылку-приглашение
       # подрядчику в письме (например https://tdo.company.ru).
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
+      # Модуль FEED: AI-поиск по документации (OpenAI-совместимый API,
+      # например Qwen/DashScope). Пусто — обычный полнотекстовый поиск.
+      AI_API_BASE_URL: ${AI_API_BASE_URL:-}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-qwen-plus}
     ports:
       - "8000:8000"
     volumes:
@@ -61,6 +66,9 @@ services:
       # проектных файлов — свой named volume. Изоляция + защита от
       # потери при апдейтах (как и tdo_uploads).
       - vendor_uploads:/data/vendor_uploads
+      # Модуль FEED: документация стадии FEED — свой volume, файлы
+      # переживают пересборки (раньше DOCchecker писал в /tmp и терял всё).
+      - feed_storage:/data/feed_storage
     depends_on:
       - db
       - redis
@@ -80,3 +88,4 @@ volumes:
   minio_data:
   tdo_uploads:
   vendor_uploads:
+  feed_storage:

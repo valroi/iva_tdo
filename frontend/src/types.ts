@@ -17,6 +17,7 @@ export interface UserPermissions {
   can_edit_workflow_statuses: boolean;
   can_process_tdo_queue: boolean;
   can_access_vendors: boolean;
+  can_access_feed: boolean;
 }
 
 export type CompanyType = "admin" | "owner" | "contractor";
@@ -553,3 +554,30 @@ export interface MrQuestionItem {
 }
 
 export interface VendorSubmitResult { status:string; missing_prices:string[]; missing_required:string[]; }
+
+// --- Модуль FEED ---
+export type FeedDocClass = "1" | "1A";
+export interface FeedFileItem {
+  id:number; feed_document_id:number; kind:"REVISION"|"ACRS"; rev:string|null;
+  file_name:string; mime:string|null; size_bytes:number|null; created_at:string;
+}
+export interface FeedDocumentItem {
+  id:number; project_id:number; discipline_code:string; doc_number:string;
+  title_en:string|null; title_ru:string|null; doc_class:FeedDocClass; doc_type:string|null;
+  latest_rev:string|null; issue_purpose:string|null; rev_date:string|null;
+  created_at:string; updated_at:string; files:FeedFileItem[]; has_acrs:boolean;
+}
+export interface FeedUploadItemResult {
+  file_name:string; status:string; doc_number:string|null; document_id:number|null;
+  detected_from:string|null; message:string|null;
+}
+export interface FeedUploadResult { items:FeedUploadItemResult[]; created:number; updated:number; failed:number; }
+export interface FeedSearchHit {
+  document_id:number; doc_number:string; title_en:string|null; title_ru:string|null;
+  discipline_code:string; latest_rev:string|null; snippet:string|null;
+}
+export interface FeedAskResult { answer:string; mode:string; sources:FeedSearchHit[]; }
+export interface MrFeedLink {
+  owner_item_id:number; owner_doc_number:string; owner_rev:string|null;
+  feed_document_id:number|null; feed_latest_rev:string|null; rev_mismatch:boolean;
+}

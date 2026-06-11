@@ -1176,3 +1176,46 @@ export async function vendorDownloadOwnerFile(fileId: number, fileName: string):
 export function vendorSubmit(): Promise<import("./types").VendorSubmitResult> {
   return vendorRequest(`/public/vendor/submit`, { method:"POST" });
 }
+
+// --- Модуль FEED ---
+export function listFeedDocuments(projectId?: number, discipline?: string): Promise<import("./types").FeedDocumentItem[]> {
+  const params = new URLSearchParams();
+  if (projectId) params.set("project_id", String(projectId));
+  if (discipline) params.set("discipline", discipline);
+  const qs = params.toString();
+  return request(`/feed/documents${qs ? `?${qs}` : ""}`);
+}
+export function uploadFeedDocuments(projectId: number, files: File[]): Promise<import("./types").FeedUploadResult> {
+  const form = new FormData();
+  for (const f of files) form.append("files", f);
+  return request(`/feed/upload?project_id=${projectId}`, { method: "POST", body: form });
+}
+export function updateFeedDocument(docId: number, payload: Partial<{ discipline_code:string; doc_number:string; title_en:string|null; title_ru:string|null; doc_class:string; doc_type:string|null; latest_rev:string|null }>): Promise<import("./types").FeedDocumentItem> {
+  return request(`/feed/documents/${docId}`, { method: "PATCH", body: JSON.stringify(payload) });
+}
+export function deleteFeedDocument(docId: number): Promise<void> {
+  return request<void>(`/feed/documents/${docId}`, { method: "DELETE" });
+}
+export function uploadFeedFile(docId: number, file: File, kind: "ACRS" | "REVISION" = "ACRS"): Promise<import("./types").FeedDocumentItem> {
+  const form = new FormData();
+  form.append("file", file);
+  return request(`/feed/documents/${docId}/files?kind=${kind}`, { method: "POST", body: form });
+}
+export function deleteFeedFile(fileId: number): Promise<void> {
+  return request<void>(`/feed/files/${fileId}`, { method: "DELETE" });
+}
+export async function downloadFeedFile(fileId: number, fileName: string): Promise<void> {
+  const blob = await requestBlob(`/feed/files/${fileId}`);
+  downloadBlob(blob, fileName);
+}
+export function searchFeed(q: string, projectId?: number): Promise<import("./types").FeedSearchHit[]> {
+  const params = new URLSearchParams({ q });
+  if (projectId) params.set("project_id", String(projectId));
+  return request(`/feed/search?${params.toString()}`);
+}
+export function askFeed(question: string, projectId?: number): Promise<import("./types").FeedAskResult> {
+  return request(`/feed/ask`, { method: "POST", body: JSON.stringify({ question, project_id: projectId ?? null }) });
+}
+export function getMrFeedLinks(mrId: number): Promise<import("./types").MrFeedLink[]> {
+  return request(`/mr/${mrId}/feed-links`);
+}

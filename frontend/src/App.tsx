@@ -39,7 +39,7 @@ import RevisionCardPage from "./pages/RevisionCardPage";
 import DocumentsRegistryPage from "./pages/DocumentsRegistryPage";
 import CrsPage from "./pages/CrsPage";
 import ReportingPage from "./pages/ReportingPage";
-import DocCheckerPage from "./pages/DocCheckerPage";
+import FeedPage from "./pages/FeedPage";
 import VendorsPage from "./pages/VendorsPage";
 import VendorPortalPage from "./pages/VendorPortalPage";
 import { I18nProvider } from "./i18n";
@@ -330,7 +330,7 @@ function MainApp(): JSX.Element {
     sessions: "Сессии",
     admin: "Администрирование",
     help: "Инструкция",
-    docchecker: "DOCchecker",
+    docchecker: "FEED",
   };
 
   if (!authenticated) {
@@ -349,7 +349,7 @@ function MainApp(): JSX.Element {
               options={[
                 { label: "DCC", value: "dcc" },
                 ...(user?.permissions.can_access_vendors ? [{ label: "Закупки", value: "vendors" }] : []),
-                { label: "DOCchecker", value: "docchecker" },
+                ...(user?.permissions.can_access_feed ? [{ label: "FEED", value: "docchecker" }] : []),
               ]}
               onChange={(value) => {
                 const next = value as AppModule;
@@ -363,7 +363,7 @@ function MainApp(): JSX.Element {
             mode="inline"
             items={
               activeModule === "docchecker"
-                ? [{ key: "docchecker", icon: <FileSearchOutlined />, label: "DOCchecker" }]
+                ? [{ key: "docchecker", icon: <FileSearchOutlined />, label: "FEED" }]
                 : activeModule === "vendors"
                 ? [{ key: "vendors", icon: <ShopOutlined />, label: "Вендоры" }]
                 : menuItems
@@ -401,7 +401,7 @@ function MainApp(): JSX.Element {
                 <Breadcrumb
                   style={{ marginBottom: 2 }}
                   items={[
-                    { title: activeModule === "docchecker" ? "DOCchecker" : activeModule === "vendors" ? "Закупки" : "DCC" },
+                    { title: activeModule === "docchecker" ? "FEED" : activeModule === "vendors" ? "Закупки" : "DCC" },
                     { title: sectionTitleMap[activeSection] },
                   ]}
                 />
@@ -543,7 +543,7 @@ function MainApp(): JSX.Element {
                 <AdminPage currentUser={user} onGlobalReload={loadInitialData} />
               )}
               {activeSection === "help" && user && <HelpPage currentUser={user} />}
-              {activeSection === "docchecker" && user && <DocCheckerPage />}
+              {activeSection === "docchecker" && user && <FeedPage currentUser={user} />}
               </div>
             )}
           </Content>

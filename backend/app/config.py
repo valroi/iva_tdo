@@ -51,6 +51,16 @@ class Settings(BaseSettings):
     # Макс. число подрядчиков на один MR (бизнес-ограничение).
     vendor_max_invitations_per_mr: int = 5
 
+    # --- Модуль FEED (документация стадии FEED) ---
+    # Корень хранилища файлов FEED (отдельный volume — переживает апдейты).
+    feed_storage_root: str = "/data/feed_storage"
+    # AI-поиск по документации: OpenAI-совместимый API (Qwen/DashScope,
+    # OpenRouter, локальный vLLM и т.п.). Если ключ пуст — работает обычный
+    # полнотекстовый поиск без нейросети.
+    ai_api_base_url: str = ""
+    ai_api_key: str = ""
+    ai_model: str = "qwen-plus"
+
 
 @lru_cache
 def get_settings() -> Settings:

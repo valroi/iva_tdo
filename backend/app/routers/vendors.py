@@ -36,6 +36,7 @@ from app.models import (
 )
 from app.schemas import (
     MrCreate,
+    MrFeedLink,
     MrOwnerItemCreate,
     MrOwnerItemRead,
     MrOwnerItemUpdate,
@@ -1013,3 +1014,55 @@ def set_question_visibility(
     db.commit()
     db.refresh(q)
     return _owner_question_read(db, q)
+
+
+# ------------------------------------------------- Интеграция с FEED
+@router.get("/mr/{mr_id}/feed-links", response_model=list[MrFeedLink])
+def mr_feed_links(
+    mr_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Сверка документов REQ (чек-лист заказчика) с базой FEED по номеру
+    документа: подтянут ли документ в FEED и совпадает ли крайняя ревизия.
+    rev_mismatch=True — в FEED ревизия новее/другая, надо проверить REQ."""
+    from app.models import FeedDocument
+    from app.services.feed_import import split_rev
+
+    mr = _get_mr_or_404(db, mr_id)
+    ensure_can_manage_mr(db, user=current_user, mr=mr)
+    items = (
+        db.query(MrOwnerItem)
+        .filter(MrOwnerItem.mr_id == mr.id, MrOwnerItem.doc_number.isnot(None))
+        .all()
+    )
+    links: list[MrFeedLink] = []
+    for item in items:
+        raw_no = (item.doc_number or "").strip().upper()
+        # Attachment No.N — внутренняя нумерация REQ, в FEED не ищем.
+        if not raw_no or raw_no.startswith("ATTACHMENT"):
+            continue
+        base_no, item_rev = split_rev(raw_no)
+        item_rev = item_rev or (item.rev or None)
+        feed_doc = (
+            db.query(FeedDocument)
+            .filter(FeedDocument.project_id == mr.project_id, FeedDocument.doc_number == base_no)
+            .first()
+        )
+        mismatch = bool(
+            feed_doc
+            and feed_doc.latest_rev
+            and item_rev
+            and feed_doc.latest_rev != item_rev
+        )
+        links.append(
+            MrFeedLink(
+                owner_item_id=item.id,
+                owner_doc_number=raw_no,
+                owner_rev=item_rev,
+                feed_document_id=feed_doc.id if feed_doc else None,
+                feed_latest_rev=feed_doc.latest_rev if feed_doc else None,
+                rev_mismatch=mismatch,
+            )
+        )
+    return links

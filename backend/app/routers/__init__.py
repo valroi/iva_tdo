@@ -5,6 +5,7 @@ from app.deps import require_permissions
 from app.routers import (
     auth,
     documents,
+    feed,
     mdr,
     notifications,
     projects,
@@ -32,3 +33,9 @@ api_router.include_router(
 # Гостевой роутер подрядчиков — отдельная изолированная авторизация
 # (свой vendor-токен, БЕЗ требования can_access_vendors).
 api_router.include_router(vendor_public.router, tags=["vendor-public"])
+# Модуль FEED — документация стадии FEED, доступ по праву can_access_feed.
+api_router.include_router(
+    feed.router,
+    tags=["feed"],
+    dependencies=[Depends(require_permissions("can_access_feed"))],
+)

@@ -17,6 +17,7 @@ import {
   deleteMrTag,
   deleteMrVendorItem,
   downloadMrReportXlsx,
+  getMrFeedLinks,
   getMrReport,
   importReq,
   listMr,
@@ -39,6 +40,7 @@ import type {
   MrOwnerItem,
   MrStatus,
   MrTagItem,
+  MrFeedLink,
   MrQuestionItem,
   MrVendorItem,
   ProjectItem,
@@ -78,6 +80,7 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
   const [invitations, setInvitations] = useState<VendorInvitationItem[]>([]);
   const [report, setReport] = useState<VendorReport | null>(null);
   const [questions, setQuestions] = useState<MrQuestionItem[]>([]);
+  const [feedLinks, setFeedLinks] = useState<MrFeedLink[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editForm] = Form.useForm();
@@ -119,13 +122,14 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
   }, []);
 
   const loadDetails = async (mrId: number) => {
-    const [t, o, v, inv, rep, q] = await Promise.all([
+    const [t, o, v, inv, rep, q, fl] = await Promise.all([
       listMrTags(mrId),
       listMrOwnerItems(mrId),
       listMrVendorItems(mrId),
       listMrInvitations(mrId),
       getMrReport(mrId).catch(() => null),
       listMrQuestions(mrId).catch(() => []),
+      getMrFeedLinks(mrId).catch(() => []),
     ]);
     setTags(t);
     setOwnerItems(o);
@@ -133,11 +137,12 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
     setInvitations(inv);
     setReport(rep);
     setQuestions(q);
+    setFeedLinks(fl);
   };
 
   useEffect(() => {
     if (selectedMrId === null) {
-      setTags([]); setOwnerItems([]); setVendorItems([]); setInvitations([]); setReport(null); setQuestions([]);
+      setTags([]); setOwnerItems([]); setVendorItems([]); setInvitations([]); setReport(null); setQuestions([]); setFeedLinks([]);
       return;
     }
     void loadDetails(selectedMrId).catch(() => undefined);
@@ -322,6 +327,39 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
               {" · "}{t("vend.deadline")}: {formatDeadlineRu(selectedMr.deadline_at)}
             </Typography.Text>
           </Space>
+
+          {/* Сверка с FEED: подтянуты ли документы REQ и совпадают ли ревизии */}
+          {feedLinks.length > 0 && (() => {
+            const mismatches = feedLinks.filter((l) => l.rev_mismatch);
+            const missing = feedLinks.filter((l) => !l.feed_document_id);
+            const ok = feedLinks.length - mismatches.length - missing.length;
+            return (
+              <Card size="small" style={{ marginBottom: 16 }}
+                title={<Space><Typography.Text strong>Сверка с FEED</Typography.Text>
+                  <Tag color="success">{ok} ок</Tag>
+                  {mismatches.length > 0 && <Tag color="error">{mismatches.length} расхождений ревизий</Tag>}
+                  {missing.length > 0 && <Tag color="warning">{missing.length} нет в FEED</Tag>}
+                </Space>}>
+                {mismatches.length === 0 && missing.length === 0 ? (
+                  <Typography.Text type="secondary">Все документы REQ найдены в FEED, ревизии совпадают.</Typography.Text>
+                ) : (
+                  <Space direction="vertical" size={4} style={{ width: "100%" }}>
+                    {mismatches.map((l) => (
+                      <Typography.Text key={l.owner_item_id}>
+                        <Tag color="error">РЕВИЗИЯ</Tag>{l.owner_doc_number}: в REQ rev {l.owner_rev ?? "—"}, в FEED rev {l.feed_latest_rev ?? "—"} — проверьте актуальность приложения.
+                      </Typography.Text>
+                    ))}
+                    {missing.slice(0, 10).map((l) => (
+                      <Typography.Text key={l.owner_item_id} type="secondary">
+                        <Tag color="warning">НЕТ В FEED</Tag>{l.owner_doc_number}
+                      </Typography.Text>
+                    ))}
+                    {missing.length > 10 && <Typography.Text type="secondary">…и ещё {missing.length - 10}</Typography.Text>}
+                  </Space>
+                )}
+              </Card>
+            );
+          })()}
 
           {/* Material Summary */}
           <Space style={{ width: "100%", justifyContent: "space-between", marginBottom: 8 }}>
