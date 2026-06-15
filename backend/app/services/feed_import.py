@@ -20,7 +20,6 @@ from app.services.smart_upload import (  # переиспользуем боев
     _extract_cipher_from_text,
     _extract_drawing_title_parts,
     _extract_stamp_triplet,
-    _extract_text,
     _extract_text_pdftotext,
 )
 
@@ -161,11 +160,14 @@ def parse_feed_file(file_name: str, raw: bytes) -> dict[str, Any]:
     is_pdf = file_name.lower().endswith(".pdf")
     is_docx = file_name.lower().endswith(".docx")
 
+    # Текст извлекаем ОДИН раз и переиспользуем и для метаданных, и для поиска.
+    # pypdf на векторных чертежах медленный (~1с/стр), поэтому ограничиваем
+    # число страниц — шифр/класс/наименование всегда на первых листах.
     text = ""
     if is_pdf:
-        text = _extract_text(raw) or _extract_text_pdftotext(raw)
+        text = extract_pdf_text(raw, max_pages=4) or _extract_text_pdftotext(raw)
     elif is_docx:
-        text = extract_docx_text(raw)[:20000]
+        text = extract_docx_text(raw)
     text_upper = (text or "").upper()
 
     # 1. Имя файла — приоритетный источник шифра.
@@ -193,12 +195,8 @@ def parse_feed_file(file_name: str, raw: bytes) -> dict[str, Any]:
 
     components = parse_components(doc_number) if doc_number else {"discipline": None, "doc_type": None}
 
-    search_text = ""
-    if is_pdf:
-        search_text = extract_pdf_text(raw)
-    elif is_docx:
-        search_text = extract_docx_text(raw)
-    search_text = (search_text or "")[:200_000]
+    # Поисковый текст — тот же извлечённый текст (повторно PDF не парсим).
+    search_text = (text or "")[:200_000]
 
     return {
         "doc_number": doc_number,
