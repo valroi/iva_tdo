@@ -2,11 +2,10 @@ FROM node:22-alpine
 
 WORKDIR /app
 
-# Pin npm to current major; node:22-alpine ships 10.9.x which warns about 11.x.
-# Обновляемся явно, чтобы CI не сыпал "npm notice New major version" в логи
-# и чтобы поведение `npm ci` совпадало с прод-окружением.
-RUN npm install -g npm@11.16.0
-
+# npm из базового образа (10.9.x) используется как есть. In-place self-upgrade
+# (npm install -g npm@11.x) на alpine ломает установку — теряется promise-retry
+# в @npmcli/arborist (MODULE_NOT_FOUND). Нотис "New major version" косметический,
+# поэтому npm НЕ обновляем — стабильность билда важнее.
 COPY package.json package-lock.json /app/
 RUN npm ci
 
