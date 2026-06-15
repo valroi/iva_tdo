@@ -1193,4 +1193,6 @@ class MrFeedLink(BaseModel):
     owner_rev: str | None
     feed_document_id: int | None
     feed_latest_rev: str | None
+    feed_file_id: int | None = None   # основной файл из FEED для скачивания
+    feed_file_name: str | None = None
     rev_mismatch: bool

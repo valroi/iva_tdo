@@ -580,5 +580,6 @@ export interface FeedSearchHit {
 export interface FeedAskResult { answer:string; mode:string; sources:FeedSearchHit[]; }
 export interface MrFeedLink {
   owner_item_id:number; owner_doc_number:string; owner_rev:string|null;
-  feed_document_id:number|null; feed_latest_rev:string|null; rev_mismatch:boolean;
+  feed_document_id:number|null; feed_latest_rev:string|null;
+  feed_file_id:number|null; feed_file_name:string|null; rev_mismatch:boolean;
 }

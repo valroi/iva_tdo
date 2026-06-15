@@ -1055,6 +1055,16 @@ def mr_feed_links(
             and item_rev
             and feed_doc.latest_rev != item_rev
         )
+        feed_file = None
+        if feed_doc:
+            from app.models import FeedFile, FeedFileKind
+
+            feed_file = (
+                db.query(FeedFile)
+                .filter(FeedFile.feed_document_id == feed_doc.id, FeedFile.kind == FeedFileKind.REVISION)
+                .order_by(FeedFile.id.desc())
+                .first()
+            )
         links.append(
             MrFeedLink(
                 owner_item_id=item.id,
@@ -1062,6 +1072,8 @@ def mr_feed_links(
                 owner_rev=item_rev,
                 feed_document_id=feed_doc.id if feed_doc else None,
                 feed_latest_rev=feed_doc.latest_rev if feed_doc else None,
+                feed_file_id=feed_file.id if feed_file else None,
+                feed_file_name=feed_file.file_name if feed_file else None,
                 rev_mismatch=mismatch,
             )
         )

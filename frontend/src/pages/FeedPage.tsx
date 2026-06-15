@@ -17,14 +17,18 @@ import { DownloadOutlined, RobotOutlined, SearchOutlined, UploadOutlined } from 
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
 
+import { Switch } from "antd";
+
 import {
   askFeed,
   deleteFeedDocument,
   deleteFeedFile,
   downloadFeedFile,
+  getFeedSettings,
   listFeedDocuments,
   listProjects,
   searchFeed,
+  setFeedSettings,
   updateFeedDocument,
   uploadFeedDocuments,
   uploadFeedFile,
@@ -45,10 +49,13 @@ const LANG_COLOR: Record<string, string> = { RU: "blue", EN: "geekblue", BI: "pu
  * класс 1/1А, финальная ревизия; для 1А — ACRS). Массовая загрузка с
  * автораспознаванием шифра (штамп → имя файла). Поиск + AI-чат.
  */
-export default function FeedPage({ currentUser: _currentUser }: Props): JSX.Element {
+export default function FeedPage({ currentUser }: Props): JSX.Element {
   const { message, modal } = App.useApp();
+  const isAdmin = currentUser.permissions.can_manage_users;
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [projectId, setProjectId] = useState<number | null>(null);
+  const [aiEnabled, setAiEnabled] = useState(false);
+  const [aiConfigured, setAiConfigured] = useState(false);
   const [docs, setDocs] = useState<FeedDocumentItem[]>([]);
   const [disciplineFilter, setDisciplineFilter] = useState<string | null>(null);
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
@@ -81,6 +88,9 @@ export default function FeedPage({ currentUser: _currentUser }: Props): JSX.Elem
         if (ps.length > 0) setProjectId(ps[0].id);
       })
       .catch(() => setProjects([]));
+    getFeedSettings()
+      .then((s) => { setAiEnabled(s.ai_enabled); setAiConfigured(s.ai_configured); })
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -277,7 +287,24 @@ export default function FeedPage({ currentUser: _currentUser }: Props): JSX.Elem
             options={disciplines.map((d) => ({ value: d, label: d }))}
             onChange={(v) => setDisciplineFilter(v ?? null)}
           />
-          <Button icon={<RobotOutlined />} onClick={() => setChatOpen(true)}>AI-поиск</Button>
+          {isAdmin && aiConfigured && (
+            <Space size={4}>
+              <RobotOutlined style={{ color: aiEnabled ? "#1677ff" : "#bbb" }} />
+              <Typography.Text type="secondary">Умный поиск</Typography.Text>
+              <Switch
+                size="small"
+                checked={aiEnabled}
+                onChange={async (v) => {
+                  try {
+                    const res = await setFeedSettings(v);
+                    setAiEnabled(res.ai_enabled);
+                    message.success(v ? "Умный поиск включён" : "Умный поиск выключен");
+                  } catch (e) { message.error(e instanceof Error ? e.message : "Ошибка"); }
+                }}
+              />
+            </Space>
+          )}
+          <Button icon={<SearchOutlined />} onClick={() => setChatOpen(true)}>Поиск</Button>
         </Space>
       </Space>
 
@@ -393,13 +420,14 @@ export default function FeedPage({ currentUser: _currentUser }: Props): JSX.Elem
         </Form>
       </Modal>
 
-      {/* AI-чат по документации */}
-      <Drawer open={chatOpen} onClose={() => setChatOpen(false)} title="AI-поиск по документации FEED" width={560}>
+      {/* Поиск по документации (умный, если включён админом) */}
+      <Drawer open={chatOpen} onClose={() => setChatOpen(false)} title="Поиск по документации FEED" width={560}>
         <Space direction="vertical" size={12} style={{ width: "100%" }}>
           {chatLog.length === 0 && (
             <Typography.Text type="secondary">
-              Задайте вопрос по документации — ответ с указанием документов-источников.
-              Без настроенного AI-ключа работает обычный поиск по ключевым словам.
+              {aiEnabled && aiConfigured
+                ? "Умный поиск включён: задайте вопрос — нейросеть ответит по содержанию документов и укажет источники."
+                : "Поиск по ключевым словам: введите термин из документа — покажу подходящие документы со ссылками."}
             </Typography.Text>
           )}
           {chatLog.map((entry, i) => (

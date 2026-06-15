@@ -231,14 +231,18 @@ def delete_feed_document(
     current_user: User = Depends(get_current_user),
 ):
     doc = _get_doc_or_404(db, doc_id)
-    for f in db.query(FeedFile).filter(FeedFile.feed_document_id == doc.id).all():
-        try:
-            Path(f.file_path).unlink(missing_ok=True)
-        except OSError:
-            pass
-        db.delete(f)
+    # Сначала собираем пути, затем удаляем строки одним bulk-запросом и
+    # коммитим — и только после успешного коммита трогаем файлы на диске.
+    # Так удаление в БД не падает из-за проблем с ФС (причина бага на проде).
+    paths = [f.file_path for f in db.query(FeedFile).filter(FeedFile.feed_document_id == doc.id).all()]
+    db.query(FeedFile).filter(FeedFile.feed_document_id == doc.id).delete(synchronize_session=False)
     db.delete(doc)
     db.commit()
+    for p in paths:
+        try:
+            Path(p).unlink(missing_ok=True)
+        except OSError:
+            pass
     return None
 
 
@@ -380,15 +384,61 @@ def search_feed(
     return [_hit_schema(d, s) for d, s in _keyword_hits(db, q, project_id)]
 
 
+_FEED_AI_SETTING_KEY = "feed_ai_enabled"
+
+
+def _feed_ai_enabled(db: Session) -> bool:
+    from app.models import SystemSetting
+
+    item = db.query(SystemSetting).filter(SystemSetting.key == _FEED_AI_SETTING_KEY).first()
+    return bool(item and item.value == "true")
+
+
+def _ai_configured() -> bool:
+    return bool(settings.ai_api_key and settings.ai_api_base_url)
+
+
+@router.get("/feed/settings")
+def get_feed_settings(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Состояние умного (AI) поиска: включён админом и настроен ли ключ."""
+    return {"ai_enabled": _feed_ai_enabled(db), "ai_configured": _ai_configured()}
+
+
+@router.put("/feed/settings")
+def set_feed_settings(
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Вкл/выкл умный поиск. Только для админов (управление пользователями)."""
+    from app.deps import has_permission
+    from app.models import SystemSetting
+
+    if not has_permission(current_user, "can_manage_users"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+    enabled = bool(payload.get("ai_enabled"))
+    item = db.query(SystemSetting).filter(SystemSetting.key == _FEED_AI_SETTING_KEY).first()
+    if item is None:
+        item = SystemSetting(key=_FEED_AI_SETTING_KEY, value="true" if enabled else "false")
+        db.add(item)
+    else:
+        item.value = "true" if enabled else "false"
+    db.commit()
+    return {"ai_enabled": enabled, "ai_configured": _ai_configured()}
+
+
 @router.post("/feed/ask", response_model=FeedAskResult)
 def ask_feed(
     payload: dict,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """AI-поиск по документации. Если настроен OpenAI-совместимый API
-    (AI_API_BASE_URL/AI_API_KEY, напр. Qwen) — отвечает нейросеть с опорой
-    на найденные документы. Иначе — обычный поиск с выдачей источников."""
+    """Поиск по документации. Если умный поиск включён админом И настроен
+    OpenAI-совместимый API — отвечает нейросеть с опорой на найденные
+    документы. Иначе — полнотекстовый поиск с выдачей источников."""
     question = (payload.get("question") or "").strip()
     project_id = payload.get("project_id")
     if not question:
@@ -397,19 +447,28 @@ def ask_feed(
     hits = _keyword_hits(db, question, project_id, limit=5)
     sources = [_hit_schema(d, s) for d, s in hits]
 
-    if not settings.ai_api_key or not settings.ai_api_base_url:
+    if not (_feed_ai_enabled(db) and _ai_configured()):
         if not sources:
             return FeedAskResult(answer="Ничего не найдено по запросу. Уточните формулировку.", mode="keyword", sources=[])
         listing = "\n".join(f"• {h.doc_number} — {h.title_en or h.title_ru or ''} (rev {h.latest_rev or '—'})" for h in sources)
         return FeedAskResult(
-            answer=f"AI-поиск не настроен (нет API-ключа). Найдено по ключевым словам:\n{listing}",
+            answer=f"Найдено по ключевым словам:\n{listing}",
             mode="keyword",
             sources=sources,
         )
 
-    # Контекст для LLM: фрагменты текста найденных документов.
+    # Контекст для LLM. Если по ключевым словам ничего не нашли — берём
+    # свежие документы проекта (с непустым текстом), чтобы AI мог ответить
+    # на общий вопрос, а не просить «дайте фрагменты».
+    ctx_docs = [d for d, _ in hits]
+    if not ctx_docs:
+        q = db.query(FeedDocument)
+        if project_id is not None:
+            q = q.filter(FeedDocument.project_id == project_id)
+        ctx_docs = q.filter(FeedDocument.search_text.isnot(None)).order_by(FeedDocument.updated_at.desc()).limit(5).all()
+        sources = [_hit_schema(d, None) for d in ctx_docs]
     context_parts = []
-    for d, _ in hits:
+    for d in ctx_docs:
         body = (d.search_text or "")[:4000]
         context_parts.append(f"=== {d.doc_number} (rev {d.latest_rev or '—'}) {d.title_en or d.title_ru or ''} ===\n{body}")
     context = "\n\n".join(context_parts)[:24000]

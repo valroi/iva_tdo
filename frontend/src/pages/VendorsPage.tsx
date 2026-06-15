@@ -16,6 +16,7 @@ import {
   answerMrQuestion,
   deleteMrTag,
   deleteMrVendorItem,
+  downloadFeedFile,
   downloadMrReportXlsx,
   getMrFeedLinks,
   getMrReport,
@@ -174,17 +175,54 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
     { title: t("vend.col.vendors"), dataIndex: "invitations_count", key: "inv", width: 80 },
   ];
 
+  const feedByItem = new Map(feedLinks.map((l) => [l.owner_item_id, l]));
   const ownerColumns: ColumnsType<MrOwnerItem> = [
-    { title: "№", dataIndex: "att_no", key: "att_no", width: 70, render: (v) => v ?? "—" },
+    { title: "№", dataIndex: "att_no", key: "att_no", width: 56, render: (v) => v ?? "—" },
     {
       title: "Документ",
       dataIndex: "title",
       key: "title",
-      ellipsis: true,
-      render: (v, row) => (row.is_group ? <Typography.Text strong>{v}</Typography.Text> : v),
+      ellipsis: { showTitle: true },
+      render: (v, row) => (row.is_group ? <Typography.Text strong>{v}</Typography.Text> : <Typography.Text ellipsis={{ tooltip: v }}>{v}</Typography.Text>),
     },
-    { title: "Doc No", dataIndex: "doc_number", key: "doc", width: 150, ellipsis: true, render: (v, row) => (row.is_group ? "" : v ?? "—") },
-    { title: "Рев", dataIndex: "rev", key: "rev", width: 60, render: (v, row) => (row.is_group ? "" : v ?? "—") },
+    {
+      title: "Doc No",
+      dataIndex: "doc_number",
+      key: "doc",
+      width: 200,
+      render: (v, row) => (row.is_group ? "" : v ? <Typography.Text style={{ fontSize: 12 }} copyable={{ text: v }}>{v}</Typography.Text> : "—"),
+    },
+    { title: "Рев", dataIndex: "rev", key: "rev", width: 56, render: (v, row) => (row.is_group ? "" : v ?? "—") },
+    {
+      title: "FEED",
+      key: "feed",
+      width: 200,
+      render: (_, row) => {
+        if (row.is_group) return null;
+        const link = feedByItem.get(row.id);
+        if (!link || !link.owner_doc_number || link.owner_doc_number.toUpperCase().startsWith("ATTACHMENT")) return null;
+        if (!link.feed_document_id) {
+          return <Tag color="default">нет в FEED</Tag>;
+        }
+        const dl = () => link.feed_file_id && void downloadFeedFile(link.feed_file_id, link.feed_file_name || link.owner_doc_number);
+        if (link.rev_mismatch) {
+          return (
+            <Tooltip title={`В FEED ревизия ${link.feed_latest_rev ?? "—"}, в REQ ${link.owner_rev ?? "—"} — проверьте актуальность`}>
+              <Space size={2} direction="vertical">
+                <Tag color="warning" style={{ marginRight: 0 }}>FEED rev {link.feed_latest_rev ?? "—"} ≠ {link.owner_rev ?? "—"}</Tag>
+                {link.feed_file_id && <Button size="small" type="link" style={{ padding: 0 }} icon={<UploadOutlined rotate={180} />} onClick={dl}>скачать из FEED</Button>}
+              </Space>
+            </Tooltip>
+          );
+        }
+        return (
+          <Space size={2} direction="vertical">
+            <Tag color="success" style={{ marginRight: 0 }}>в FEED rev {link.feed_latest_rev ?? "—"}</Tag>
+            {link.feed_file_id && <Button size="small" type="link" style={{ padding: 0 }} icon={<UploadOutlined rotate={180} />} onClick={dl}>скачать из FEED</Button>}
+          </Space>
+        );
+      },
+    },
     {
       title: "Файлы",
       key: "files",
@@ -327,39 +365,6 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
               {" · "}{t("vend.deadline")}: {formatDeadlineRu(selectedMr.deadline_at)}
             </Typography.Text>
           </Space>
-
-          {/* Сверка с FEED: подтянуты ли документы REQ и совпадают ли ревизии */}
-          {feedLinks.length > 0 && (() => {
-            const mismatches = feedLinks.filter((l) => l.rev_mismatch);
-            const missing = feedLinks.filter((l) => !l.feed_document_id);
-            const ok = feedLinks.length - mismatches.length - missing.length;
-            return (
-              <Card size="small" style={{ marginBottom: 16 }}
-                title={<Space><Typography.Text strong>Сверка с FEED</Typography.Text>
-                  <Tag color="success">{ok} ок</Tag>
-                  {mismatches.length > 0 && <Tag color="error">{mismatches.length} расхождений ревизий</Tag>}
-                  {missing.length > 0 && <Tag color="warning">{missing.length} нет в FEED</Tag>}
-                </Space>}>
-                {mismatches.length === 0 && missing.length === 0 ? (
-                  <Typography.Text type="secondary">Все документы REQ найдены в FEED, ревизии совпадают.</Typography.Text>
-                ) : (
-                  <Space direction="vertical" size={4} style={{ width: "100%" }}>
-                    {mismatches.map((l) => (
-                      <Typography.Text key={l.owner_item_id}>
-                        <Tag color="error">РЕВИЗИЯ</Tag>{l.owner_doc_number}: в REQ rev {l.owner_rev ?? "—"}, в FEED rev {l.feed_latest_rev ?? "—"} — проверьте актуальность приложения.
-                      </Typography.Text>
-                    ))}
-                    {missing.slice(0, 10).map((l) => (
-                      <Typography.Text key={l.owner_item_id} type="secondary">
-                        <Tag color="warning">НЕТ В FEED</Tag>{l.owner_doc_number}
-                      </Typography.Text>
-                    ))}
-                    {missing.length > 10 && <Typography.Text type="secondary">…и ещё {missing.length - 10}</Typography.Text>}
-                  </Space>
-                )}
-              </Card>
-            );
-          })()}
 
           {/* Material Summary */}
           <Space style={{ width: "100%", justifyContent: "space-between", marginBottom: 8 }}>

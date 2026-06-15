@@ -1219,3 +1219,10 @@ export function askFeed(question: string, projectId?: number): Promise<import(".
 export function getMrFeedLinks(mrId: number): Promise<import("./types").MrFeedLink[]> {
   return request(`/mr/${mrId}/feed-links`);
 }
+
+export function getFeedSettings(): Promise<{ ai_enabled: boolean; ai_configured: boolean }> {
+  return request(`/feed/settings`);
+}
+export function setFeedSettings(aiEnabled: boolean): Promise<{ ai_enabled: boolean; ai_configured: boolean }> {
+  return request(`/feed/settings`, { method: "PUT", body: JSON.stringify({ ai_enabled: aiEnabled }) });
+}
