@@ -36,6 +36,9 @@ interface Props {
   currentUser: User;
 }
 
+const LANG_LABEL: Record<string, string> = { RU: "RU", EN: "EN", BI: "RU/EN", NA: "—" };
+const LANG_COLOR: Record<string, string> = { RU: "blue", EN: "geekblue", BI: "purple", NA: "default" };
+
 /**
  * Модуль FEED — документация стадии FEED.
  * Структура: проект → дисциплина → документы (шифр, RU/EN название,
@@ -176,20 +179,28 @@ export default function FeedPage({ currentUser: _currentUser }: Props): JSX.Elem
     },
     { title: "Рев", dataIndex: "latest_rev", key: "rev", width: 60, render: (v) => v ?? "—" },
     {
-      title: "Файлы",
+      title: "Файлы (версии)",
       key: "files",
-      width: 200,
+      width: 260,
       render: (_, row) => (
         <Space direction="vertical" size={2}>
           {row.files.filter((f) => f.kind === "REVISION").map((f) => (
             <Space key={f.id} size={4}>
+              <Tag color={LANG_COLOR[f.lang]} style={{ marginRight: 0 }}>{LANG_LABEL[f.lang]}</Tag>
               <Button size="small" type="link" icon={<DownloadOutlined />} style={{ padding: 0 }}
                 onClick={() => void downloadFeedFile(f.id, f.file_name)}>
-                {f.rev ? `rev ${f.rev}` : f.file_name.slice(0, 18)}
+                {f.rev ? `rev ${f.rev}` : f.file_name.slice(0, 16)}
               </Button>
               <Button size="small" type="link" danger style={{ padding: 0 }} onClick={async () => { await deleteFeedFile(f.id); await loadDocs(projectId); }}>✕</Button>
             </Space>
           ))}
+          {/* Дозагрузка ещё одной языковой версии под тот же шифр */}
+          <Upload showUploadList={false} beforeUpload={(file) => {
+            void uploadFeedFile(row.id, file, "REVISION").then(() => loadDocs(projectId)).catch((e) => message.error(e.message));
+            return false;
+          }}>
+            <Button size="small" type="dashed" icon={<UploadOutlined />}>+ версия</Button>
+          </Upload>
         </Space>
       ),
     },
@@ -322,14 +333,23 @@ export default function FeedPage({ currentUser: _currentUser }: Props): JSX.Elem
             extra={<Button size="small" onClick={() => setSearchHits(null)}>Закрыть</Button>}>
             <Space direction="vertical" size={6} style={{ width: "100%" }}>
               {searchHits.length === 0 && <Typography.Text type="secondary">Ничего не найдено.</Typography.Text>}
-              {searchHits.map((h) => (
-                <div key={h.document_id}>
-                  <Typography.Text strong>{h.doc_number}</Typography.Text>{" "}
-                  <Typography.Text>{h.title_en || h.title_ru || ""}</Typography.Text>{" "}
-                  <Tag>{h.discipline_code}</Tag>
-                  {h.snippet && <Typography.Paragraph type="secondary" style={{ margin: "2px 0 0" }}>{h.snippet}</Typography.Paragraph>}
-                </div>
-              ))}
+              {searchHits.map((h) => {
+                const doc = docs.find((d) => d.id === h.document_id);
+                const primary = doc?.files.find((f) => f.kind === "REVISION") ?? doc?.files[0];
+                return (
+                  <div key={h.document_id}>
+                    <Space size={6}>
+                      <Button type="link" size="small" icon={<DownloadOutlined />} style={{ padding: 0 }}
+                        disabled={!primary} onClick={() => primary && void downloadFeedFile(primary.id, primary.file_name)}>
+                        <b>{h.doc_number}</b>
+                      </Button>
+                      <Typography.Text>{h.title_en || h.title_ru || ""}</Typography.Text>
+                      <Tag>{h.discipline_code}</Tag>
+                    </Space>
+                    {h.snippet && <Typography.Paragraph type="secondary" style={{ margin: "2px 0 0" }}>{h.snippet}</Typography.Paragraph>}
+                  </div>
+                );
+              })}
             </Space>
           </Card>
         )}
@@ -391,10 +411,24 @@ export default function FeedPage({ currentUser: _currentUser }: Props): JSX.Elem
                 </Typography.Paragraph>
                 {entry.a.sources.length > 0 && (
                   <Space direction="vertical" size={2}>
-                    <Typography.Text type="secondary">Источники:</Typography.Text>
-                    {entry.a.sources.map((s) => (
-                      <Typography.Text key={s.document_id} code>{s.doc_number} {s.title_en || s.title_ru || ""}</Typography.Text>
-                    ))}
+                    <Typography.Text type="secondary">Источники (нажмите для скачивания):</Typography.Text>
+                    {entry.a.sources.map((s) => {
+                      const doc = docs.find((d) => d.id === s.document_id);
+                      const primary = doc?.files.find((f) => f.kind === "REVISION") ?? doc?.files[0];
+                      return (
+                        <Button
+                          key={s.document_id}
+                          type="link"
+                          size="small"
+                          icon={<DownloadOutlined />}
+                          style={{ padding: 0, height: "auto", textAlign: "left", whiteSpace: "normal" }}
+                          disabled={!primary}
+                          onClick={() => primary && void downloadFeedFile(primary.id, primary.file_name)}
+                        >
+                          {s.doc_number} — {s.title_en || s.title_ru || ""}
+                        </Button>
+                      );
+                    })}
                   </Space>
                 )}
               </Card>

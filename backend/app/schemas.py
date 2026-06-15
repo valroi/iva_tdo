@@ -1107,13 +1107,14 @@ class MrQuestionRead(BaseModel):
 #  Модуль FEED
 # =====================================================================
 
-from app.models import FeedDocClass, FeedFileKind  # noqa: E402
+from app.models import FeedDocClass, FeedFileKind, FeedFileLang  # noqa: E402
 
 
 class FeedFileRead(BaseModel):
     id: int
     feed_document_id: int
     kind: FeedFileKind
+    lang: FeedFileLang
     rev: str | None
     file_name: str
     mime: str | None

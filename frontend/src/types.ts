@@ -557,8 +557,9 @@ export interface VendorSubmitResult { status:string; missing_prices:string[]; mi
 
 // --- Модуль FEED ---
 export type FeedDocClass = "1" | "1A";
+export type FeedFileLang = "RU" | "EN" | "BI" | "NA";
 export interface FeedFileItem {
-  id:number; feed_document_id:number; kind:"REVISION"|"ACRS"; rev:string|null;
+  id:number; feed_document_id:number; kind:"REVISION"|"ACRS"; lang:FeedFileLang; rev:string|null;
   file_name:string; mime:string|null; size_bytes:number|null; created_at:string;
 }
 export interface FeedDocumentItem {

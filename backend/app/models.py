@@ -723,6 +723,13 @@ class FeedFileKind(str, enum.Enum):
     ACRS = "ACRS"          # ACRS-приложение (для класса 1А)
 
 
+class FeedFileLang(str, enum.Enum):
+    RU = "RU"          # русская версия
+    EN = "EN"          # английская версия
+    BI = "BI"          # двуязычный документ
+    NA = "NA"          # не определено
+
+
 class FeedDocument(Base):
     __tablename__ = "feed_documents"
     __table_args__ = (UniqueConstraint("project_id", "doc_number", name="uq_feed_doc_number"),)
@@ -754,6 +761,7 @@ class FeedFile(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     feed_document_id: Mapped[int] = mapped_column(ForeignKey("feed_documents.id"), nullable=False, index=True)
     kind: Mapped[FeedFileKind] = mapped_column(Enum(FeedFileKind), nullable=False, default=FeedFileKind.REVISION)
+    lang: Mapped[FeedFileLang] = mapped_column(Enum(FeedFileLang), nullable=False, default=FeedFileLang.NA)
     rev: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     file_path: Mapped[str] = mapped_column(String(500), nullable=False)
     file_name: Mapped[str] = mapped_column(String(255), nullable=False)

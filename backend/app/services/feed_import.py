@@ -90,8 +90,74 @@ def extract_docx_text(docx_bytes: bytes) -> str:
         return ""
 
 
+def detect_class(text_upper: str) -> str | None:
+    """Класс документа из штампа: 'Class: 1A' / 'КЛАСС 1'. Возвращает '1' или '1A'."""
+    m = re.search(r"CLASS\s*[:\-]?\s*(1\s*[АA]|1B|1|2|3)", text_upper)
+    if not m:
+        m = re.search(r"КЛАСС\s*[:\-]?\s*(1\s*[АA]|1|2|3)", text_upper)
+    if not m:
+        return None
+    raw = re.sub(r"\s+", "", m.group(1)).upper().replace("А", "A")
+    return "1A" if raw == "1A" else raw
+
+
+def detect_language(text: str) -> str:
+    """RU/EN/BI/NA по соотношению кириллицы и латиницы в теле документа."""
+    cyr = len(re.findall(r"[А-Яа-яЁё]", text))
+    lat = len(re.findall(r"[A-Za-z]", text))
+    total = cyr + lat
+    if total < 30:
+        return "NA"
+    cyr_share = cyr / total
+    lat_share = lat / total
+    if cyr_share > 0.15 and lat_share > 0.15:
+        return "BI"
+    if cyr_share >= lat_share:
+        return "RU"
+    return "EN"
+
+
+# Слова-маркеры заголовка инженерного документа (EN).
+_TITLE_HINT = re.compile(
+    r"\b(SYSTEM|LIST|DIAGRAM|SCHEDULE|SPECIFICATION|DRAWING|PLAN|LAYOUT|REPORT|"
+    r"DATA\s*SHEET|DATASHEET|PHILOSOPHY|CALCULATION|INDEX|PROCEDURE|REQUISITION|"
+    r"DESCRIPTION|STUDY|BASIS|MAP|PROFILE|SCHEMATIC|KEY\s*PLAN)\b",
+    re.IGNORECASE,
+)
+_TITLE_STOP = re.compile(r"PROJECT|TITLE|SUBCONTRACTOR|CONTRACTOR|OWNER|PHASE|CLASS|DOC|DISC|SHEET|PAGE|REV\b|SERIAL", re.IGNORECASE)
+
+
+def extract_titles(text: str) -> tuple[str | None, str | None]:
+    """Заголовок документа: ищем «осмысленную» строку-название.
+    EN — латинская строка с маркером (System/List/...), RU — кириллическая
+    рядом. Грубо, но лучше чем мусор из штампа; всё правится вручную."""
+    lines = [re.sub(r"\s+", " ", ln).strip(" .:-") for ln in text.splitlines()]
+    title_en = None
+    title_ru = None
+    for ln in lines:
+        if len(ln) < 6 or len(ln) > 90:
+            continue
+        if _TITLE_STOP.search(ln):
+            continue
+        has_cyr = bool(re.search(r"[А-Яа-яЁё]", ln))
+        has_lat = bool(re.search(r"[A-Za-z]", ln))
+        if title_en is None and has_lat and not has_cyr and _TITLE_HINT.search(ln):
+            # Не аббревиатура из штампа (минимум 2 слова)
+            if len(ln.split()) >= 2:
+                title_en = ln.title() if ln.isupper() else ln
+        if title_ru is None and has_cyr and not has_lat and len(ln.split()) >= 2:
+            title_ru = ln
+        if title_en and title_ru:
+            break
+    return title_en, title_ru
+
+
 def parse_feed_file(file_name: str, raw: bytes) -> dict[str, Any]:
-    """Главная функция: имя файла + содержимое → поля документа FEED."""
+    """Главная функция: имя файла + содержимое → поля документа FEED.
+
+    Шифр берём СНАЧАЛА из имени файла (надёжно для FEED — все файлы названы
+    шифром), штамп — только фолбэк. Раньше штамп цеплял случайные числа из
+    чертежей и давал мусорный шифр."""
     is_pdf = file_name.lower().endswith(".pdf")
     is_docx = file_name.lower().endswith(".docx")
 
@@ -100,39 +166,30 @@ def parse_feed_file(file_name: str, raw: bytes) -> dict[str, Any]:
         text = _extract_text(raw) or _extract_text_pdftotext(raw)
     elif is_docx:
         text = extract_docx_text(raw)[:20000]
-
     text_upper = (text or "").upper()
 
-    cipher = None
-    detected_from = "none"
-    if text_upper:
-        cipher = _extract_cipher_from_text(text_upper)
-        if cipher:
+    # 1. Имя файла — приоритетный источник шифра.
+    cipher = cipher_from_filename(file_name)
+    detected_from = "filename" if cipher else "none"
+    # 2. Фолбэк — штамп, только если в имени шифра нет.
+    if not cipher and text_upper:
+        stamp_cipher = _extract_cipher_from_text(text_upper)
+        if stamp_cipher:
+            cipher = stamp_cipher
             detected_from = "stamp"
-    if not cipher:
-        cipher = cipher_from_filename(file_name)
-        if cipher:
-            detected_from = "filename"
 
-    rev = None
-    doc_number = None
+    doc_number, rev = (None, None)
     if cipher:
         doc_number, rev = split_rev(cipher)
 
-    # Ревизия/дата/цель из штампа (если есть текст)
     stamp_rev, stamp_date, purpose = (None, None, None)
     if text_upper:
         stamp_rev, stamp_date, purpose = _extract_stamp_triplet(text_upper)
     rev = rev or stamp_rev
 
-    title_en, title_ru = (None, None)
-    if text:
-        title_en, title_ru = _extract_drawing_title_parts(text)
-        if not title_en:
-            # «Requisition for X» в первых строках — годится как EN-название
-            m = re.search(r"(REQUISITION\s+FOR\s+[A-Z0-9 ()\-/.,]{3,80})", text_upper)
-            if m:
-                title_en = m.group(1).title()
+    doc_class = detect_class(text_upper) if text_upper else None
+    language = detect_language(text) if text else "NA"
+    title_en, title_ru = extract_titles(text) if text else (None, None)
 
     components = parse_components(doc_number) if doc_number else {"discipline": None, "doc_type": None}
 
@@ -141,7 +198,6 @@ def parse_feed_file(file_name: str, raw: bytes) -> dict[str, Any]:
         search_text = extract_pdf_text(raw)
     elif is_docx:
         search_text = extract_docx_text(raw)
-    # Ограничиваем, чтобы не раздувать БД.
     search_text = (search_text or "")[:200_000]
 
     return {
@@ -149,6 +205,8 @@ def parse_feed_file(file_name: str, raw: bytes) -> dict[str, Any]:
         "rev": rev,
         "rev_date": stamp_date,
         "issue_purpose": purpose,
+        "doc_class": doc_class,
+        "language": language,
         "title_en": title_en,
         "title_ru": title_ru,
         "discipline": components.get("discipline"),

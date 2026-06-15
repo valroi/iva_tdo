@@ -8,10 +8,22 @@
       "port": 3456
     },
     {
+      "name": "babyfund-dev",
+      "runtimeExecutable": "/Users/Valerii/.nvm/versions/node/v24.11.0/bin/npm",
+      "runtimeArgs": ["--prefix", "/Users/Valerii/Documents/babyfund", "run", "dev", "--", "-p", "3457"],
+      "port": 3457
+    },
+    {
       "name": "hrp-landing",
       "runtimeExecutable": "/Users/Valerii/.nvm/versions/node/v24.11.0/bin/npx",
       "runtimeArgs": ["serve", "/Users/Valerii/Documents/hrp-landing/dist", "-p", "5176", "--no-clipboard"],
       "port": 5176
+    },
+    {
+      "name": "smart-solution-landing",
+      "runtimeExecutable": "/Users/Valerii/.nvm/versions/node/v24.11.0/bin/pnpm",
+      "runtimeArgs": ["--dir", "/Users/Valerii/Documents/smart-solution-landing", "dev"],
+      "port": 3000
     }
   ]
 }

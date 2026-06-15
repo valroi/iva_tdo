@@ -24,6 +24,7 @@ from app.models import (
     FeedDocument,
     FeedFile,
     FeedFileKind,
+    FeedFileLang,
     Project,
     User,
 )
@@ -134,6 +135,7 @@ def upload_feed_documents(
             .first()
         )
         is_new = doc is None
+        parsed_class = FeedDocClass.C1A if parsed.get("doc_class") == "1A" else FeedDocClass.C1
         if doc is None:
             doc = FeedDocument(
                 project_id=project_id,
@@ -142,11 +144,14 @@ def upload_feed_documents(
                 doc_type=parsed.get("doc_type"),
                 title_en=parsed.get("title_en"),
                 title_ru=parsed.get("title_ru"),
-                doc_class=FeedDocClass.C1,
+                doc_class=parsed_class,
                 created_by_id=current_user.id,
             )
             db.add(doc)
             db.flush()
+        elif parsed.get("doc_class") == "1A":
+            # Если хоть один файл документа помечен классом 1А — поднимаем класс.
+            doc.doc_class = FeedDocClass.C1A
 
         # Обновляем ревизию/метаданные, если новая ревизия старше или пусто.
         new_rev = parsed.get("rev")
@@ -159,13 +164,21 @@ def upload_feed_documents(
         if not doc.title_ru and parsed.get("title_ru"):
             doc.title_ru = parsed.get("title_ru")
         if parsed.get("search_text"):
-            doc.search_text = parsed["search_text"]
+            # Накапливаем текст всех языковых версий — для поиска по обеим.
+            existing = doc.search_text or ""
+            combined = (existing + "\n" + parsed["search_text"])[:400_000]
+            doc.search_text = combined
 
+        try:
+            file_lang = FeedFileLang(parsed.get("language") or "NA")
+        except ValueError:
+            file_lang = FeedFileLang.NA
         dest = _store_file(raw, fname, doc.id)
         db.add(
             FeedFile(
                 feed_document_id=doc.id,
                 kind=FeedFileKind.REVISION,
+                lang=file_lang,
                 rev=new_rev,
                 file_path=str(dest),
                 file_name=fname,
@@ -238,7 +251,8 @@ def upload_feed_file(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Дозагрузка файла к документу: ACRS (класс 1А) или доп. ревизия."""
+    """Дозагрузка файла к документу: ACRS (класс 1А), доп. ревизия или
+    другая языковая версия (RU/EN) под тем же шифром."""
     doc = _get_doc_or_404(db, doc_id)
     try:
         file_kind = FeedFileKind(kind.upper())
@@ -247,11 +261,21 @@ def upload_feed_file(
     raw = file.file.read()
     if len(raw) > MAX_FEED_FILE:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large")
+    # Определяем язык и (для версии) ревизию из содержимого.
+    parsed = feed_import.parse_feed_file(file.filename or "file", raw)
+    try:
+        file_lang = FeedFileLang(parsed.get("language") or "NA")
+    except ValueError:
+        file_lang = FeedFileLang.NA
+    if file_kind == FeedFileKind.REVISION and parsed.get("search_text"):
+        doc.search_text = ((doc.search_text or "") + "\n" + parsed["search_text"])[:400_000]
     dest = _store_file(raw, file.filename or "file", doc.id)
     db.add(
         FeedFile(
             feed_document_id=doc.id,
             kind=file_kind,
+            lang=file_lang,
+            rev=parsed.get("rev") if file_kind == FeedFileKind.REVISION else None,
             file_path=str(dest),
             file_name=file.filename or "file",
             mime=file.content_type,
