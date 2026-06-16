@@ -498,6 +498,8 @@ export interface VendorInvitationItem {
 export interface VendorInvitationCreated extends VendorInvitationItem {
   invitation_link: string;
   token: string;
+  email_sent: boolean;
+  email_note: string | null;
 }
 
 export interface VendorMrTagView {

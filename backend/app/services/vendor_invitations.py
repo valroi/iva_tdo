@@ -42,8 +42,28 @@ def verify_secret(value: str, hashed: str | None) -> bool:
         return False
 
 
-def build_invitation_link(invitation_id: int, token: str) -> str:
-    base = settings.public_base_url.rstrip("/")
+def resolve_public_base(origin: str | None = None) -> str:
+    """Базовый URL для ссылок подрядчику.
+
+    Если PUBLIC_BASE_URL задан явно (не localhost) — он главный (прод).
+    Иначе берём Origin админского запроса (тот адрес/IP в локальной сети,
+    с которого реально открыт сайт), чтобы ссылка не уходила на localhost.
+    """
+    configured = settings.public_base_url.rstrip("/")
+    is_local = ("localhost" in configured) or ("127.0.0.1" in configured)
+    if configured and not is_local:
+        return configured
+    if origin:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(origin)
+        if parsed.scheme in ("http", "https") and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}"  # только схема+хост:порт
+    return configured
+
+
+def build_invitation_link(invitation_id: int, token: str, origin: str | None = None) -> str:
+    base = resolve_public_base(origin)
     return f"{base}/#/vendor/{invitation_id}?t={token}"
 
 

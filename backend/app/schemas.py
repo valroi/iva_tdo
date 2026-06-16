@@ -934,6 +934,8 @@ class VendorInvitationCreated(VendorInvitationRead):
     # Одноразовая выдача ссылки и токена — только при создании.
     invitation_link: str
     token: str
+    email_sent: bool = False          # письмо реально ушло через SMTP
+    email_note: str | None = None     # причина, если не ушло
 
 
 class VendorRequestCode(BaseModel):

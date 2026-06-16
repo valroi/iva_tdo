@@ -1,4 +1,4 @@
-import { App, Button, Card, DatePicker, Form, Input, Modal, Progress, Select, Space, Table, Tag, Tooltip, Typography, Upload } from "antd";
+import { Alert, App, Button, Card, DatePicker, Form, Input, Modal, Progress, Select, Space, Table, Tag, Tooltip, Typography, Upload } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { UploadOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
@@ -88,6 +88,7 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
   const [importOpen, setImportOpen] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [createdLink, setCreatedLink] = useState<string | null>(null);
+  const [createdEmail, setCreatedEmail] = useState<{ sent: boolean; note: string | null; to: string }>({ sent: false, note: null, to: "" });
   const [importFile, setImportFile] = useState<File | null>(null);
   const [createForm] = Form.useForm();
   const [importForm] = Form.useForm();
@@ -618,7 +619,11 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
           if (selectedMrId === null) return;
           try {
             const created = await createMrInvitation(selectedMrId, { vendor_company_name: values.company, vendor_contact_email: values.email });
-            setInviteOpen(false); setCreatedLink(created.invitation_link); await reload(); message.success("Приглашение создано");
+            setInviteOpen(false);
+            setCreatedLink(created.invitation_link);
+            setCreatedEmail({ sent: created.email_sent, note: created.email_note, to: created.vendor_contact_email });
+            await reload();
+            message.success("Приглашение создано");
           } catch (e) { message.error(e instanceof Error ? e.message : "Ошибка"); }
         }}>
           <Form.Item name="company" label="Компания" rules={[{ required: true }]}><Input placeholder="ООО Поставщик" /></Form.Item>
@@ -633,7 +638,14 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
           <Button key="c" onClick={() => setCreatedLink(null)}>Закрыть</Button>,
         ]}>
         <Space direction="vertical" size={8} style={{ width: "100%" }}>
-          <Typography.Text>Ссылка отправлена подрядчику на email. Можно скопировать вручную (показывается один раз):</Typography.Text>
+          {createdEmail.sent ? (
+            <Alert type="success" showIcon message={`Письмо со ссылкой отправлено на ${createdEmail.to}`}
+              description="Код доступа придёт на тот же адрес при входе подрядчика по ссылке." />
+          ) : (
+            <Alert type="warning" showIcon message="Письмо НЕ отправлено"
+              description={(createdEmail.note ?? "SMTP не настроен.") + " Скопируйте ссылку и передайте подрядчику вручную."} />
+          )}
+          <Typography.Text type="secondary">Персональная ссылка (показывается один раз):</Typography.Text>
           <Input.TextArea value={createdLink ?? ""} readOnly autoSize={{ minRows: 2, maxRows: 4 }} />
         </Space>
       </Modal>

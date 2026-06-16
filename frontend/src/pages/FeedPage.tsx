@@ -1,4 +1,5 @@
 import {
+  Alert,
   App,
   Button,
   Card,
@@ -505,6 +506,16 @@ export default function FeedPage({ currentUser }: Props): JSX.Element {
             <div key={i}>
               <Typography.Paragraph strong style={{ marginBottom: 4 }}>Вы: {entry.q}</Typography.Paragraph>
               <Card size="small">
+                {entry.a.mode === "ai" && (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    icon={<RobotOutlined />}
+                    style={{ marginBottom: 8 }}
+                    message="Ответ нейросети — ориентировочный"
+                    description="Сгенерирован по тексту документов и может быть неточным. Перед использованием сверьтесь с документами-источниками ниже."
+                  />
+                )}
                 <Typography.Paragraph style={{ whiteSpace: "pre-wrap", marginBottom: entry.a.sources.length ? 8 : 0 }}>
                   {entry.a.answer}
                 </Typography.Paragraph>

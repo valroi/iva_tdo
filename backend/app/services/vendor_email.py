@@ -21,8 +21,9 @@ def _smtp_configured() -> bool:
     return bool(settings.smtp_host.strip())
 
 
-def send_email(*, to: str, subject: str, body: str) -> None:
-    """Отправляет письмо. В dev-режиме (без SMTP) — пишет в лог."""
+def send_email(*, to: str, subject: str, body: str) -> bool:
+    """Отправляет письмо. Возвращает True, если письмо реально ушло через SMTP.
+    В dev-режиме (SMTP не настроен) — пишет в лог и возвращает False."""
     if not _smtp_configured():
         logger.warning(
             "[VENDOR EMAIL — DEV MODE, SMTP не настроен]\n  TO: %s\n  SUBJ: %s\n  BODY:\n%s",
@@ -30,7 +31,7 @@ def send_email(*, to: str, subject: str, body: str) -> None:
             subject,
             body,
         )
-        return
+        return False
 
     msg = EmailMessage()
     msg["From"] = settings.smtp_from
@@ -38,24 +39,21 @@ def send_email(*, to: str, subject: str, body: str) -> None:
     msg["Subject"] = subject
     msg.set_content(body)
 
-    try:
-        if settings.smtp_use_tls:
-            with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20) as server:
-                server.starttls()
-                if settings.smtp_user:
-                    server.login(settings.smtp_user, settings.smtp_password)
-                server.send_message(msg)
-        else:
-            with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20) as server:
-                if settings.smtp_user:
-                    server.login(settings.smtp_user, settings.smtp_password)
-                server.send_message(msg)
-    except Exception as exc:  # noqa: BLE001 — письмо не должно ронять запрос
-        logger.error("Не удалось отправить email подрядчику %s: %s", to, exc)
-        raise
+    if settings.smtp_use_tls:
+        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20) as server:
+            server.starttls()
+            if settings.smtp_user:
+                server.login(settings.smtp_user, settings.smtp_password)
+            server.send_message(msg)
+    else:
+        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20) as server:
+            if settings.smtp_user:
+                server.login(settings.smtp_user, settings.smtp_password)
+            server.send_message(msg)
+    return True
 
 
-def send_invitation_code(*, to: str, company_name: str, mr_code: str, code: str) -> None:
+def send_invitation_code(*, to: str, company_name: str, mr_code: str, code: str) -> bool:
     subject = f"Код доступа к заявке на поставку {mr_code}"
     body = (
         f"Здравствуйте, {company_name}!\n\n"
@@ -64,10 +62,10 @@ def send_invitation_code(*, to: str, company_name: str, mr_code: str, code: str)
         f"Код действует ограниченное время. Если вы не запрашивали доступ, "
         f"проигнорируйте это письмо.\n"
     )
-    send_email(to=to, subject=subject, body=body)
+    return send_email(to=to, subject=subject, body=body)
 
 
-def send_invitation_link(*, to: str, company_name: str, mr_code: str, link: str) -> None:
+def send_invitation_link(*, to: str, company_name: str, mr_code: str, link: str) -> bool:
     subject = f"Приглашение к заявке на поставку {mr_code}"
     body = (
         f"Здравствуйте, {company_name}!\n\n"
@@ -76,4 +74,4 @@ def send_invitation_link(*, to: str, company_name: str, mr_code: str, link: str)
         f"При входе потребуется код подтверждения, который придёт на этот адрес.\n"
         f"Ссылка персональная — не передавайте её третьим лицам.\n"
     )
-    send_email(to=to, subject=subject, body=body)
+    return send_email(to=to, subject=subject, body=body)

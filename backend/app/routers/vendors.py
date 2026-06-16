@@ -626,17 +626,24 @@ def create_invitation(
     db.commit()
     db.refresh(inv)
 
-    link = vendor_invitations.build_invitation_link(inv.id, token)
+    # Ссылку строим от Origin админского запроса — чтобы в локальной сети она
+    # вела на IP сайта, а не на localhost (если PUBLIC_BASE_URL не задан явно).
+    origin = request.headers.get("origin") or request.headers.get("referer")
+    link = vendor_invitations.build_invitation_link(inv.id, token, origin=origin)
     # Письмо-приглашение со ссылкой (код придёт отдельно при входе).
+    email_sent = False
+    email_note: str | None = None
     try:
-        vendor_email.send_invitation_link(
+        email_sent = vendor_email.send_invitation_link(
             to=inv.vendor_contact_email,
             company_name=inv.vendor_company_name,
             mr_code=mr.code,
             link=link,
         )
-    except Exception:  # noqa: BLE001 — письмо не должно ронять создание
-        pass
+        if not email_sent:
+            email_note = "SMTP не настроен — письмо не отправлено. Передайте ссылку вручную."
+    except Exception as exc:  # noqa: BLE001 — письмо не должно ронять создание
+        email_note = f"Ошибка отправки письма: {str(exc)[:150]}"
     write_audit(
         db,
         action="invitation_created",
@@ -648,7 +655,13 @@ def create_invitation(
     )
 
     base = VendorInvitationRead.model_validate(inv, from_attributes=True)
-    return VendorInvitationCreated(**base.model_dump(), invitation_link=link, token=token)
+    return VendorInvitationCreated(
+        **base.model_dump(),
+        invitation_link=link,
+        token=token,
+        email_sent=email_sent,
+        email_note=email_note,
+    )
 
 
 @router.post("/mr/{mr_id}/invitations/{invitation_id}/revoke", response_model=VendorInvitationRead)
