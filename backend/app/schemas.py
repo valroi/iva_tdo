@@ -1120,6 +1120,8 @@ class FeedFileRead(BaseModel):
     mime: str | None
     size_bytes: int | None
     created_at: datetime
+    is_master: bool = False    # PDF-ревизия — главная (финальная) версия
+    is_editable: bool = False  # не-PDF (docx/xls…) — редактируемый, не главный
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -1140,6 +1142,9 @@ class FeedDocumentRead(BaseModel):
     updated_at: datetime
     files: list[FeedFileRead] = []
     has_acrs: bool = False
+    master_langs: list[str] = []        # языки главных (PDF) версий
+    incomplete: bool = False            # не хватает обязательной версии
+    incomplete_reason: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -1157,7 +1162,7 @@ class FeedDocumentUpdate(BaseModel):
 
 class FeedUploadItemResult(BaseModel):
     file_name: str
-    status: str                 # created | updated | failed
+    status: str                 # created | updated | duplicate | failed
     doc_number: str | None = None
     document_id: int | None = None
     detected_from: str | None = None  # stamp | filename | none
@@ -1169,6 +1174,7 @@ class FeedUploadResult(BaseModel):
     created: int
     updated: int
     failed: int
+    duplicate: int = 0
 
 
 class FeedSearchHit(BaseModel):

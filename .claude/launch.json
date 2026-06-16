@@ -2,6 +2,12 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "iva-tdo",
+      "runtimeExecutable": "/Users/Valerii/.nvm/versions/node/v24.11.0/bin/npm",
+      "runtimeArgs": ["--prefix", "/Users/Valerii/Documents/iva_tdo/frontend", "run", "dev"],
+      "port": 3003
+    },
+    {
       "name": "svadba",
       "runtimeExecutable": "/Users/Valerii/.nvm/versions/node/v24.11.0/bin/npx",
       "runtimeArgs": ["serve", "/Users/Valerii/Documents/svadba", "-p", "3456", "--no-clipboard"],

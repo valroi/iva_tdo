@@ -6,6 +6,7 @@ import {
   Form,
   Input,
   Modal,
+  Progress,
   Select,
   Space,
   Table,
@@ -60,6 +61,7 @@ export default function FeedPage({ currentUser }: Props): JSX.Element {
   const [disciplineFilter, setDisciplineFilter] = useState<string | null>(null);
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number; current: string } | null>(null);
   const [editDoc, setEditDoc] = useState<FeedDocumentItem | null>(null);
   const [editForm] = Form.useForm();
   const [searchQ, setSearchQ] = useState("");
@@ -115,19 +117,33 @@ export default function FeedPage({ currentUser }: Props): JSX.Element {
   const handleBulkUpload = async () => {
     if (projectId === null || uploadFiles.length === 0) return;
     setUploading(true);
+    // Грузим по одному файлу, чтобы показывать живой прогресс (PDF парсятся
+    // по несколько секунд, иначе кажется что «висит»).
+    let created = 0, updated = 0, failed = 0, duplicate = 0, unresolved = 0;
+    const total = uploadFiles.length;
     try {
-      const res = await uploadFeedDocuments(projectId, uploadFiles);
-      message.success(`Создано: ${res.created}, обновлено: ${res.updated}, ошибок: ${res.failed}`);
-      const unresolved = res.items.filter((i) => i.doc_number?.startsWith("UNRESOLVED"));
-      if (unresolved.length) {
-        message.warning(`Не распознан шифр у ${unresolved.length} файлов — поправьте вручную (строки UNRESOLVED).`);
+      for (let i = 0; i < uploadFiles.length; i++) {
+        const file = uploadFiles[i];
+        setProgress({ done: i, total, current: file.name });
+        try {
+          const res = await uploadFeedDocuments(projectId, [file]);
+          created += res.created; updated += res.updated; failed += res.failed; duplicate += res.duplicate;
+          if (res.items.some((it) => it.doc_number?.startsWith("UNRESOLVED"))) unresolved += 1;
+        } catch {
+          failed += 1;
+        }
+        setProgress({ done: i + 1, total, current: file.name });
       }
+      const parts = [`создано: ${created}`, `обновлено: ${updated}`];
+      if (duplicate) parts.push(`дублей пропущено: ${duplicate}`);
+      if (failed) parts.push(`ошибок: ${failed}`);
+      message.success(parts.join(", "));
+      if (unresolved) message.warning(`Не распознан шифр у ${unresolved} файлов — поправьте вручную (строки UNRESOLVED).`);
       setUploadFiles([]);
       await loadDocs(projectId);
-    } catch (e) {
-      message.error(e instanceof Error ? e.message : "Ошибка загрузки");
     } finally {
       setUploading(false);
+      setProgress(null);
     }
   };
 
@@ -163,9 +179,20 @@ export default function FeedPage({ currentUser }: Props): JSX.Element {
       title: "Шифр",
       dataIndex: "doc_number",
       key: "doc_number",
-      width: 230,
-      render: (v: string) =>
-        v.startsWith("UNRESOLVED") ? <Tag color="error">{v.slice(0, 28)}…</Tag> : <Typography.Text copyable={{ text: v }}>{v}</Typography.Text>,
+      width: 250,
+      render: (v: string, row) =>
+        v.startsWith("UNRESOLVED") ? (
+          <Tag color="error">{v.slice(0, 28)}…</Tag>
+        ) : (
+          <Space size={4} wrap>
+            <Typography.Text copyable={{ text: v }} style={{ fontSize: 12 }}>{v}</Typography.Text>
+            {row.incomplete && (
+              <Tag color="error" style={{ marginRight: 0 }} title={row.incomplete_reason ?? "Не хватает версии документа"}>
+                ⚠ {row.incomplete_reason ?? "нет файла"}
+              </Tag>
+            )}
+          </Space>
+        ),
     },
     { title: "Название (EN)", dataIndex: "title_en", key: "ten", ellipsis: true, render: (v) => v ?? "—" },
     { title: "Название (RU)", dataIndex: "title_ru", key: "tru", ellipsis: true, render: (v) => v ?? "—" },
@@ -196,7 +223,10 @@ export default function FeedPage({ currentUser }: Props): JSX.Element {
         <Space direction="vertical" size={2}>
           {row.files.filter((f) => f.kind === "REVISION").map((f) => (
             <Space key={f.id} size={4}>
-              <Tag color={LANG_COLOR[f.lang]} style={{ marginRight: 0 }}>{LANG_LABEL[f.lang]}</Tag>
+              <Tag color={f.is_editable ? "default" : LANG_COLOR[f.lang]} style={{ marginRight: 0 }}>{LANG_LABEL[f.lang]}</Tag>
+              {f.is_editable && (
+                <Tag color="gold" style={{ marginRight: 0 }} title="Не-PDF (редактируемый исходник) — не считается главной версией">ред.</Tag>
+              )}
               <Button size="small" type="link" icon={<DownloadOutlined />} style={{ padding: 0 }}
                 onClick={() => void downloadFeedFile(f.id, f.file_name)}>
                 {f.rev ? `rev ${f.rev}` : f.file_name.slice(0, 16)}
@@ -314,7 +344,8 @@ export default function FeedPage({ currentUser }: Props): JSX.Element {
         steps={[
           "Выберите проект и загрузите документы пачкой — шифр, дисциплина и ревизия распознаются автоматически (штамп → имя файла).",
           "Нераспознанные строки помечаются UNRESOLVED — поправьте шифр кнопкой «Изм.».",
-          "Для документов класса 1А прикрепите ACRS. Поиск и AI-чат — по всему тексту документации.",
+          "Класс 1 = главными считаются PDF (RU и EN либо двуязычный); только одна версия — красный тег «не хватает». Класс 1А — английский PDF + ACRS.",
+          "Дубли по содержимому не загружаются (даже под другим именем). Не-PDF (docx/xls) помечаются «ред.» — это редактируемые исходники, не главные.",
         ]}
       />
 
@@ -385,12 +416,52 @@ export default function FeedPage({ currentUser }: Props): JSX.Element {
       {Object.keys(docsByDiscipline).length === 0 && (
         <Card><Typography.Text type="secondary">Документов пока нет. Загрузите файлы выше.</Typography.Text></Card>
       )}
-      {Object.entries(docsByDiscipline).map(([disc, list]) => (
-        <Card key={disc} size="small" style={{ marginBottom: 12 }}
-          title={<Space><Tag color="blue">{disc}</Tag><Typography.Text strong>Дисциплина {disc}</Typography.Text><Typography.Text type="secondary">({list.length})</Typography.Text></Space>}>
-          <Table rowKey="id" size="small" columns={columns} dataSource={list} pagination={list.length > 20 ? { pageSize: 20 } : false} />
-        </Card>
-      ))}
+      {(() => {
+        const totalIncomplete = visibleDocs.filter((d) => d.incomplete).length;
+        return totalIncomplete > 0 ? (
+          <Card size="small" style={{ marginBottom: 12, borderColor: "#ffccc7", background: "#fff2f0" }}>
+            <Space wrap>
+              <Tag color="error">⚠ Не хватает файлов: {totalIncomplete}</Tag>
+              {disciplines.map((disc) => {
+                const n = visibleDocs.filter((d) => d.discipline_code === disc && d.incomplete).length;
+                return n > 0 ? <Tag key={disc} color="error" style={{ marginRight: 0 }}>{disc}: {n}</Tag> : null;
+              })}
+              <Typography.Text type="secondary">— класс 1 без второй языковой версии или без PDF; догрузите недостающее.</Typography.Text>
+            </Space>
+          </Card>
+        ) : null;
+      })()}
+      {Object.entries(docsByDiscipline).map(([disc, list]) => {
+        const incompleteN = list.filter((d) => d.incomplete).length;
+        return (
+          <Card key={disc} size="small" style={{ marginBottom: 12 }}
+            title={
+              <Space>
+                <Tag color="blue">{disc}</Tag>
+                <Typography.Text strong>Дисциплина {disc}</Typography.Text>
+                <Typography.Text type="secondary">({list.length})</Typography.Text>
+                {incompleteN > 0 && <Tag color="error" style={{ marginRight: 0 }}>⚠ {incompleteN} без комплекта</Tag>}
+              </Space>
+            }>
+            <Table rowKey="id" size="small" columns={columns} dataSource={list} pagination={list.length > 20 ? { pageSize: 20 } : false} />
+          </Card>
+        );
+      })}
+
+      {/* Прогресс загрузки */}
+      <Modal open={progress !== null} title="Загрузка документов в FEED" footer={null} closable={false} maskClosable={false}>
+        {progress && (
+          <Space direction="vertical" size={8} style={{ width: "100%" }}>
+            <Progress percent={Math.round((progress.done / progress.total) * 100)} status="active" />
+            <Typography.Text>
+              Файл {Math.min(progress.done + 1, progress.total)} из {progress.total}
+            </Typography.Text>
+            <Typography.Text type="secondary" ellipsis>
+              Обрабатывается: {progress.current} — распознаём шифр, дисциплину, текст для поиска…
+            </Typography.Text>
+          </Space>
+        )}
+      </Modal>
 
       {/* Редактирование документа */}
       <Modal open={editDoc !== null} title={`Документ: ${editDoc?.doc_number ?? ""}`} okText="Сохранить" cancelText="Отмена"

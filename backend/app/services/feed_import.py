@@ -161,11 +161,11 @@ def parse_feed_file(file_name: str, raw: bytes) -> dict[str, Any]:
     is_docx = file_name.lower().endswith(".docx")
 
     # Текст извлекаем ОДИН раз и переиспользуем и для метаданных, и для поиска.
-    # pypdf на векторных чертежах медленный (~1с/стр), поэтому ограничиваем
-    # число страниц — шифр/класс/наименование всегда на первых листах.
+    # pypdf на векторных чертежах медленный (~1с/стр); берём достаточно
+    # страниц для качественного поиска (прогресс загрузки показываем на UI).
     text = ""
     if is_pdf:
-        text = extract_pdf_text(raw, max_pages=4) or _extract_text_pdftotext(raw)
+        text = extract_pdf_text(raw, max_pages=12) or _extract_text_pdftotext(raw)
     elif is_docx:
         text = extract_docx_text(raw)
     text_upper = (text or "").upper()

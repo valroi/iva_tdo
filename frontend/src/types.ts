@@ -561,18 +561,20 @@ export type FeedFileLang = "RU" | "EN" | "BI" | "NA";
 export interface FeedFileItem {
   id:number; feed_document_id:number; kind:"REVISION"|"ACRS"; lang:FeedFileLang; rev:string|null;
   file_name:string; mime:string|null; size_bytes:number|null; created_at:string;
+  is_master:boolean; is_editable:boolean;
 }
 export interface FeedDocumentItem {
   id:number; project_id:number; discipline_code:string; doc_number:string;
   title_en:string|null; title_ru:string|null; doc_class:FeedDocClass; doc_type:string|null;
   latest_rev:string|null; issue_purpose:string|null; rev_date:string|null;
   created_at:string; updated_at:string; files:FeedFileItem[]; has_acrs:boolean;
+  master_langs:string[]; incomplete:boolean; incomplete_reason:string|null;
 }
 export interface FeedUploadItemResult {
   file_name:string; status:string; doc_number:string|null; document_id:number|null;
   detected_from:string|null; message:string|null;
 }
-export interface FeedUploadResult { items:FeedUploadItemResult[]; created:number; updated:number; failed:number; }
+export interface FeedUploadResult { items:FeedUploadItemResult[]; created:number; updated:number; failed:number; duplicate:number; }
 export interface FeedSearchHit {
   document_id:number; doc_number:string; title_en:string|null; title_ru:string|null;
   discipline_code:string; latest_rev:string|null; snippet:string|null;

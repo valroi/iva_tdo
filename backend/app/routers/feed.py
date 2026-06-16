@@ -13,7 +13,6 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
-from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -46,6 +45,10 @@ FEED_ROOT = Path(settings.feed_storage_root)
 MAX_FEED_FILE = 200 * 1024 * 1024  # 200 MB — чертежи бывают тяжёлые
 
 
+def _is_pdf(file_name: str | None, mime: str | None) -> bool:
+    return bool((file_name or "").lower().endswith(".pdf") or (mime or "").lower() == "application/pdf")
+
+
 def _doc_read(db: Session, doc: FeedDocument) -> FeedDocumentRead:
     files = (
         db.query(FeedFile)
@@ -54,8 +57,42 @@ def _doc_read(db: Session, doc: FeedDocument) -> FeedDocumentRead:
         .all()
     )
     data = FeedDocumentRead.model_validate(doc, from_attributes=True)
-    data.files = [FeedFileRead.model_validate(f, from_attributes=True) for f in files]
+    file_reads: list[FeedFileRead] = []
+    master_langs: set[str] = set()
+    for f in files:
+        fr = FeedFileRead.model_validate(f, from_attributes=True)
+        is_pdf = _is_pdf(f.file_name, f.mime)
+        # Главная версия — PDF-ревизия. Не-PDF (docx/xls…) — редактируемый исходник.
+        fr.is_master = bool(is_pdf and f.kind == FeedFileKind.REVISION)
+        fr.is_editable = bool((not is_pdf) and f.kind == FeedFileKind.REVISION)
+        if fr.is_master:
+            master_langs.add(f.lang.value)
+        file_reads.append(fr)
+    data.files = file_reads
     data.has_acrs = any(f.kind == FeedFileKind.ACRS for f in files)
+    data.master_langs = sorted(master_langs)
+
+    # Комплектность. Класс 1: нужна двуязычная (BI) ИЛИ обе версии EN+RU.
+    # Класс 1А: только английская версия (+ ACRS).
+    incomplete, reason = False, None
+    if doc.doc_class == FeedDocClass.C1:
+        if not master_langs:
+            incomplete, reason = True, "нет PDF-версии"
+        elif FeedFileLang.BI.value in master_langs:
+            pass  # двуязычный покрывает оба языка
+        elif FeedFileLang.EN.value in master_langs and FeedFileLang.RU.value in master_langs:
+            pass
+        else:
+            have = "EN" if FeedFileLang.EN.value in master_langs else ("RU" if FeedFileLang.RU.value in master_langs else "—")
+            missing = "RU" if have == "EN" else "EN"
+            incomplete, reason = True, f"есть только {have}, не хватает {missing}"
+    else:  # C1A
+        if FeedFileLang.EN.value not in master_langs and FeedFileLang.BI.value not in master_langs:
+            incomplete, reason = True, "нет английской PDF-версии"
+        elif not data.has_acrs:
+            incomplete, reason = True, "нет ACRS"
+    data.incomplete = incomplete
+    data.incomplete_reason = reason
     return data
 
 
@@ -107,7 +144,8 @@ def upload_feed_documents(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
     items: list[FeedUploadItemResult] = []
-    created = updated = failed = 0
+    created = updated = failed = duplicate = 0
+    batch_hashes: set[str] = set()
 
     for up in files:
         fname = up.filename or "document"
@@ -116,6 +154,26 @@ def upload_feed_documents(
             items.append(FeedUploadItemResult(file_name=fname, status="failed", message="File too large"))
             failed += 1
             continue
+
+        # Дедуп по содержимому: одинаковый файл (даже под другим именем) не
+        # загружаем повторно — ни в рамках пачки, ни если уже есть в проекте.
+        digest = hashlib.sha256(raw).hexdigest()
+        if digest in batch_hashes:
+            items.append(FeedUploadItemResult(file_name=fname, status="duplicate", message="Дубликат в этой пачке"))
+            duplicate += 1
+            continue
+        existing_dup = (
+            db.query(FeedFile.id)
+            .join(FeedDocument, FeedFile.feed_document_id == FeedDocument.id)
+            .filter(FeedDocument.project_id == project_id, FeedFile.sha256 == digest)
+            .first()
+        )
+        if existing_dup:
+            items.append(FeedUploadItemResult(file_name=fname, status="duplicate", message="Уже загружен в проект"))
+            duplicate += 1
+            continue
+        batch_hashes.add(digest)
+
         try:
             parsed = feed_import.parse_feed_file(fname, raw)
         except Exception as exc:  # noqa: BLE001 — одна битая PDF не должна валить пачку
@@ -184,7 +242,7 @@ def upload_feed_documents(
                 file_name=fname,
                 mime=up.content_type,
                 size_bytes=len(raw),
-                sha256=hashlib.sha256(raw).hexdigest(),
+                sha256=digest,
                 uploaded_by_id=current_user.id,
             )
         )
@@ -204,7 +262,7 @@ def upload_feed_documents(
         else:
             updated += 1
 
-    return FeedUploadResult(items=items, created=created, updated=updated, failed=failed)
+    return FeedUploadResult(items=items, created=created, updated=updated, failed=failed, duplicate=duplicate)
 
 
 @router.patch("/feed/documents/{doc_id}", response_model=FeedDocumentRead)
@@ -265,6 +323,15 @@ def upload_feed_file(
     raw = file.file.read()
     if len(raw) > MAX_FEED_FILE:
         raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large")
+    digest = hashlib.sha256(raw).hexdigest()
+    existing_dup = (
+        db.query(FeedFile.id)
+        .join(FeedDocument, FeedFile.feed_document_id == FeedDocument.id)
+        .filter(FeedDocument.project_id == doc.project_id, FeedFile.sha256 == digest)
+        .first()
+    )
+    if existing_dup:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Такой файл уже загружен в проект")
     # Определяем язык и (для версии) ревизию из содержимого.
     parsed = feed_import.parse_feed_file(file.filename or "file", raw)
     try:
@@ -284,7 +351,7 @@ def upload_feed_file(
             file_name=file.filename or "file",
             mime=file.content_type,
             size_bytes=len(raw),
-            sha256=hashlib.sha256(raw).hexdigest(),
+            sha256=digest,
             uploaded_by_id=current_user.id,
         )
     )
@@ -325,34 +392,30 @@ def download_feed_file(
 
 # ------------------------------------------------------------- search / ask
 def _keyword_hits(db: Session, q: str, project_id: int | None, limit: int = 10) -> list[tuple[FeedDocument, str | None]]:
-    words = [w for w in re.split(r"\s+", q.strip()) if len(w) >= 3][:6]
+    # casefold() + подсчёт в Python: SQLite LIKE/lower() не различает регистр
+    # кириллицы, из-за чего «график» не находил «График» (выдача мусорных
+    # источников). Объём FEED-документов небольшой — скорим на стороне Python.
+    words = [w.casefold() for w in re.split(r"\W+", q, flags=re.UNICODE) if len(w) >= 3][:8]
     if not words:
         return []
     query = db.query(FeedDocument)
     if project_id is not None:
         query = query.filter(FeedDocument.project_id == project_id)
-    conditions = []
-    for w in words:
-        like = f"%{w}%"
-        conditions.append(
-            or_(
-                FeedDocument.search_text.ilike(like),
-                FeedDocument.doc_number.ilike(like),
-                FeedDocument.title_en.ilike(like),
-                FeedDocument.title_ru.ilike(like),
-            )
-        )
-    docs = query.filter(or_(*conditions)).limit(limit * 3).all()
+    docs = query.all()
 
-    # Скоринг: сколько слов реально встретилось; сниппет вокруг первого вхождения.
     scored: list[tuple[int, FeedDocument, str | None]] = []
     for d in docs:
-        haystack = " ".join(filter(None, [d.doc_number, d.title_en or "", d.title_ru or "", d.search_text or ""])).lower()
-        score = sum(1 for w in words if w.lower() in haystack)
+        head = f"{d.doc_number} {d.title_en or ''} {d.title_ru or ''}".casefold()
+        body = (d.search_text or "").casefold()
+        # Совпадение в шифре/заголовке весомее, чем в теле; считаем вхождения.
+        score = sum(head.count(w) * 5 + body.count(w) for w in words)
+        if score == 0:
+            continue  # показываем ТОЛЬКО реально релевантные документы
         snippet = None
         text = d.search_text or ""
+        low = text.casefold()
         for w in words:
-            idx = text.lower().find(w.lower())
+            idx = low.find(w)
             if idx >= 0:
                 start = max(0, idx - 80)
                 snippet = ("…" if start else "") + text[start : idx + 160].replace("\n", " ") + "…"
@@ -459,14 +522,15 @@ def ask_feed(
 
     # Контекст для LLM. Если по ключевым словам ничего не нашли — берём
     # свежие документы проекта (с непустым текстом), чтобы AI мог ответить
-    # на общий вопрос, а не просить «дайте фрагменты».
+    # на общий вопрос. ВАЖНО: эти fallback-доки НЕ выдаём как источники —
+    # иначе в ответе всплывают нерелевантные шифры (жалоба заказчика).
     ctx_docs = [d for d, _ in hits]
     if not ctx_docs:
         q = db.query(FeedDocument)
         if project_id is not None:
             q = q.filter(FeedDocument.project_id == project_id)
         ctx_docs = q.filter(FeedDocument.search_text.isnot(None)).order_by(FeedDocument.updated_at.desc()).limit(5).all()
-        sources = [_hit_schema(d, None) for d in ctx_docs]
+        # sources остаётся пустым: показываем только то, что реально совпало.
     context_parts = []
     for d in ctx_docs:
         body = (d.search_text or "")[:4000]
