@@ -354,6 +354,20 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
                   onOk: async () => { await deleteMr(selectedMr.id); setSelectedMrId(null); await loadMr(); message.success("Удалено"); },
                 })}>{t("vend.deleteMr")}</Button>
               )}
+              {/* Принудительное удаление (для админа) — когда обычное недоступно */}
+              {currentUser.permissions.can_manage_users && !(selectedMr.status === "DRAFT" && selectedMr.invitations_count === 0) && (
+                <Button size="small" danger onClick={() => modal.confirm({
+                  title: "Занулить (полностью удалить) MR?",
+                  content: `${selectedMr.code} будет удалена вместе со всеми приглашениями, ответами, котировками и файлами подрядчиков. Действие необратимо.`,
+                  okText: "Удалить полностью", okButtonProps: { danger: true }, cancelText: "Отмена",
+                  onOk: async () => {
+                    try {
+                      await deleteMr(selectedMr.id, true);
+                      setSelectedMrId(null); await loadMr(); message.success("MR удалена");
+                    } catch (e) { message.error(e instanceof Error ? e.message : "Ошибка удаления"); }
+                  },
+                })}>Занулить MR</Button>
+              )}
             </Space>
           }
         >

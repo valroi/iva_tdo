@@ -31,8 +31,11 @@ from app.models import (
     Project,
     User,
     UserRole,
+    VendorAuditLog,
     VendorInvitation,
+    VendorItemResponse,
     VendorQuote,
+    VendorUpload,
 )
 from app.schemas import (
     MrCreate,
@@ -200,18 +203,41 @@ def update_mr(
 @router.delete("/mr/{mr_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_mr(
     mr_id: int,
+    force: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Удаление MR.
+
+    Обычное: только черновик без приглашений (защита истории тендера).
+    force=true: полное каскадное удаление вместе с приглашениями, ответами,
+    котировками и файлами подрядчиков — только для администратора
+    (can_manage_users). Используется, чтобы «занулить» старую/ошибочную MR.
+    """
+    from app.deps import has_permission
+
     mr = _get_mr_or_404(db, mr_id)
     ensure_can_manage_mr(db, user=current_user, mr=mr)
+
+    if force:
+        if not has_permission(current_user, "can_manage_users"):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Force delete is admin only")
+        paths = _force_delete_mr(db, mr)
+        db.commit()
+        for p in paths:  # файлы чистим только после успешного коммита БД
+            try:
+                Path(p).unlink(missing_ok=True)
+            except OSError:
+                pass
+        return None
+
     # Удалять можно только черновик без приглашений (не было контакта с
     # подрядчиками). Это защищает историю тендера.
     has_invitations = db.query(VendorInvitation).filter(VendorInvitation.mr_id == mr.id).first() is not None
     if mr.status != MrStatus.DRAFT or has_invitations:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Only a DRAFT MR without invitations can be deleted",
+            detail="Only a DRAFT MR without invitations can be deleted (use force delete to remove an MR with invitations)",
         )
     db.query(MrTag).filter(MrTag.mr_id == mr.id).delete()
     db.query(MrOwnerFile).filter(MrOwnerFile.mr_id == mr.id).delete()
@@ -220,6 +246,41 @@ def delete_mr(
     db.delete(mr)
     db.commit()
     return None
+
+
+def _force_delete_mr(db: Session, mr: MaterialRequisition) -> list[str]:
+    """Каскадно удаляет MR и все зависимые записи (FK-безопасный порядок).
+    Возвращает пути к файлам для удаления с диска после коммита."""
+    inv_ids = [i.id for i in db.query(VendorInvitation.id).filter(VendorInvitation.mr_id == mr.id).all()]
+    inv_ids = [row[0] if isinstance(row, tuple) else row for row in inv_ids]
+
+    # Пути к файлам — соберём до удаления, чистим с диска после коммита.
+    file_paths: list[str] = []
+    if inv_ids:
+        for f in db.query(VendorUpload).filter(VendorUpload.invitation_id.in_(inv_ids)).all():
+            if f.file_path:
+                file_paths.append(f.file_path)
+    for f in db.query(MrOwnerFile).filter(MrOwnerFile.mr_id == mr.id).all():
+        if getattr(f, "file_path", None):
+            file_paths.append(f.file_path)
+
+    # Дети приглашений.
+    if inv_ids:
+        db.query(VendorQuote).filter(VendorQuote.invitation_id.in_(inv_ids)).delete(synchronize_session=False)
+        db.query(VendorUpload).filter(VendorUpload.invitation_id.in_(inv_ids)).delete(synchronize_session=False)
+        db.query(VendorItemResponse).filter(VendorItemResponse.invitation_id.in_(inv_ids)).delete(synchronize_session=False)
+        db.query(MrQuestion).filter(MrQuestion.invitation_id.in_(inv_ids)).delete(synchronize_session=False)
+        db.query(VendorAuditLog).filter(VendorAuditLog.invitation_id.in_(inv_ids)).delete(synchronize_session=False)
+    # Прямые дети MR.
+    db.query(MrQuestion).filter(MrQuestion.mr_id == mr.id).delete(synchronize_session=False)
+    db.query(VendorAuditLog).filter(VendorAuditLog.mr_id == mr.id).delete(synchronize_session=False)
+    db.query(VendorInvitation).filter(VendorInvitation.mr_id == mr.id).delete(synchronize_session=False)
+    db.query(MrTag).filter(MrTag.mr_id == mr.id).delete(synchronize_session=False)
+    db.query(MrOwnerFile).filter(MrOwnerFile.mr_id == mr.id).delete(synchronize_session=False)
+    db.query(MrOwnerItem).filter(MrOwnerItem.mr_id == mr.id).delete(synchronize_session=False)
+    db.query(MrVendorItem).filter(MrVendorItem.mr_id == mr.id).delete(synchronize_session=False)
+    db.delete(mr)
+    return file_paths
 
 
 # --------------------------------------------------------------------- Tags

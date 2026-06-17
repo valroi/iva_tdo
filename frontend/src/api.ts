@@ -975,8 +975,8 @@ export function updateMr(
   return request<MrItem>(`/mr/${mrId}`, { method: "PATCH", body: JSON.stringify(payload) });
 }
 
-export function deleteMr(mrId: number): Promise<void> {
-  return request<void>(`/mr/${mrId}`, { method: "DELETE" });
+export function deleteMr(mrId: number, force = false): Promise<void> {
+  return request<void>(`/mr/${mrId}${force ? "?force=true" : ""}`, { method: "DELETE" });
 }
 
 export function listMrTags(mrId: number): Promise<MrTagItem[]> {

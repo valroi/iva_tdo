@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import smtplib
+import ssl
 from email.message import EmailMessage
 
 from app.config import get_settings
@@ -19,6 +20,22 @@ settings = get_settings()
 
 def _smtp_configured() -> bool:
     return bool(settings.smtp_host.strip())
+
+
+def _ssl_context() -> ssl.SSLContext:
+    """SSL-контекст, принимающий слабые DH-ключи корпоративных почтовых
+    серверов. Дефолтный контекст (SECLEVEL=2) падает с DH_KEY_TOO_SMALL —
+    понижаем уровень до 1. При smtp_insecure отключаем и проверку сертификата
+    (на случай self-signed корп. сертификата)."""
+    context = ssl.create_default_context()
+    try:
+        context.set_ciphers("DEFAULT@SECLEVEL=1")
+    except ssl.SSLError:
+        pass
+    if getattr(settings, "smtp_insecure", False):
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+    return context
 
 
 def send_email(*, to: str, subject: str, body: str) -> bool:
@@ -39,14 +56,17 @@ def send_email(*, to: str, subject: str, body: str) -> bool:
     msg["Subject"] = subject
     msg.set_content(body)
 
-    if settings.smtp_use_tls:
-        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20) as server:
-            server.starttls()
+    context = _ssl_context()
+    if settings.smtp_port == 465:
+        # Implicit SSL (порт 465).
+        with smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=20, context=context) as server:
             if settings.smtp_user:
                 server.login(settings.smtp_user, settings.smtp_password)
             server.send_message(msg)
     else:
         with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20) as server:
+            if settings.smtp_use_tls:
+                server.starttls(context=context)
             if settings.smtp_user:
                 server.login(settings.smtp_user, settings.smtp_password)
             server.send_message(msg)

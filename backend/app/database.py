@@ -41,6 +41,11 @@ def init_db() -> None:
     _ensure_mdr_planned_start_column()
     _ensure_document_attachments_revision_column()
     _ensure_postgres_role_enum_values()
+    # Общая авто-миграция: добавляет в существующие таблицы любые колонки,
+    # которые есть в моделях, но отсутствуют в БД. create_all() создаёт только
+    # новые таблицы, но НЕ добавляет колонки в уже существующие — из-за этого
+    # на проде падало `column feed_files.lang does not exist`.
+    _ensure_all_model_columns()
 
 
 def _ensure_projects_document_category_column() -> None:
@@ -169,3 +174,50 @@ def _ensure_document_attachments_revision_column() -> None:
         return
     with engine.begin() as connection:
         connection.execute(text("ALTER TABLE document_attachments ADD COLUMN revision_id INTEGER"))
+
+
+def _ensure_all_model_columns() -> None:
+    """Идемпотентно добавляет недостающие колонки во ВСЕ таблицы по моделям.
+
+    Колонки добавляются как NULLABLE (чтобы ALTER не падал на таблицах с
+    данными), затем для NOT NULL-колонок со скалярным default'ом NULL-значения
+    заполняются этим default'ом. Для Postgres при необходимости создаётся ENUM-
+    тип колонки. Приложение само проставляет значения при вставке, поэтому
+    отсутствие DB-constraint NOT NULL некритично."""
+    import enum as _enum
+
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    dialect = engine.dialect
+
+    for table in Base.metadata.sorted_tables:
+        if table.name not in existing_tables:
+            continue  # новые таблицы уже создал create_all()
+        existing_cols = {c["name"] for c in inspector.get_columns(table.name)}
+        for col in table.columns:
+            if col.name in existing_cols:
+                continue
+            try:
+                with engine.begin() as connection:
+                    # Postgres: тип-ENUM колонки может ещё не существовать.
+                    coltype = col.type
+                    if hasattr(coltype, "create"):
+                        try:
+                            coltype.create(connection, checkfirst=True)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    type_sql = coltype.compile(dialect=dialect)
+                    connection.execute(text(f'ALTER TABLE {table.name} ADD COLUMN {col.name} {type_sql}'))
+                    # Бэкфилл для NOT NULL-колонок со скалярным default'ом.
+                    if not col.nullable and col.default is not None and getattr(col.default, "is_scalar", False):
+                        val = col.default.arg
+                        if isinstance(val, _enum.Enum):
+                            val = val.value
+                        if isinstance(val, (str, int, float, bool)):
+                            connection.execute(
+                                text(f'UPDATE {table.name} SET {col.name} = :v WHERE {col.name} IS NULL'),
+                                {"v": val},
+                            )
+                logger.info("Auto-migration: added column %s.%s", table.name, col.name)
+            except Exception as exc:  # noqa: BLE001 — одна колонка не должна валить старт
+                logger.warning("Auto-migration failed for %s.%s: %s", table.name, col.name, exc)

@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_from: str = "no-reply@ivamaris.io"
     smtp_use_tls: bool = True
+    # Отключить проверку SSL-сертификата SMTP (self-signed корп. сертификат).
+    smtp_insecure: bool = False
     # Базовый URL фронта для ссылок-приглашений в письмах.
     public_base_url: str = "http://localhost:3000"
     # Корень хранилища документов подрядчиков (отдельный volume).

@@ -45,6 +45,7 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-no-reply@ivamaris.io}
       SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+      SMTP_INSECURE: ${SMTP_INSECURE:-false}
       # Базовый URL фронта — нужен, чтобы собрать ссылку-приглашение
       # подрядчику в письме (например https://tdo.company.ru).
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
