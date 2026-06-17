@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     smtp_use_tls: bool = True
     # Отключить проверку SSL-сертификата SMTP (self-signed корп. сертификат).
     smtp_insecure: bool = False
+    # Имя, которым backend представляется серверу в EHLO/HELO. По умолчанию
+    # Python подставляет внутренний docker-IP (172.x), который корп. Exchange
+    # отвергает. Указать hostname или IP хостовой машины (напр. 192.168.11.237).
+    # Пусто — fallback на host из public_base_url (если не localhost).
+    smtp_helo: str = ""
     # Базовый URL фронта для ссылок-приглашений в письмах.
     public_base_url: str = "http://localhost:3000"
     # Корень хранилища документов подрядчиков (отдельный volume).

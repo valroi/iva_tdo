@@ -8,9 +8,11 @@ backend-лог (режим разработки). Это позволяет пр
 from __future__ import annotations
 
 import logging
+import re
 import smtplib
 import ssl
 from email.message import EmailMessage
+from urllib.parse import urlparse
 
 from app.config import get_settings
 
@@ -20,6 +22,23 @@ settings = get_settings()
 
 def _smtp_configured() -> bool:
     return bool(settings.smtp_host.strip())
+
+
+def _helo_name() -> str | None:
+    """Имя для EHLO/HELO. По умолчанию smtplib шлёт внутренний docker-IP
+    (172.x), который корп. Exchange отвергает. Берём SMTP_HELO, иначе host из
+    PUBLIC_BASE_URL (если не localhost). IP-литерал оборачиваем в скобки по
+    RFC 5321 (EHLO [192.168.11.237])."""
+    raw = (settings.smtp_helo or "").strip()
+    if not raw:
+        host = urlparse(settings.public_base_url).hostname or ""
+        if host and host not in ("localhost", "127.0.0.1"):
+            raw = host
+    if not raw:
+        return None  # smtplib подставит дефолт
+    if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", raw):
+        return f"[{raw}]"
+    return raw
 
 
 def _ssl_context() -> ssl.SSLContext:
@@ -58,14 +77,15 @@ def send_email(*, to: str, subject: str, body: str) -> bool:
 
     context = _ssl_context()
     host, port = settings.smtp_host, settings.smtp_port
+    helo = _helo_name()
     try:
         if port == 465:
             # Implicit SSL (порт 465).
-            with smtplib.SMTP_SSL(host, port, timeout=20, context=context) as server:
+            with smtplib.SMTP_SSL(host, port, local_hostname=helo, timeout=20, context=context) as server:
                 server.ehlo()
                 _login_and_send(server, msg)
         else:
-            with smtplib.SMTP(host, port, timeout=20) as server:
+            with smtplib.SMTP(host, port, local_hostname=helo, timeout=20) as server:
                 server.ehlo()
                 # STARTTLS применяем, если сервер его поддерживает (или флаг
                 # принудительно включён). AUTH на большинстве серверов доступен
@@ -75,10 +95,10 @@ def send_email(*, to: str, subject: str, body: str) -> bool:
                     server.ehlo()
                 _login_and_send(server, msg)
     except Exception as exc:  # noqa: BLE001 — логируем и пробрасываем выше
-        logger.error("SMTP send failed (host=%s port=%s tls=%s) to=%s: %s",
-                     host, port, settings.smtp_use_tls, to, exc)
+        logger.error("SMTP send failed (host=%s port=%s tls=%s helo=%s) to=%s: %s",
+                     host, port, settings.smtp_use_tls, helo, to, exc)
         raise
-    logger.info("SMTP email sent to %s (subject=%s)", to, subject)
+    logger.info("SMTP email sent to %s (helo=%s subject=%s)", to, helo, subject)
     return True
 
 
