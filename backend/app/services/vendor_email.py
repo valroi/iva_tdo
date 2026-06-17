@@ -57,20 +57,44 @@ def send_email(*, to: str, subject: str, body: str) -> bool:
     msg.set_content(body)
 
     context = _ssl_context()
-    if settings.smtp_port == 465:
-        # Implicit SSL (порт 465).
-        with smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=20, context=context) as server:
-            if settings.smtp_user:
-                server.login(settings.smtp_user, settings.smtp_password)
-            server.send_message(msg)
-    else:
-        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20) as server:
-            if settings.smtp_use_tls:
-                server.starttls(context=context)
-            if settings.smtp_user:
-                server.login(settings.smtp_user, settings.smtp_password)
-            server.send_message(msg)
+    host, port = settings.smtp_host, settings.smtp_port
+    try:
+        if port == 465:
+            # Implicit SSL (порт 465).
+            with smtplib.SMTP_SSL(host, port, timeout=20, context=context) as server:
+                server.ehlo()
+                _login_and_send(server, msg)
+        else:
+            with smtplib.SMTP(host, port, timeout=20) as server:
+                server.ehlo()
+                # STARTTLS применяем, если сервер его поддерживает (или флаг
+                # принудительно включён). AUTH на большинстве серверов доступен
+                # ТОЛЬКО после STARTTLS — иначе «AUTH extension not supported».
+                if server.has_extn("starttls") or settings.smtp_use_tls:
+                    server.starttls(context=context)
+                    server.ehlo()
+                _login_and_send(server, msg)
+    except Exception as exc:  # noqa: BLE001 — логируем и пробрасываем выше
+        logger.error("SMTP send failed (host=%s port=%s tls=%s) to=%s: %s",
+                     host, port, settings.smtp_use_tls, to, exc)
+        raise
+    logger.info("SMTP email sent to %s (subject=%s)", to, subject)
     return True
+
+
+def _login_and_send(server: smtplib.SMTP, msg: EmailMessage) -> None:
+    """Логинится (если заданы креды и сервер поддерживает AUTH) и шлёт письмо.
+    Если AUTH не предлагается даже после STARTTLS — пытаемся отправить без
+    авторизации (внутренние релеи часто принимают почту без логина)."""
+    if settings.smtp_user:
+        if server.has_extn("auth"):
+            server.login(settings.smtp_user, settings.smtp_password)
+        else:
+            logger.warning(
+                "SMTP server %s does not advertise AUTH (даже после STARTTLS) — "
+                "отправляем без авторизации", settings.smtp_host,
+            )
+    server.send_message(msg)
 
 
 def send_invitation_code(*, to: str, company_name: str, mr_code: str, code: str) -> bool:
