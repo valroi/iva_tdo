@@ -15,7 +15,7 @@ import {
   Typography,
   Upload,
 } from "antd";
-import { DownloadOutlined, RobotOutlined, SearchOutlined, UploadOutlined } from "@ant-design/icons";
+import { DownloadOutlined, EyeOutlined, RobotOutlined, SearchOutlined, UploadOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
 
@@ -26,6 +26,7 @@ import {
   deleteFeedDocument,
   deleteFeedFile,
   downloadFeedFile,
+  getFeedFileObjectUrl,
   getFeedSettings,
   listFeedDocuments,
   listProjects,
@@ -63,6 +64,23 @@ export default function FeedPage({ currentUser }: Props): JSX.Element {
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number; current: string } | null>(null);
+  const [preview, setPreview] = useState<{ url: string; name: string } | null>(null);
+
+  const openPreview = async (fileId: number, name: string) => {
+    const hide = message.loading("Открываю файл…", 0);
+    try {
+      const url = await getFeedFileObjectUrl(fileId);
+      setPreview({ url, name });
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : "Не удалось открыть файл");
+    } finally {
+      hide();
+    }
+  };
+  const closePreview = () => {
+    if (preview) URL.revokeObjectURL(preview.url);
+    setPreview(null);
+  };
   const [editDoc, setEditDoc] = useState<FeedDocumentItem | null>(null);
   const [editForm] = Form.useForm();
   const [searchQ, setSearchQ] = useState("");
@@ -227,6 +245,10 @@ export default function FeedPage({ currentUser }: Props): JSX.Element {
               <Tag color={f.is_editable ? "default" : LANG_COLOR[f.lang]} style={{ marginRight: 0 }}>{LANG_LABEL[f.lang]}</Tag>
               {f.is_editable && (
                 <Tag color="gold" style={{ marginRight: 0 }} title="Не-PDF (редактируемый исходник) — не считается главной версией">ред.</Tag>
+              )}
+              {!f.is_editable && (
+                <Button size="small" type="link" icon={<EyeOutlined />} style={{ padding: 0 }} title="Просмотр без скачивания"
+                  onClick={() => void openPreview(f.id, f.file_name)} />
               )}
               <Button size="small" type="link" icon={<DownloadOutlined />} style={{ padding: 0 }}
                 onClick={() => void downloadFeedFile(f.id, f.file_name)}>
@@ -448,6 +470,23 @@ export default function FeedPage({ currentUser }: Props): JSX.Element {
           </Card>
         );
       })}
+
+      {/* Предпросмотр PDF без скачивания */}
+      <Modal
+        open={preview !== null}
+        title={preview?.name ?? "Просмотр"}
+        onCancel={closePreview}
+        width="80%"
+        style={{ top: 24 }}
+        footer={[
+          preview && <Button key="dl" icon={<DownloadOutlined />} href={preview.url} download={preview.name}>Скачать</Button>,
+          <Button key="close" onClick={closePreview}>Закрыть</Button>,
+        ]}
+      >
+        {preview && (
+          <iframe title="pdf-preview" src={preview.url} style={{ width: "100%", height: "78vh", border: "none" }} />
+        )}
+      </Modal>
 
       {/* Прогресс загрузки */}
       <Modal open={progress !== null} title="Загрузка документов в FEED" footer={null} closable={false} maskClosable={false}>

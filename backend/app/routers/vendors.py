@@ -1100,8 +1100,8 @@ def mr_feed_links(
     """Сверка документов REQ (чек-лист заказчика) с базой FEED по номеру
     документа: подтянут ли документ в FEED и совпадает ли крайняя ревизия.
     rev_mismatch=True — в FEED ревизия новее/другая, надо проверить REQ."""
-    from app.models import FeedDocument
-    from app.services.feed_import import split_rev
+    from app.models import FeedDocument, FeedFile, FeedFileKind
+    from app.services.feed_import import split_lang, split_rev
 
     mr = _get_mr_or_404(db, mr_id)
     ensure_can_manage_mr(db, user=current_user, mr=mr)
@@ -1116,7 +1116,8 @@ def mr_feed_links(
         # Attachment No.N — внутренняя нумерация REQ, в FEED не ищем.
         if not raw_no or raw_no.startswith("ATTACHMENT"):
             continue
-        base_no, item_rev = split_rev(raw_no)
+        no_lang, _ = split_lang(raw_no)  # отрезаем -EN/-RU, как в FEED
+        base_no, item_rev = split_rev(no_lang)
         item_rev = item_rev or (item.rev or None)
         feed_doc = (
             db.query(FeedDocument)
@@ -1131,14 +1132,20 @@ def mr_feed_links(
         )
         feed_file = None
         if feed_doc:
-            from app.models import FeedFile, FeedFileKind
-
-            feed_file = (
+            rev_files = (
                 db.query(FeedFile)
                 .filter(FeedFile.feed_document_id == feed_doc.id, FeedFile.kind == FeedFileKind.REVISION)
-                .order_by(FeedFile.id.desc())
-                .first()
+                .all()
             )
+            # Главный файл = PDF (не редактируемый docx/xls). Среди PDF —
+            # предпочитаем двуязычный/английский, затем свежезагруженный.
+            def _is_pdf(f: FeedFile) -> bool:
+                return (f.file_name or "").lower().endswith(".pdf") or (f.mime or "") == "application/pdf"
+
+            lang_pref = {"BI": 0, "EN": 1, "RU": 2, "NA": 3}
+            pool = [f for f in rev_files if _is_pdf(f)] or rev_files
+            pool.sort(key=lambda f: (lang_pref.get(getattr(f.lang, "value", f.lang), 9), -f.id))
+            feed_file = pool[0] if pool else None
         links.append(
             MrFeedLink(
                 owner_item_id=item.id,

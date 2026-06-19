@@ -13,7 +13,8 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
-from sqlalchemy.orm import Session
+from sqlalchemy import or_
+from sqlalchemy.orm import Session, defer
 
 from app.config import get_settings
 from app.database import get_db
@@ -56,6 +57,10 @@ def _doc_read(db: Session, doc: FeedDocument) -> FeedDocumentRead:
         .order_by(FeedFile.id.asc())
         .all()
     )
+    return _build_doc_read(doc, files)
+
+
+def _build_doc_read(doc: FeedDocument, files: list[FeedFile]) -> FeedDocumentRead:
     data = FeedDocumentRead.model_validate(doc, from_attributes=True)
     file_reads: list[FeedFileRead] = []
     master_langs: set[str] = set()
@@ -120,13 +125,26 @@ def list_feed_documents(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    query = db.query(FeedDocument)
+    # defer(search_text): при листинге не тянем огромные тексты документов
+    # (по ~200КБ на документ; на 2700 доках это были сотни МБ и тормоза).
+    query = db.query(FeedDocument).options(defer(FeedDocument.search_text))
     if project_id is not None:
         query = query.filter(FeedDocument.project_id == project_id)
     if discipline:
         query = query.filter(FeedDocument.discipline_code == discipline.upper())
     docs = query.order_by(FeedDocument.discipline_code.asc(), FeedDocument.doc_number.asc()).all()
-    return [_doc_read(db, d) for d in docs]
+    # Все файлы — ОДНИМ запросом (вместо N+1 запроса на каждый документ).
+    doc_ids = [d.id for d in docs]
+    files_by_doc: dict[int, list[FeedFile]] = {}
+    if doc_ids:
+        for f in (
+            db.query(FeedFile)
+            .filter(FeedFile.feed_document_id.in_(doc_ids))
+            .order_by(FeedFile.id.asc())
+            .all()
+        ):
+            files_by_doc.setdefault(f.feed_document_id, []).append(f)
+    return [_build_doc_read(d, files_by_doc.get(d.id, [])) for d in docs]
 
 
 @router.post("/feed/upload", response_model=FeedUploadResult)
@@ -401,7 +419,18 @@ def _keyword_hits(db: Session, q: str, project_id: int | None, limit: int = 10) 
     query = db.query(FeedDocument)
     if project_id is not None:
         query = query.filter(FeedDocument.project_id == project_id)
-    docs = query.all()
+    # Предфильтр в БД (ilike в Postgres регистронезависим и для кириллицы),
+    # чтобы не тянуть тексты ВСЕХ документов в Python (на 2700 доках — тормоза).
+    conds = []
+    for w in words:
+        like = f"%{w}%"
+        conds.append(or_(
+            FeedDocument.search_text.ilike(like),
+            FeedDocument.doc_number.ilike(like),
+            FeedDocument.title_en.ilike(like),
+            FeedDocument.title_ru.ilike(like),
+        ))
+    docs = query.filter(or_(*conds)).limit(300).all()
 
     scored: list[tuple[int, FeedDocument, str | None]] = []
     for d in docs:

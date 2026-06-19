@@ -30,12 +30,31 @@ FILENAME_CIPHER_RE = re.compile(
 )
 
 
+_LANG_SUFFIX = {
+    "EN": "EN", "ENG": "EN", "ENGLISH": "EN",
+    "RU": "RU", "RUS": "RU", "RUSSIAN": "RU",
+    "BI": "BI", "ENRU": "BI", "RUEN": "BI",
+}
+
+
+def split_lang(cipher: str) -> tuple[str, str | None]:
+    """Отрезает завершающий языковой суффикс шифра — он не часть номера.
+    IMP-…-020-01-EN → (IMP-…-020-01, 'EN'); …-01-RU-EN → (…-01, 'BI').
+    Благодаря этому RU/EN-версии одного документа попадают в одну карточку."""
+    parts = cipher.strip().upper().split("-")
+    if len(parts) >= 2 and {parts[-2], parts[-1]} == {"RU", "EN"}:
+        return "-".join(parts[:-2]), "BI"
+    if parts and parts[-1] in _LANG_SUFFIX:
+        return "-".join(parts[:-1]), _LANG_SUFFIX[parts[-1]]
+    return "-".join(parts), None
+
+
 def split_rev(cipher: str) -> tuple[str, str | None]:
     """IMP-FD-00-00-HM-REQ-262-00 → (IMP-FD-00-00-HM-REQ-262, '00').
-    Последняя секция из 2 цифр трактуется как ревизия."""
+    Последняя секция из 1-2 цифр трактуется как ревизия."""
     parts = cipher.strip().upper().split("-")
-    if len(parts) >= 7 and re.fullmatch(r"\d{2}", parts[-1]):
-        return "-".join(parts[:-1]), parts[-1]
+    if len(parts) >= 7 and re.fullmatch(r"\d{1,2}", parts[-1]):
+        return "-".join(parts[:-1]), parts[-1].zfill(2)
     return "-".join(parts), None
 
 
@@ -181,7 +200,9 @@ def parse_feed_file(file_name: str, raw: bytes) -> dict[str, Any]:
             detected_from = "stamp"
 
     doc_number, rev = (None, None)
+    lang_from_name = None
     if cipher:
+        cipher, lang_from_name = split_lang(cipher)  # отрезаем -EN/-RU и т.п.
         doc_number, rev = split_rev(cipher)
 
     stamp_rev, stamp_date, purpose = (None, None, None)
@@ -190,7 +211,8 @@ def parse_feed_file(file_name: str, raw: bytes) -> dict[str, Any]:
     rev = rev or stamp_rev
 
     doc_class = detect_class(text_upper) if text_upper else None
-    language = detect_language(text) if text else "NA"
+    # Язык: суффикс имени файла надёжнее распознавания по тексту.
+    language = lang_from_name or (detect_language(text) if text else "NA")
     title_en, title_ru = extract_titles(text) if text else (None, None)
 
     components = parse_components(doc_number) if doc_number else {"discipline": None, "doc_type": None}
