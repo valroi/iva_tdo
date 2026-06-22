@@ -77,23 +77,28 @@ def _build_doc_read(doc: FeedDocument, files: list[FeedFile]) -> FeedDocumentRea
     data.has_acrs = any(f.kind == FeedFileKind.ACRS for f in files)
     data.master_langs = sorted(master_langs)
 
-    # Комплектность. Класс 1: нужна двуязычная (BI) ИЛИ обе версии EN+RU.
-    # Класс 1А: только английская версия (+ ACRS).
+    # Комплектность.
+    # Класс 1: ВАЖНО — флажим только если документ ВЫПУЩЕН по языкам, но один
+    # язык отсутствует (есть EN, нет RU — или наоборот). Одиночный PDF без
+    # языкового суффикса (lang=NA) — это самостоятельный/совмещённый документ,
+    # он считается полным. Иначе пол-базы (тысячи доков с одним PDF) горели бы
+    # ложным «не хватает версии».
+    # Класс 1А: нужен PDF + ACRS.
+    has_en = FeedFileLang.EN.value in master_langs
+    has_ru = FeedFileLang.RU.value in master_langs
+    has_bi = FeedFileLang.BI.value in master_langs
     incomplete, reason = False, None
     if doc.doc_class == FeedDocClass.C1:
         if not master_langs:
             incomplete, reason = True, "нет PDF-версии"
-        elif FeedFileLang.BI.value in master_langs:
-            pass  # двуязычный покрывает оба языка
-        elif FeedFileLang.EN.value in master_langs and FeedFileLang.RU.value in master_langs:
-            pass
-        else:
-            have = "EN" if FeedFileLang.EN.value in master_langs else ("RU" if FeedFileLang.RU.value in master_langs else "—")
-            missing = "RU" if have == "EN" else "EN"
-            incomplete, reason = True, f"есть только {have}, не хватает {missing}"
+        elif has_en and not has_ru and not has_bi:
+            incomplete, reason = True, "есть только EN, не хватает RU"
+        elif has_ru and not has_en and not has_bi:
+            incomplete, reason = True, "есть только RU, не хватает EN"
+        # только NA (один совмещённый PDF), либо EN+RU, либо BI → полный
     else:  # C1A
-        if FeedFileLang.EN.value not in master_langs and FeedFileLang.BI.value not in master_langs:
-            incomplete, reason = True, "нет английской PDF-версии"
+        if not master_langs:
+            incomplete, reason = True, "нет PDF-версии"
         elif not data.has_acrs:
             incomplete, reason = True, "нет ACRS"
     data.incomplete = incomplete
@@ -211,7 +216,10 @@ def upload_feed_documents(
             .first()
         )
         is_new = doc is None
-        parsed_class = FeedDocClass.C1A if parsed.get("doc_class") == "1A" else FeedDocClass.C1
+        # Наличие ACRS-файла — признак класса 1А (ACRS бывает только у 1А).
+        parsed_kind = (parsed.get("kind") or "REVISION").upper()
+        is_1a = parsed.get("doc_class") == "1A" or parsed_kind == "ACRS"
+        parsed_class = FeedDocClass.C1A if is_1a else FeedDocClass.C1
         if doc is None:
             doc = FeedDocument(
                 project_id=project_id,
@@ -225,8 +233,8 @@ def upload_feed_documents(
             )
             db.add(doc)
             db.flush()
-        elif parsed.get("doc_class") == "1A":
-            # Если хоть один файл документа помечен классом 1А — поднимаем класс.
+        elif is_1a:
+            # Если хоть один файл документа класса 1А (или ACRS) — поднимаем класс.
             doc.doc_class = FeedDocClass.C1A
 
         # Обновляем ревизию/метаданные, если новая ревизия старше или пусто.
@@ -249,11 +257,12 @@ def upload_feed_documents(
             file_lang = FeedFileLang(parsed.get("language") or "NA")
         except ValueError:
             file_lang = FeedFileLang.NA
+        file_kind = FeedFileKind.ACRS if parsed_kind == "ACRS" else FeedFileKind.REVISION
         dest = _store_file(raw, fname, doc.id)
         db.add(
             FeedFile(
                 feed_document_id=doc.id,
-                kind=FeedFileKind.REVISION,
+                kind=file_kind,
                 lang=file_lang,
                 rev=new_rev,
                 file_path=str(dest),

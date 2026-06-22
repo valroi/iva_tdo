@@ -58,6 +58,50 @@ def split_rev(cipher: str) -> tuple[str, str | None]:
     return "-".join(parts), None
 
 
+# Канонический шифр: PROJ-PHASE-UU-SS-DISC-TYPE-SERIAL. SERIAL — цифры с
+# опциональной буквой (201A, 257B — это РАЗНЫЕ документы). Всё после серийника
+# (ревизия, язык, ACRS/CRS, IR-выпуск, номер листа, копии) — метаданные.
+_CANON_RE = re.compile(
+    r"^([A-Z]{2,4}-[A-Z]{2}-\d{2}-\d{2}-[A-Z]{2}-[A-Z]{2,5}-\d{1,4}[A-Z]?)(.*)$"
+)
+
+
+def parse_filename_cipher(file_name: str) -> dict[str, str | None] | None:
+    """Жёстко структурный разбор имени файла FEED.
+
+    Возвращает doc_number (канонический шифр без суффиксов), rev (2 цифры),
+    язык (EN/RU/BI) и kind (REVISION/ACRS). None — если имя не похоже на шифр
+    (тогда выше сработает фолбэк по штампу). Покрывает реальные шаблоны:
+    -EN/-RU/_EN/_RU/-BI, -ACRS/_ACRS/-ACRS-NNN, -CRS, -IR01, листы _1/_2,
+    копии [01], двойные расширения .xlsm.xlsx."""
+    name = re.sub(r"(\.[A-Za-z0-9]{1,5})+$", "", file_name.strip())  # все расширения
+    name = re.sub(r"\[[^\]]*\]|\([^)]*\)", "", name)  # маркеры копий
+    m = _CANON_RE.match(name.strip().upper())
+    if not m:
+        return None
+    doc_number, rest = m.group(1), m.group(2)
+    rev = lang = None
+    kind = "REVISION"
+    for tok in re.split(r"[-_]", rest):
+        if not tok:
+            continue
+        if tok in ("EN", "ENG", "ENGLISH"):
+            lang = "EN"
+        elif tok in ("RU", "RUS", "RUSSIAN"):
+            lang = "RU"
+        elif tok in ("BI", "ENRU", "RUEN"):
+            lang = "BI"
+        elif tok == "ACRS":
+            kind = "ACRS"
+        elif tok == "CRS":
+            kind = "CRS"  # лист замечаний — вспомогательный, не главный
+        elif re.fullmatch(r"IR\d*", tok):
+            continue  # промежуточный выпуск — игнорируем для группировки
+        elif re.fullmatch(r"\d{2}", tok) and rev is None:
+            rev = tok  # ревизия всегда 2 цифры; одиночные цифры (_1/_2) — листы
+    return {"doc_number": doc_number, "rev": rev, "lang": lang, "kind": kind}
+
+
 def parse_components(doc_number: str) -> dict[str, str | None]:
     """Из шифра без ревизии достаём дисциплину и тип документа.
     IMP-FD-00-00-HM-REQ-262 → discipline=HM, doc_type=REQ."""
@@ -189,21 +233,30 @@ def parse_feed_file(file_name: str, raw: bytes) -> dict[str, Any]:
         text = extract_docx_text(raw)
     text_upper = (text or "").upper()
 
-    # 1. Имя файла — приоритетный источник шифра.
-    cipher = cipher_from_filename(file_name)
-    detected_from = "filename" if cipher else "none"
-    # 2. Фолбэк — штамп, только если в имени шифра нет.
-    if not cipher and text_upper:
-        stamp_cipher = _extract_cipher_from_text(text_upper)
-        if stamp_cipher:
-            cipher = stamp_cipher
-            detected_from = "stamp"
-
+    # 1. Имя файла — приоритетный и надёжный источник (структурный разбор).
     doc_number, rev = (None, None)
     lang_from_name = None
-    if cipher:
-        cipher, lang_from_name = split_lang(cipher)  # отрезаем -EN/-RU и т.п.
-        doc_number, rev = split_rev(cipher)
+    file_kind = "REVISION"
+    detected_from = "none"
+    parsed_name = parse_filename_cipher(file_name)
+    if parsed_name:
+        doc_number = parsed_name["doc_number"]
+        rev = parsed_name["rev"]
+        lang_from_name = parsed_name["lang"]
+        file_kind = parsed_name["kind"] or "REVISION"
+        detected_from = "filename"
+    else:
+        # 2. Фолбэк — старое эвристическое имя, затем штамп.
+        cipher = cipher_from_filename(file_name)
+        if not cipher and text_upper:
+            cipher = _extract_cipher_from_text(text_upper)
+            if cipher:
+                detected_from = "stamp"
+        if cipher:
+            if detected_from == "none":
+                detected_from = "filename"
+            cipher, lang_from_name = split_lang(cipher)
+            doc_number, rev = split_rev(cipher)
 
     stamp_rev, stamp_date, purpose = (None, None, None)
     if text_upper:
@@ -227,6 +280,7 @@ def parse_feed_file(file_name: str, raw: bytes) -> dict[str, Any]:
         "issue_purpose": purpose,
         "doc_class": doc_class,
         "language": language,
+        "kind": file_kind,
         "title_en": title_en,
         "title_ru": title_ru,
         "discipline": components.get("discipline"),
