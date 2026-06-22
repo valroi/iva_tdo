@@ -19,7 +19,9 @@ from app.services.smart_upload import (
 )
 
 router = APIRouter(prefix="/smart-upload")
-SMART_UPLOAD_ROOT = Path("/tmp/tdo_smart_upload")
+from app.config import get_settings  # noqa: E402
+
+SMART_UPLOAD_ROOT = Path(get_settings().smart_upload_root)
 
 
 def _apply_full_cipher(fields: dict[str, Any], full_cipher: str) -> None:

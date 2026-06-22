@@ -64,7 +64,12 @@ from app.schemas import (
 )
 
 router = APIRouter()
-UPLOAD_ROOT = Path("/tmp/tdo_uploads")
+from app.config import get_settings  # noqa: E402
+
+UPLOAD_ROOT = Path(get_settings().tdo_uploads_root)
+# Легаси-корень: файлы, загруженные до выноса пути в env, лежат тут. Отдаём их
+# тоже, чтобы при смене TDO_UPLOADS_ROOT старые PDF не превратились в 404.
+LEGACY_UPLOAD_ROOTS = {Path("/tmp/tdo_uploads").resolve()}
 OWNER_VISIBLE_REVISION_STATUSES = {
     "UNDER_REVIEW",
     "OWNER_COMMENTS_SENT",
@@ -1372,8 +1377,8 @@ def get_revision_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PDF file is not attached")
 
     path = Path(revision.file_path).resolve()
-    upload_root = UPLOAD_ROOT.resolve()
-    if upload_root not in path.parents:
+    allowed_roots = {UPLOAD_ROOT.resolve(), *LEGACY_UPLOAD_ROOTS}
+    if not any(root in path.parents for root in allowed_roots):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid file path")
     if not path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")

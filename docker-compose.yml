@@ -49,6 +49,10 @@ services:
       # Имя для EHLO/HELO (hostname или IP хостовой машины, напр. 192.168.11.237).
       # Без него Python шлёт внутренний docker-IP, который Exchange отвергает.
       SMTP_HELO: ${SMTP_HELO:-}
+      # Корни хранилищ DCC (совпадают с томами ниже). Можно переопределить на
+      # host bind-mount для надёжности и бэкапов (см. SYSADMIN_DEPLOY_RU §9).
+      TDO_UPLOADS_ROOT: ${TDO_UPLOADS_ROOT:-/tmp/tdo_uploads}
+      SMART_UPLOAD_ROOT: ${SMART_UPLOAD_ROOT:-/tmp/tdo_smart_upload}
       # Базовый URL фронта — нужен, чтобы собрать ссылку-приглашение
       # подрядчику в письме (например https://tdo.company.ru).
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
@@ -60,18 +64,17 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      # Все загруженные PDF и доп. файлы лежат в /tmp/tdo_uploads внутри
-      # контейнера. Без persistent volume они пропадают при каждой
-      # пересборке/пересоздании контейнера — БД остаётся с битыми
-      # file_path, PDF возвращает 404. Закрепляем директорию за
-      # named volume, чтобы апдейты бэка не теряли пользовательские файлы.
+      # Все загруженные PDF ревизий лежат в /tmp/tdo_uploads внутри контейнера.
+      # Без persistent volume они пропадают при каждой пересборке/пересоздании
+      # контейнера — БД остаётся с битыми file_path, PDF возвращает 404.
+      # Named volume сохраняет файлы при апдейтах backend.
       - tdo_uploads:/tmp/tdo_uploads
-      # Модуль Vendors: документы подрядчиков хранятся ОТДЕЛЬНО от
-      # проектных файлов — свой named volume. Изоляция + защита от
-      # потери при апдейтах (как и tdo_uploads).
+      # DOCchecker / smart-upload: РАНЬШЕ писал в /tmp без тома и терял файлы
+      # при каждой пересборке. Теперь — свой persistent volume.
+      - smart_upload:/tmp/tdo_smart_upload
+      # Модуль Vendors: документы подрядчиков хранятся ОТДЕЛЬНО — свой volume.
       - vendor_uploads:/data/vendor_uploads
-      # Модуль FEED: документация стадии FEED — свой volume, файлы
-      # переживают пересборки (раньше DOCchecker писал в /tmp и терял всё).
+      # Модуль FEED: документация стадии FEED — свой volume.
       - feed_storage:/data/feed_storage
     depends_on:
       - db
@@ -91,5 +94,6 @@ volumes:
   postgres_data:
   minio_data:
   tdo_uploads:
+  smart_upload:
   vendor_uploads:
   feed_storage:

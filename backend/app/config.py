@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     smtp_helo: str = ""
     # Базовый URL фронта для ссылок-приглашений в письмах.
     public_base_url: str = "http://localhost:3000"
+    # --- Хранилища DCC (документы/ревизии). Должны быть на persistent volume,
+    # иначе PDF теряются при пересборке контейнера. Настраиваются через env,
+    # чтобы сисадмин мог указать host bind-mount. Дефолт совместим со старыми
+    # путями в БД (не осиротить уже загруженные файлы). ---
+    tdo_uploads_root: str = "/tmp/tdo_uploads"
+    smart_upload_root: str = "/tmp/tdo_smart_upload"
     # Корень хранилища документов подрядчиков (отдельный volume).
     vendor_uploads_root: str = "/data/vendor_uploads"
     # Время жизни email-кода подтверждения, минут.
