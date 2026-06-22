@@ -24,14 +24,15 @@ createRoot(document.getElementById("root")!).render(
           borderRadius: 6,
           borderRadiusLG: 12,
           borderRadiusSM: 4,
-          fontFamily: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+          fontFamily: '"Manrope", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
           fontSize: 13,
           fontSizeLG: 14,
           lineHeight: 1.5714,
           controlHeight: 32,
           controlHeightSM: 26,
-          boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
-          boxShadowSecondary: "0 4px 12px rgba(0,0,0,0.10)",
+          // Тёплые тени — лёгкий синий тон вместо чистого чёрного (глубже и мягче).
+          boxShadow: "0 1px 2px rgba(23,23,40,0.06), 0 1px 3px rgba(23,23,40,0.05)",
+          boxShadowSecondary: "0 6px 16px -4px rgba(23,23,40,0.12), 0 2px 6px -2px rgba(23,23,40,0.08)",
         },
         components: {
           Menu: {

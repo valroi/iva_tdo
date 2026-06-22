@@ -21,8 +21,9 @@
   --radius-sm:    6px;
   --radius-md:    8px;
   --radius-lg:    12px;
-  --shadow-sm:    0 1px 3px rgba(0,0,0,0.08);
-  --shadow-md:    0 4px 12px rgba(0,0,0,0.10);
+  /* Тёплые тени — лёгкий сине-серый тон вместо чистого чёрного: глубже, мягче. */
+  --shadow-sm:    0 1px 2px rgba(23,23,40,0.06), 0 1px 3px rgba(23,23,40,0.05);
+  --shadow-md:    0 6px 16px -4px rgba(23,23,40,0.12), 0 2px 6px -2px rgba(23,23,40,0.08);
 }
 
 /* ─── Base ─────────────────────────────────────────────────────────────── */
@@ -30,12 +31,20 @@
 
 body {
   margin: 0;
-  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: "Manrope", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   background: var(--bg);
   color: var(--text);
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Заголовки — плотнее межбуквенный интервал, аккуратный перенос. */
+h1, h2, h3, h4, .ant-typography h1, .ant-typography h2, .ant-typography h3, .ant-typography h4,
+.ant-typography-h1, .ant-typography-h2, .ant-typography-h3, .ant-typography-h4 {
+  letter-spacing: -0.015em;
+  text-wrap: balance;
 }
 
 /* ─── Shell / Layout ───────────────────────────────────────────────────── */
@@ -250,6 +259,14 @@ body {
   border-color: #4096ff !important;
 }
 
+/* Физический отклик на нажатие — кнопка слегка «вдавливается». */
+.ant-btn:active {
+  transform: translateY(0.5px) scale(0.985);
+}
+.ant-btn-primary {
+  box-shadow: 0 1px 2px rgba(22,119,255,0.25) !important;
+}
+
 .ant-btn-default {
   border-color: var(--border-hover) !important;
   background: var(--surface) !important;
@@ -312,6 +329,10 @@ body {
   border-bottom: 1px solid var(--border) !important;
   color: var(--text) !important;
   transition: background 0.1s !important;
+  /* Табличные цифры: шифры, ревизии, количества и даты выравниваются по
+     разрядам — данные в инженерных таблицах читаются как в колонках. */
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "cv11" 1;
 }
 
 .ant-table-wrapper .ant-table-tbody > tr:last-child > td {
