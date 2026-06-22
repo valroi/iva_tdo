@@ -2,13 +2,11 @@ import {
   AuditOutlined,
   BellOutlined,
   BarChartOutlined,
-  FileSearchOutlined,
   HomeOutlined,
   LogoutOutlined,
   ProjectOutlined,
   QuestionCircleOutlined,
   SafetyOutlined,
-  ShopOutlined,
   TeamOutlined,
   UnorderedListOutlined,
 } from "@ant-design/icons";
@@ -22,7 +20,6 @@ import {
   listMdr,
   listNotifications,
   listProjects,
-  listWorkflowStatuses,
   me,
 } from "./api";
 import LoginForm from "./components/LoginForm";
@@ -44,7 +41,7 @@ import VendorsPage from "./pages/VendorsPage";
 import VendorPortalPage from "./pages/VendorPortalPage";
 import { I18nProvider } from "./i18n";
 import LanguageSwitcher from "./components/LanguageSwitcher";
-import type { DocumentItem, MDRRecord, NotificationItem, ProjectItem, User, WorkflowStatus } from "./types";
+import type { DocumentItem, MDRRecord, NotificationItem, ProjectItem, User } from "./types";
 
 const { Header, Sider, Content } = Layout;
 
@@ -180,7 +177,6 @@ function MainApp(): JSX.Element {
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
-  const [workflowStatuses, setWorkflowStatuses] = useState<WorkflowStatus[]>([]);
   const [notificationTarget, setNotificationTarget] = useState<{
     project_code?: string | null;
     document_num?: string | null;
@@ -217,21 +213,24 @@ function MainApp(): JSX.Element {
   const loadInitialData = useCallback(async () => {
     setLoading(true);
     try {
-      const [userResp, mdrResp, docsResp, projectsResp, notificationsResp, statusResp] = await Promise.all([
-        me(),
+      // Авторизация зависит ТОЛЬКО от профиля пользователя. Раньше Promise.all
+      // разлогинивал при сбое любого из второстепенных списков (MDR/документы/
+      // и т.п.) — один битый запрос выкидывал из системы. Теперь они грузятся
+      // отказоустойчиво и не влияют на сессию.
+      const userResp = await me();
+      setUser(userResp);
+      const [mdrResp, docsResp, projectsResp, notificationsResp] = await Promise.allSettled([
         listMdr(),
         listDocuments(),
         listProjects(),
         listNotifications(),
-        listWorkflowStatuses(),
       ]);
-      setUser(userResp);
-      setMdr(mdrResp);
-      setDocuments(docsResp);
-      setProjects(projectsResp);
-      setNotifications(notificationsResp);
-      setWorkflowStatuses(statusResp);
+      if (mdrResp.status === "fulfilled") setMdr(mdrResp.value);
+      if (docsResp.status === "fulfilled") setDocuments(docsResp.value);
+      if (projectsResp.status === "fulfilled") setProjects(projectsResp.value);
+      if (notificationsResp.status === "fulfilled") setNotifications(notificationsResp.value);
     } catch (error) {
+      // Сюда попадаем только если упал сам me() — токен действительно невалиден.
       const text = error instanceof Error ? error.message : "Ошибка загрузки";
       message.error(text);
       clearTokens();
@@ -318,7 +317,7 @@ function MainApp(): JSX.Element {
   const sectionTitleMap: Record<Section, string> = {
     dashboard: "Обзор",
     projects: "Проекты",
-    vendors: "Вендоры",
+    vendors: "Закупки",
     documents_registry: "Документы",
     revisions: "Ревизии",
     trm: "TRM",
@@ -358,32 +357,21 @@ function MainApp(): JSX.Element {
               }}
             />
           </div>
-          <Menu
-            theme="light"
-            mode="inline"
-            items={
-              activeModule === "docchecker"
-                ? [{ key: "docchecker", icon: <FileSearchOutlined />, label: "FEED" }]
-                : activeModule === "vendors"
-                ? [{ key: "vendors", icon: <ShopOutlined />, label: "Вендоры" }]
-                : menuItems
-            }
-            selectedKeys={[activeModule === "docchecker" ? "docchecker" : activeModule === "vendors" ? "vendors" : activeSection]}
-            onSelect={(item) => {
-              if (item.key === "docchecker") {
-                setActiveModule("docchecker");
-                setActiveSection("docchecker");
-                return;
-              }
-              if (item.key === "vendors") {
-                setActiveModule("vendors");
-                setActiveSection("vendors");
-                return;
-              }
-              setActiveModule("dcc");
-              setActiveSection(item.key as Section);
-            }}
-          />
+          {/* Боковое меню — только для DCC (там много разделов). Для модулей
+              FEED/Закупки активный модуль уже виден в переключателе выше, и
+              дублирующий одинокий пункт меню только мешал. */}
+          {activeModule === "dcc" && (
+            <Menu
+              theme="light"
+              mode="inline"
+              items={menuItems}
+              selectedKeys={[activeSection]}
+              onSelect={(item) => {
+                setActiveModule("dcc");
+                setActiveSection(item.key as Section);
+              }}
+            />
+          )}
 
           <div className="sider-user-card">
             <Avatar>{user?.full_name?.slice(0, 1).toUpperCase() ?? "U"}</Avatar>

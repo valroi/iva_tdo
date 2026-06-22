@@ -159,7 +159,7 @@ export default function VendorsPage({ currentUser }: Props): JSX.Element {
     return (
       <Card>
         <Typography.Text type="secondary">
-          Раздел «Вендоры» доступен только сотрудникам заказчика. Подрядчики работают с MR по персональной ссылке-приглашению.
+          Раздел «Закупки» доступен только сотрудникам заказчика. Подрядчики работают с MR по персональной ссылке-приглашению.
         </Typography.Text>
       </Card>
     );

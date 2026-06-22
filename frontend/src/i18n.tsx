@@ -80,10 +80,10 @@ const DICT: Dict = {
   "portal.answer": { ru: "Ответ", en: "Answer" },
 
   // Страница «Закупки» (заказчик)
-  "vend.title": { ru: "Вендоры — заявки на поставку (MR)", en: "Vendors — Material Requisitions (MR)" },
+  "vend.title": { ru: "Закупки — заявки на поставку (MR)", en: "Procurement — Material Requisitions (MR)" },
   "vend.import": { ru: "Импорт REQ (.docx)", en: "Import REQ (.docx)" },
   "vend.createMr": { ru: "+ Создать MR", en: "+ New MR" },
-  "vend.hintTitle": { ru: "Как работать с модулем Вендоры", en: "How to use the Vendors module" },
+  "vend.hintTitle": { ru: "Как работать с модулем Закупки", en: "How to use the Procurement module" },
   "vend.hint1": { ru: "Импортируйте REQ (.docx) — структура MR (теги, чек-листы) создастся автоматически.", en: "Import a REQ (.docx) — the MR structure (tags, checklists) is created automatically." },
   "vend.hint2": { ru: "Догрузите документы заказчика по чек-листу, при необходимости поправьте пункты.", en: "Upload owner documents per the checklist; adjust items if needed." },
   "vend.hint3": { ru: "Пригласите подрядчиков (до 5) — каждому уйдёт персональная ссылка.", en: "Invite vendors (up to 5) — each receives a personal link." },
