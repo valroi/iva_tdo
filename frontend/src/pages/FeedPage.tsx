@@ -545,7 +545,7 @@ export default function FeedPage({ currentUser }: Props): JSX.Element {
             <div key={i}>
               <Typography.Paragraph strong style={{ marginBottom: 4 }}>Вы: {entry.q}</Typography.Paragraph>
               <Card size="small">
-                {entry.a.mode === "ai" && (
+                {entry.a.mode !== "keyword" && (
                   <Alert
                     type="warning"
                     showIcon

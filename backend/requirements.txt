@@ -12,3 +12,9 @@ httpx
 eval_type_backport
 openpyxl
 pypdf
+# --- FEED RAG-агент (LangGraph + Qdrant + локальные эмбеддинги bge-m3) ---
+langgraph
+langchain-core
+qdrant-client
+fastembed
+openai

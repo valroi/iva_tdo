@@ -11,13 +11,13 @@ import re
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, defer
 
 from app.config import get_settings
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.deps import get_current_user
 from app.models import (
     FeedDocClass,
@@ -152,9 +152,32 @@ def list_feed_documents(
     return [_build_doc_read(d, files_by_doc.get(d.id, [])) for d in docs]
 
 
+def _index_docs_bg(doc_ids: list[int]) -> None:
+    """Фоновая инкрементальная индексация документов в Qdrant после загрузки.
+    Тихо выходит, если RAG-стек не готов — поиск тогда работает по ключевым."""
+    if not doc_ids:
+        return
+    from app.services import feed_rag
+
+    if not feed_rag.rag_ready():
+        return
+    db = SessionLocal()
+    try:
+        for did in set(doc_ids):
+            doc = db.query(FeedDocument).filter(FeedDocument.id == did).first()
+            if doc:
+                try:
+                    feed_rag.index_document(doc)
+                except Exception:  # noqa: BLE001 — индексация не должна падать в фоне
+                    pass
+    finally:
+        db.close()
+
+
 @router.post("/feed/upload", response_model=FeedUploadResult)
 def upload_feed_documents(
     project_id: int,
+    background: BackgroundTasks,
     files: list[UploadFile] = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -169,6 +192,7 @@ def upload_feed_documents(
     items: list[FeedUploadItemResult] = []
     created = updated = failed = duplicate = 0
     batch_hashes: set[str] = set()
+    touched: set[int] = set()
 
     for up in files:
         fname = up.filename or "document"
@@ -274,6 +298,7 @@ def upload_feed_documents(
             )
         )
         db.commit()
+        touched.add(doc.id)
 
         items.append(
             FeedUploadItemResult(
@@ -289,6 +314,8 @@ def upload_feed_documents(
         else:
             updated += 1
 
+    # Инкрементальная индексация затронутых документов — в фоне, не блокирует ответ.
+    background.add_task(_index_docs_bg, list(touched))
     return FeedUploadResult(items=items, created=created, updated=updated, failed=failed, duplicate=duplicate)
 
 
@@ -504,8 +531,15 @@ def get_feed_settings(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Состояние умного (AI) поиска: включён админом и настроен ли ключ."""
-    return {"ai_enabled": _feed_ai_enabled(db), "ai_configured": _ai_configured()}
+    """Состояние умного (AI) поиска: включён админом, настроен ключ, готов RAG."""
+    from app.services import feed_rag
+
+    return {
+        "ai_enabled": _feed_ai_enabled(db),
+        "ai_configured": _ai_configured(),
+        "rag_ready": feed_rag.rag_ready(),
+        "agent_model": settings.agent_model,
+    }
 
 
 @router.put("/feed/settings")
@@ -531,6 +565,15 @@ def set_feed_settings(
     return {"ai_enabled": enabled, "ai_configured": _ai_configured()}
 
 
+def _keyword_result(db: Session, question: str, project_id: int | None) -> FeedAskResult:
+    hits = _keyword_hits(db, question, project_id, limit=5)
+    sources = [_hit_schema(d, s) for d, s in hits]
+    if not sources:
+        return FeedAskResult(answer="Ничего не найдено по запросу. Уточните формулировку.", mode="keyword", sources=[])
+    listing = "\n".join(f"• {h.doc_number} — {h.title_en or h.title_ru or ''} (rev {h.latest_rev or '—'})" for h in sources)
+    return FeedAskResult(answer=f"Найдено по ключевым словам:\n{listing}", mode="keyword", sources=sources)
+
+
 @router.post("/feed/ask", response_model=FeedAskResult)
 def ask_feed(
     payload: dict,
@@ -538,80 +581,47 @@ def ask_feed(
     current_user: User = Depends(get_current_user),
 ):
     """Поиск по документации. Если умный поиск включён админом И настроен
-    OpenAI-совместимый API — отвечает нейросеть с опорой на найденные
-    документы. Иначе — полнотекстовый поиск с выдачей источников."""
+    OpenRouter — отвечает LangGraph-агент (RAG: Qdrant + bge-m3 + Qwen).
+    Иначе или при сбое стека — полнотекстовый поиск с выдачей источников."""
     question = (payload.get("question") or "").strip()
     project_id = payload.get("project_id")
     if not question:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty question")
 
-    hits = _keyword_hits(db, question, project_id, limit=5)
-    sources = [_hit_schema(d, s) for d, s in hits]
-
     if not (_feed_ai_enabled(db) and _ai_configured()):
-        if not sources:
-            return FeedAskResult(answer="Ничего не найдено по запросу. Уточните формулировку.", mode="keyword", sources=[])
-        listing = "\n".join(f"• {h.doc_number} — {h.title_en or h.title_ru or ''} (rev {h.latest_rev or '—'})" for h in sources)
-        return FeedAskResult(
-            answer=f"Найдено по ключевым словам:\n{listing}",
-            mode="keyword",
-            sources=sources,
-        )
+        return _keyword_result(db, question, project_id)
 
-    # Контекст для LLM. Если по ключевым словам ничего не нашли — берём
-    # свежие документы проекта (с непустым текстом), чтобы AI мог ответить
-    # на общий вопрос. ВАЖНО: эти fallback-доки НЕ выдаём как источники —
-    # иначе в ответе всплывают нерелевантные шифры (жалоба заказчика).
-    ctx_docs = [d for d, _ in hits]
-    if not ctx_docs:
-        q = db.query(FeedDocument)
-        if project_id is not None:
-            q = q.filter(FeedDocument.project_id == project_id)
-        ctx_docs = q.filter(FeedDocument.search_text.isnot(None)).order_by(FeedDocument.updated_at.desc()).limit(5).all()
-        # sources остаётся пустым: показываем только то, что реально совпало.
-    context_parts = []
-    for d in ctx_docs:
-        body = (d.search_text or "")[:4000]
-        context_parts.append(f"=== {d.doc_number} (rev {d.latest_rev or '—'}) {d.title_en or d.title_ru or ''} ===\n{body}")
-    context = "\n\n".join(context_parts)[:24000]
+    from app.services import feed_agent, feed_rag
 
     try:
-        import json as _json
-        import urllib.request
-
-        req_body = _json.dumps(
-            {
-                "model": settings.ai_model,
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": (
-                            "Ты помощник по проектной документации стадии FEED. Отвечай кратко и"
-                            " по делу на языке вопроса. Опирайся ТОЛЬКО на предоставленные фрагменты"
-                            " документов; в конце перечисли шифры документов-источников."
-                        ),
-                    },
-                    {"role": "user", "content": f"Фрагменты документов:\n{context}\n\nВопрос: {question}"},
-                ],
-                "temperature": 0.2,
-            }
-        ).encode("utf-8")
-        req = urllib.request.Request(
-            settings.ai_api_base_url.rstrip("/") + "/chat/completions",
-            data=req_body,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {settings.ai_api_key}",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            data = _json.loads(resp.read().decode("utf-8"))
-        answer = data["choices"][0]["message"]["content"]
-        return FeedAskResult(answer=answer, mode="ai", sources=sources)
-    except Exception as exc:  # noqa: BLE001 — сеть/ключ/квота: не роняем, отдаём keyword-фолбэк
-        listing = "\n".join(f"• {h.doc_number} — {h.title_en or h.title_ru or ''}" for h in sources)
+        res = feed_agent.answer_question(question, project_id)
+        sources = [FeedSearchHit(**s) for s in res.get("sources", [])]
+        return FeedAskResult(answer=res["answer"], mode="agent", sources=sources)
+    except feed_rag.RagUnavailable:
+        return _keyword_result(db, question, project_id)  # стек не готов
+    except Exception as exc:  # noqa: BLE001 — LLM/квота/сеть: keyword-фолбэк с пометкой
+        base = _keyword_result(db, question, project_id)
         return FeedAskResult(
-            answer=f"AI-сервис недоступен ({str(exc)[:120]}). Найдено по ключевым словам:\n{listing}",
+            answer=f"AI-агент недоступен ({str(exc)[:120]}).\n{base.answer}",
             mode="keyword",
-            sources=sources,
+            sources=base.sources,
         )
+
+
+@router.post("/feed/agent/reindex")
+def reindex_feed_agent(
+    project_id: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Перестроить векторный индекс (Qdrant) по документам FEED. Только админ."""
+    from app.deps import has_permission
+    from app.services import feed_rag
+
+    if not has_permission(current_user, "can_manage_users"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+    try:
+        stats = feed_rag.reindex_all(db, project_id)
+    except feed_rag.RagUnavailable as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
+    return {"status": "ok", **stats}

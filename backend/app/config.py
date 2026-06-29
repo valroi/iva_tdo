@@ -74,6 +74,18 @@ class Settings(BaseSettings):
     ai_api_key: str = ""
     ai_model: str = "qwen-plus"
 
+    # --- FEED RAG-агент (LangGraph + Qdrant + локальные эмбеддинги) ---
+    qdrant_url: str = "http://qdrant:6333"
+    rag_embed_model: str = "BAAI/bge-m3"          # мультиязычный, 1024-dim
+    rag_rerank: bool = True                        # bge-reranker-v2-m3
+    rag_collection: str = "feed_docs"
+    rag_top_k: int = 20                            # кандидатов из Qdrant
+    rag_top_n: int = 6                             # после реранка → в контекст
+    rag_chunk_chars: int = 1800                    # ~800 токенов
+    rag_chunk_overlap: int = 250
+    # Модель-«мозг» агента на OpenRouter (reuse ai_api_base_url/ai_api_key).
+    agent_model: str = "qwen/qwen-2.5-72b-instruct:free"
+
 
 @lru_cache
 def get_settings() -> Settings:
