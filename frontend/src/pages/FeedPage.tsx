@@ -3,6 +3,7 @@ import {
   App,
   Button,
   Card,
+  Collapse,
   Drawer,
   Form,
   Input,
@@ -15,7 +16,7 @@ import {
   Typography,
   Upload,
 } from "antd";
-import { DownloadOutlined, EyeOutlined, RobotOutlined, SearchOutlined, UploadOutlined } from "@ant-design/icons";
+import { DownloadOutlined, EyeOutlined, LinkOutlined, RobotOutlined, SearchOutlined, UploadOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
 
@@ -61,6 +62,8 @@ export default function FeedPage({ currentUser }: Props): JSX.Element {
   const [aiConfigured, setAiConfigured] = useState(false);
   const [docs, setDocs] = useState<FeedDocumentItem[]>([]);
   const [disciplineFilter, setDisciplineFilter] = useState<string | null>(null);
+  const [openDisc, setOpenDisc] = useState<string[]>([]);   // раскрытые секции дисциплин
+  const [docQuery, setDocQuery] = useState("");             // фильтр по шифру (живой)
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number; current: string } | null>(null);
@@ -123,15 +126,33 @@ export default function FeedPage({ currentUser }: Props): JSX.Element {
     () => Array.from(new Set(docs.map((d) => d.discipline_code))).sort(),
     [docs],
   );
-  const visibleDocs = useMemo(
-    () => (disciplineFilter ? docs.filter((d) => d.discipline_code === disciplineFilter) : docs),
-    [docs, disciplineFilter],
-  );
+  const visibleDocs = useMemo(() => {
+    let list = disciplineFilter ? docs.filter((d) => d.discipline_code === disciplineFilter) : docs;
+    const q = docQuery.trim().toLowerCase();
+    if (q) {
+      list = list.filter((d) =>
+        d.doc_number.toLowerCase().includes(q) ||
+        (d.title_en || "").toLowerCase().includes(q) ||
+        (d.title_ru || "").toLowerCase().includes(q),
+      );
+    }
+    return list;
+  }, [docs, disciplineFilter, docQuery]);
   const docsByDiscipline = useMemo(() => {
     const groups: Record<string, FeedDocumentItem[]> = {};
     for (const d of visibleDocs) (groups[d.discipline_code] ??= []).push(d);
     return groups;
   }, [visibleDocs]);
+
+  // Фильтр по шифру → авто-раскрытие подходящих дисциплин. Deep-link #/docchecker?doc=ШИФР.
+  useEffect(() => {
+    if (docQuery.trim()) setOpenDisc(Object.keys(docsByDiscipline));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docQuery, docs]);
+  useEffect(() => {
+    const m = window.location.hash.match(/[?&]doc=([^&]+)/);
+    if (m) setDocQuery(decodeURIComponent(m[1]));
+  }, []);
 
   const handleBulkUpload = async () => {
     if (projectId === null || uploadFiles.length === 0) return;
@@ -205,6 +226,15 @@ export default function FeedPage({ currentUser }: Props): JSX.Element {
         ) : (
           <Space size={4} wrap>
             <Typography.Text copyable={{ text: v }} style={{ fontSize: 12 }}>{v}</Typography.Text>
+            <Button
+              size="small" type="link" icon={<LinkOutlined />} style={{ padding: 0 }}
+              title="Скопировать постоянную ссылку на документ"
+              onClick={() => {
+                const url = `${window.location.origin}${window.location.pathname}#/docchecker?doc=${encodeURIComponent(v)}`;
+                void navigator.clipboard.writeText(url);
+                message.success("Ссылка на документ скопирована");
+              }}
+            />
             {row.incomplete && (
               <Tag color="error" style={{ marginRight: 0 }} title={row.incomplete_reason ?? "Не хватает версии документа"}>
                 ⚠ {row.incomplete_reason ?? "нет файла"}
@@ -454,22 +484,44 @@ export default function FeedPage({ currentUser }: Props): JSX.Element {
           </Card>
         ) : null;
       })()}
-      {Object.entries(docsByDiscipline).map(([disc, list]) => {
-        const incompleteN = list.filter((d) => d.incomplete).length;
-        return (
-          <Card key={disc} size="small" style={{ marginBottom: 12 }}
-            title={
-              <Space>
-                <Tag color="blue">{disc}</Tag>
-                <Typography.Text strong>Дисциплина {disc}</Typography.Text>
-                <Typography.Text type="secondary">({list.length})</Typography.Text>
-                {incompleteN > 0 && <Tag color="error" style={{ marginRight: 0 }}>⚠ {incompleteN} без комплекта</Tag>}
-              </Space>
-            }>
-            <Table rowKey="id" size="small" columns={columns} dataSource={list} pagination={list.length > 20 ? { pageSize: 20 } : false} />
-          </Card>
-        );
-      })}
+      {Object.keys(docsByDiscipline).length > 0 && (
+        <>
+          <Space style={{ marginBottom: 8 }} wrap>
+            <Input.Search
+              allowClear
+              placeholder="Фильтр по шифру / названию…"
+              style={{ width: 320 }}
+              value={docQuery}
+              onChange={(e) => setDocQuery(e.target.value)}
+            />
+            <Button size="small" onClick={() => setOpenDisc(Object.keys(docsByDiscipline))}>Развернуть всё</Button>
+            <Button size="small" onClick={() => setOpenDisc([])}>Свернуть всё</Button>
+            <Typography.Text type="secondary">{visibleDocs.length} документ(ов) в {Object.keys(docsByDiscipline).length} дисциплин.</Typography.Text>
+          </Space>
+          <Collapse
+            activeKey={openDisc}
+            onChange={(k) => setOpenDisc(k as string[])}
+            items={Object.entries(docsByDiscipline).map(([disc, list]) => {
+              const incompleteN = list.filter((d) => d.incomplete).length;
+              return {
+                key: disc,
+                label: (
+                  <Space>
+                    <Tag color="blue">{disc}</Tag>
+                    <Typography.Text strong>Дисциплина {disc}</Typography.Text>
+                    <Typography.Text type="secondary">({list.length})</Typography.Text>
+                    {incompleteN > 0 && <Tag color="error" style={{ marginRight: 0 }}>⚠ {incompleteN} без комплекта</Tag>}
+                  </Space>
+                ),
+                children: (
+                  <Table rowKey="id" size="small" columns={columns} dataSource={list}
+                    pagination={list.length > 20 ? { pageSize: 20 } : false} />
+                ),
+              };
+            })}
+          />
+        </>
+      )}
 
       {/* Предпросмотр PDF без скачивания */}
       <Modal

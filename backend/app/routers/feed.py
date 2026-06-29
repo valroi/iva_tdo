@@ -509,7 +509,24 @@ def search_feed(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return [_hit_schema(d, s) for d, s in _keyword_hits(db, q, project_id)]
+    # Прямой матч по шифру — ВСЕГДА работает (даже частичный, любой регистр).
+    # Короткие сегменты шифра (00, EL) терялись в keyword-скоринге.
+    cipher = q.strip().upper()
+    out: list[FeedSearchHit] = []
+    seen: set[int] = set()
+    if cipher:
+        dq = db.query(FeedDocument).filter(FeedDocument.doc_number.ilike(f"%{cipher}%"))
+        if project_id is not None:
+            dq = dq.filter(FeedDocument.project_id == project_id)
+        for d in dq.order_by(FeedDocument.doc_number.asc()).limit(50).all():
+            out.append(_hit_schema(d, None))
+            seen.add(d.id)
+    # Полнотекстовый/смысловой по содержимому.
+    for d, s in _keyword_hits(db, q, project_id):
+        if d.id not in seen:
+            out.append(_hit_schema(d, s))
+            seen.add(d.id)
+    return out
 
 
 _FEED_AI_SETTING_KEY = "feed_ai_enabled"
@@ -597,12 +614,17 @@ def ask_feed(
         res = feed_agent.answer_question(question, project_id)
         sources = [FeedSearchHit(**s) for s in res.get("sources", [])]
         return FeedAskResult(answer=res["answer"], mode="agent", sources=sources)
-    except feed_rag.RagUnavailable:
-        return _keyword_result(db, question, project_id)  # стек не готов
-    except Exception as exc:  # noqa: BLE001 — LLM/квота/сеть: keyword-фолбэк с пометкой
+    except feed_rag.RagUnavailable as exc:
+        base = _keyword_result(db, question, project_id)  # стек не готов — показываем причину
+        return FeedAskResult(
+            answer=f"⚠️ Умный поиск недоступен: {str(exc)[:200]}\n\n{base.answer}",
+            mode="keyword",
+            sources=base.sources,
+        )
+    except Exception as exc:  # noqa: BLE001 — LLM/квота/сеть: показываем ошибку в чате
         base = _keyword_result(db, question, project_id)
         return FeedAskResult(
-            answer=f"AI-агент недоступен ({str(exc)[:120]}).\n{base.answer}",
+            answer=f"⚠️ Ошибка AI-агента: {str(exc)[:250]}\n\n{base.answer}",
             mode="keyword",
             sources=base.sources,
         )
