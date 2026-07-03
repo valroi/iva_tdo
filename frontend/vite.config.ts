@@ -4,6 +4,9 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [react()],
   server: {
+    // За reverse-proxy (Caddy) Host = публичный домен; без этого vite
+    // блокирует запрос («This host is not allowed»).
+    allowedHosts: true,
     headers: {
       "Cache-Control": "no-store",
     },

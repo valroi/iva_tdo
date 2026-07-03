@@ -25,16 +25,52 @@ from app.schemas import LoginRequest, RefreshRequest, RegisterRequest, TokenPair
 router = APIRouter()
 settings = get_settings()
 
+# --- Защита /login от перебора (интернет-экспозиция) ---------------------
+# In-memory: процесс uvicorn один (см. Dockerfile CMD), внешних зависимостей
+# не требуется. Ключ — (ip, email): злоумышленник с одного IP не подберёт
+# пароль, легитимного пользователя с другого IP не блокирует.
+_LOGIN_MAX_FAILS = 5
+_LOGIN_LOCK_SECONDS = 15 * 60
+_login_fails: dict[tuple[str, str], list[float]] = {}
+
+
+def _login_locked(ip: str, email: str) -> bool:
+    import time
+
+    key = (ip, email)
+    now = time.monotonic()
+    attempts = [t for t in _login_fails.get(key, []) if now - t < _LOGIN_LOCK_SECONDS]
+    _login_fails[key] = attempts
+    return len(attempts) >= _LOGIN_MAX_FAILS
+
+
+def _login_register_fail(ip: str, email: str) -> None:
+    import time
+
+    _login_fails.setdefault((ip, email), []).append(time.monotonic())
+    # Не даём словарю расти бесконечно.
+    if len(_login_fails) > 10_000:
+        _login_fails.clear()
+
 
 @router.post("/login", response_model=TokenPair)
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == payload.email.lower()).first()
+    email = payload.email.lower()
+    ip = _get_ip_address(request) or "unknown"
+    if _login_locked(ip, email):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed attempts. Try again in 15 minutes.",
+        )
+    user = db.query(User).filter(User.email == email).first()
     if (
         user is None
         or not user.is_active
         or not verify_password(payload.password, user.hashed_password)
     ):
+        _login_register_fail(ip, email)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    _login_fails.pop((ip, email), None)
 
     ip_address = _get_ip_address(request)
     now = datetime.utcnow()

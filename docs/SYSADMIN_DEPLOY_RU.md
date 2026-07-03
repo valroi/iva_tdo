@@ -354,3 +354,54 @@ docker compose up -d                  # поднимет и контейнер q
 - Вопрос в чат FEED → приходит ответ с источниками (mode=agent).
 - Ошибка (нет кредитов/квота/стек не готов) выводится прямо в чат с ⚠️.
 - `docker compose logs backend | grep -iE "feed_rag|feed_agent|qdrant"`.
+
+---
+
+## 10. Выход в интернет (подключение внешних подрядчиков)
+
+Схема: наружу открыт ТОЛЬКО Caddy (80/443, авто-HTTPS Let's Encrypt),
+backend/frontend доступны только внутри docker-сети.
+
+### 10.1. Предпосылки
+1. Публичный домен, A-запись → IP сервера (например `tdo.company.ru`).
+2. На файрволе/роутере открыты **только 80 и 443**. Порты 3000/8000/6333/5432
+   наружу ЗАКРЫТЫ.
+3. `git pull` (redis/minio удалены из compose — они не использовались, а их
+   открытые порты с дефолт-паролями были дырой).
+
+### 10.2. .env — обязательные значения для интернета
+```dotenv
+APP_ENV=production            # backend ОТКАЖЕТСЯ стартовать с дефолтными секретами
+DOMAIN=tdo.company.ru         # домен для Caddy/TLS
+VITE_API_URL=                 # ПУСТО! фронт ходит на относительный /api через Caddy
+PUBLIC_BASE_URL=https://tdo.company.ru
+CORS_ORIGINS=["https://tdo.company.ru"]
+SECRET_KEY=<случайный 64+>    # НЕ дефолт — иначе backend не стартует
+FIRST_ADMIN_PASSWORD=<свой>   # НЕ admin123 — иначе backend не стартует
+SEED_DEMO_USERS=false
+```
+
+### 10.3. Запуск
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml build backend frontend
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+Caddy сам получит сертификат (нужны рабочий DNS и открытый 80). Проверка:
+`https://tdo.company.ru` открывается, замок валиден, `http://` редиректит.
+
+### 10.4. Что уже встроено в код (этот релиз)
+- Rate-limit на вход: 5 неверных паролей с одного IP → блок 15 минут (429).
+- Отказ старта в production с дефолтными SECRET_KEY / паролем админа /
+  включёнными демо-пользователями.
+- Security-заголовки на всех ответах API; HSTS/HTTPS — на Caddy.
+- Подрядчики: персональная ссылка + email-код, лимит попыток, изоляция MR —
+  было ранее.
+
+### 10.5. Чек-лист перед открытием наружу
+- [ ] `APP_ENV=production`, свои SECRET_KEY / пароли (backend не стартует с дефолтами)
+- [ ] Файрвол: наружу только 80/443
+- [ ] `VITE_API_URL` пустой + фронт пересобран (`build frontend`)
+- [ ] SMTP работает (письмо подрядчику доходит) — иначе подрядчик не войдёт
+- [ ] `PUBLIC_BASE_URL=https://домен` — ссылки в письмах ведут на публичный адрес
+- [ ] Бэкап volumes настроен (postgres_data + файловые тома, §5)
+- [ ] Тест с внешней сети (мобильный интернет): вход админа, портал подрядчика по ссылке

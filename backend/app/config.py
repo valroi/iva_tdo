@@ -10,6 +10,8 @@ class Settings(BaseSettings):
 
     app_name: str = "IvaMaris TDO"
     api_v1_prefix: str = "/api/v1"
+    # production → при старте проверяются дефолтные секреты (см. main.py).
+    app_env: str = "development"
 
     secret_key: str = Field(default="change-me-in-production")
     algorithm: str = "HS256"

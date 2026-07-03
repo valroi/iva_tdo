@@ -22,8 +22,41 @@ app.add_middleware(
 app.include_router(api_router, prefix=settings.api_v1_prefix)
 
 
+@app.middleware("http")
+async def security_headers(request, call_next):
+    """Базовые security-заголовки для интернет-экспозиции.
+    HSTS/CSP добавляет reverse-proxy (Caddy) — тут только независимые от TLS."""
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    return response
+
+
+def _check_production_secrets() -> None:
+    """APP_ENV=production: отказ старта с дефолтными секретами.
+    Дефолтный SECRET_KEY = подделка любых JWT, дефолтный пароль админа =
+    полный захват системы. На публичном сервере это фатально."""
+    if settings.app_env.lower() != "production":
+        return
+    problems = []
+    if settings.secret_key == "change-me-in-production":
+        problems.append("SECRET_KEY имеет дефолтное значение")
+    if settings.first_admin_password in ("admin123", "change-this-admin-password"):
+        problems.append("FIRST_ADMIN_PASSWORD имеет дефолтное значение")
+    if settings.seed_demo_users:
+        problems.append("SEED_DEMO_USERS=true (демо-пользователи с известными паролями)")
+    if problems:
+        raise RuntimeError(
+            "APP_ENV=production, но обнаружены небезопасные настройки: "
+            + "; ".join(problems)
+            + ". Задайте значения в .env и перезапустите."
+        )
+
+
 @app.on_event("startup")
 def on_startup() -> None:
+    _check_production_secrets()
     init_db()
     with SessionLocal() as db:
         seed_default_data(db)

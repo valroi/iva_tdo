@@ -1,0 +1,29 @@
+# Reverse-proxy для выхода IvaMaris TDO в интернет.
+# DOMAIN берётся из .env (docker-compose.prod.yml). Caddy сам получает и
+# продлевает TLS-сертификат Let's Encrypt — нужен только A-запись DNS на сервер
+# и открытые 80/443.
+
+{$DOMAIN} {
+	encode gzip
+
+	# Безопасность: HSTS + базовые заголовки (дублируют backend-middleware —
+	# так фронтовые ответы тоже покрыты).
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# API → backend. Фронт ходит на относительный /api (VITE_API_URL пустой),
+	# поэтому CORS и mixed-content исключены by design.
+	handle /api/* {
+		reverse_proxy backend:8000
+	}
+
+	# Всё остальное → frontend.
+	handle {
+		reverse_proxy frontend:3000
+	}
+}

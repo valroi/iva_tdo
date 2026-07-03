@@ -1,0 +1,41 @@
+# Прод-оверрайд для выхода в интернет: наружу ТОЛЬКО Caddy (80/443, авто-HTTPS
+# Let's Encrypt). Порты backend/frontend наружу не публикуются.
+#
+# Запуск:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Требования в .env:
+#   DOMAIN=tdo.company.ru          # A-запись DNS указывает на сервер
+#   APP_ENV=production             # включает проверку дефолтных секретов
+#   VITE_API_URL=                  # ПУСТО → фронт ходит на относительный /api
+#   PUBLIC_BASE_URL=https://tdo.company.ru
+#   CORS_ORIGINS=["https://tdo.company.ru"]
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?Задайте DOMAIN в .env (публичный домен системы)}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+      - frontend
+
+  backend:
+    # Наружу не торчит — только через Caddy (/api/*).
+    ports: !reset []
+
+  frontend:
+    # Наружу не торчит — только через Caddy.
+    ports: !reset []
+
+volumes:
+  caddy_data:
+  caddy_config:
