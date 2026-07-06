@@ -165,7 +165,11 @@ def seed_default_data(db: Session) -> None:
             is_active=True,
         )
         db.add(admin)
-    else:
+    elif settings.force_admin_reset:
+        # Аварийное восстановление доступа: FORCE_ADMIN_RESET=true в .env →
+        # пароль/права админа сбрасываются к значениям из env. По умолчанию
+        # ВЫКЛЮЧЕНО: раньше пароль затирался при КАЖДОМ рестарте backend,
+        # и смена пароля через UI жила до первого обновления.
         admin.hashed_password = get_password_hash(settings.first_admin_password)
         admin.role = UserRole.admin
         admin.permissions = default_permissions_for_role(UserRole.admin)
@@ -206,7 +210,8 @@ def seed_default_data(db: Session) -> None:
                     is_active=True,
                 )
             )
-        else:
+        elif settings.force_admin_reset:
+            # См. комментарий выше — сброс только по явному флагу.
             main_admin.hashed_password = get_password_hash(settings.first_admin_password)
             main_admin.role = UserRole.admin
             main_admin.permissions = default_permissions_for_role(UserRole.admin)

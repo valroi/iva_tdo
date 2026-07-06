@@ -435,13 +435,24 @@ def delete_feed_file(
 @router.get("/feed/files/{file_id}")
 def download_feed_file(
     file_id: int,
+    inline: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     f = db.query(FeedFile).filter(FeedFile.id == file_id).first()
     if f is None or not Path(f.file_path).exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-    return FileResponse(f.file_path, filename=f.file_name, media_type="application/octet-stream")
+    # PDF отдаём с настоящим content-type: иначе браузер не рендерит в iframe
+    # и принудительно скачивает («просмотрщик не работает»). inline=1 —
+    # просмотр в браузере, без — скачивание с именем файла.
+    is_pdf = (f.file_name or "").lower().endswith(".pdf")
+    media = "application/pdf" if is_pdf else "application/octet-stream"
+    return FileResponse(
+        f.file_path,
+        filename=f.file_name,
+        media_type=media,
+        content_disposition_type="inline" if (inline and is_pdf) else "attachment",
+    )
 
 
 # ------------------------------------------------------------- search / ask

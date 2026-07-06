@@ -1209,9 +1209,12 @@ export async function downloadFeedFile(fileId: number, fileName: string): Promis
   downloadBlob(blob, fileName);
 }
 export async function getFeedFileObjectUrl(fileId: number): Promise<string> {
-  // Blob для просмотра PDF в модалке без скачивания на диск.
-  const blob = await requestBlob(`/feed/files/${fileId}`);
-  return URL.createObjectURL(blob.type ? blob : new Blob([blob], { type: "application/pdf" }));
+  // Blob для просмотра PDF в модалке без скачивания на диск. inline=1 —
+  // сервер отдаёт application/pdf + inline. Октет-стрим перематываем в pdf:
+  // иначе iframe не рендерит и браузер принудительно качает файл.
+  const blob = await requestBlob(`/feed/files/${fileId}?inline=1`);
+  const pdfBlob = blob.type === "application/pdf" ? blob : new Blob([blob], { type: "application/pdf" });
+  return URL.createObjectURL(pdfBlob);
 }
 export function searchFeed(q: string, projectId?: number): Promise<import("./types").FeedSearchHit[]> {
   const params = new URLSearchParams({ q });

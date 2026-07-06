@@ -18,6 +18,8 @@ services:
     environment:
       # production → отказ старта при дефолтных секретах (обязателен для интернета).
       APP_ENV: ${APP_ENV:-development}
+      # Аварийный сброс пароля админа к env-значениям (по умолчанию НЕ трогаем).
+      FORCE_ADMIN_RESET: ${FORCE_ADMIN_RESET:-false}
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://user:pass@db:5432/tdms}
       SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
       FIRST_ADMIN_EMAIL: ${FIRST_ADMIN_EMAIL:-admin@ivamaris.io}
@@ -82,9 +84,13 @@ services:
     # Порт наружу не публикуем — доступ только из backend по сети compose.
 
   frontend:
-    build: ./frontend
-    environment:
-      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+    build:
+      context: ./frontend
+      args:
+        # ПУСТО (дефолт) = относительный /api: nginx внутри контейнера
+        # проксирует на backend. Работает в LAN и за Caddy без CORS.
+        # VITE_API_URL — BUILD-время: смена требует пересборки frontend.
+        VITE_API_URL: ${VITE_API_URL:-}
     ports:
       - "3000:3000"
     depends_on:

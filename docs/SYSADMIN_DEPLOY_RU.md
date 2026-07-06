@@ -405,3 +405,51 @@ Caddy сам получит сертификат (нужны рабочий DNS 
 - [ ] `PUBLIC_BASE_URL=https://домен` — ссылки в письмах ведут на публичный адрес
 - [ ] Бэкап volumes настроен (postgres_data + файловые тома, §5)
 - [ ] Тест с внешней сети (мобильный интернет): вход админа, портал подрядчика по ссылке
+
+---
+
+## 11. Обновления БЕЗ потери данных и настроек
+
+### 11.1. Что гарантировано переживает обновление
+| Данные | Где живут | Трогает ли обновление |
+|---|---|---|
+| БД (документы, решения, замечания, MR) | volume `postgres_data` | НЕТ |
+| PDF ревизий | volume `tdo_uploads` | НЕТ |
+| Файлы DOCchecker | volume `smart_upload` | НЕТ |
+| Файлы подрядчиков | volume `vendor_uploads` | НЕТ |
+| Документация FEED | volume `feed_storage` | НЕТ |
+| Векторный индекс агента | volume `qdrant_data` | НЕТ |
+| Схема БД | авто-миграция ДОБАВЛЯЕТ недостающие колонки, ничего не удаляет | безопасно |
+| **Пароль админа, изменённый в UI** | БД | **теперь НЕ сбрасывается** (см. 11.2) |
+
+Правильная процедура обновления (данные не затрагивает):
+```bash
+git pull origin main
+docker compose -f docker-compose.yml -f docker-compose.prod.yml build backend frontend
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
+
+### 11.2. Исправлено: сброс пароля админа при рестарте
+Раньше КАЖДЫЙ перезапуск backend затирал пароль и права админа значениями из
+.env — смена пароля через UI жила до первого обновления. Теперь существующие
+учётки не трогаются. Аварийное восстановление доступа (забыли пароль):
+```dotenv
+FORCE_ADMIN_RESET=true   # + перезапуск backend; после входа вернуть false
+```
+
+### 11.3. Чего НЕ делать
+- `docker compose down -v` — флаг `-v` УДАЛЯЕТ все volumes (БД + файлы).
+- `docker volume prune` при остановленных контейнерах — удалит тома проекта.
+- Менять `TDO_UPLOADS_ROOT`/`FEED_STORAGE_ROOT` без переноса файлов.
+
+### 11.4. Бэкап (рекомендуется по крону, раз в сутки)
+```bash
+# БД
+docker compose exec -T db pg_dump -U tdo_app tdms | gzip > /backup/tdms_$(date +%F).sql.gz
+# Файловые тома
+for v in tdo_uploads smart_upload vendor_uploads feed_storage; do
+  docker run --rm -v iva_tdo_${v}:/data -v /backup:/backup alpine \
+    tar czf /backup/${v}_$(date +%F).tar.gz -C /data .
+done
+```
+(Имя тома = `<папка_проекта>_<volume>`; проверить: `docker volume ls`.)
