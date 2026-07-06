@@ -73,14 +73,16 @@ def _compose_legacy_cipher(payload: ComposeCipherPayload) -> tuple[str, str]:
     part_code = (payload.doc_type or "").strip()
     book_code = (payload.serial_number or "").strip()
 
-    if category == "PD":
-        # IMP-CTR-PD-0001-AR(.1)(.1.2)
+    if category in ("PD", "SE"):
+        # PD: IMP-CTR-PD-0001-AR(.1)(.1.2)  — раздел из справочника pd_section.
+        # SE: IMP-CTR-SE-0001-IGDI(...)     — тот же принцип, код отчёта из
+        #     справочника se_reporting_type (инженерные изыскания).
         if not re.fullmatch(r"\d{4}", title_number):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="title_object must be 4 digits for PD")
-        if not re.fullmatch(r"[A-Z0-9]{2,5}", section_code):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"title_object must be 4 digits for {category}")
+        if not re.fullmatch(r"[A-Z0-9]{2,8}", section_code):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="discipline_code must be 2-5 alnum chars (project documentation section code)",
+                detail="discipline_code must be 2-8 alnum chars (section/report code from reference)",
             )
         if part_code and not re.fullmatch(r"\d{1,2}", part_code):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="doc_type must be 1-2 digits (part)")
@@ -91,7 +93,7 @@ def _compose_legacy_cipher(payload: ComposeCipherPayload) -> tuple[str, str]:
         cipher = f"{payload.project_code.upper()}-{payload.originator_code.upper()}-{category}-{title_number}-{section_part}"
         if book_code:
             cipher = f"{cipher}.{book_code}"
-        return cipher, "PD_SIMPLE"
+        return cipher, f"{category}_SIMPLE"
 
     serial_number = (payload.serial_number or "").strip()
     if not serial_number:
@@ -361,10 +363,24 @@ def create_mdr(
     if project is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown project_code")
     if project.document_category and payload.category.upper() != project.document_category.upper():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Category must match project category: {project.document_category}",
+        # Категория проекта — основная, но допускаются и другие АКТИВНЫЕ
+        # категории из справочника document_category (например SE —
+        # инженерные изыскания живут рядом с ПД в одном проекте).
+        allowed = (
+            db.query(ProjectReference.id)
+            .filter(
+                ProjectReference.project_id == project.id,
+                ProjectReference.ref_type == "document_category",
+                ProjectReference.code == payload.category.upper(),
+                ProjectReference.is_active.is_(True),
+            )
+            .first()
         )
+        if allowed is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Category must match project category ({project.document_category}) or an active document_category reference",
+            )
 
     exists = db.query(MDRRecord).filter(MDRRecord.document_key == payload.document_key).first()
     if exists:

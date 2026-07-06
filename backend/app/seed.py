@@ -263,10 +263,26 @@ def seed_default_data(db: Session) -> None:
                 db.add(item)
 
         upsert_ref("document_category", "PD", "Проектная документация")
+        upsert_ref("document_category", "SE", "Инженерные изыскания")
         for code, value in DEFAULT_TITLE_OBJECTS:
             upsert_ref("title_object", code, value)
         for code, value in DEFAULT_PD_SECTIONS:
             upsert_ref("pd_section", code, value)
+        # Справочник видов SE-отчётов: сеем ТОЛЬКО если пуст — на проде он
+        # наполнен вручную, upsert перезаписал бы названия пользователя.
+        has_se = (
+            db.query(ProjectReference.id)
+            .filter(ProjectReference.project_id == project.id, ProjectReference.ref_type == "se_reporting_type")
+            .first()
+        )
+        if has_se is None:
+            for code, value in [
+                ("IGDI", "Инженерно-геодезические изыскания"),
+                ("IGI", "Инженерно-геологические изыскания"),
+                ("IGMI", "Инженерно-гидрометеорологические изыскания"),
+                ("IEI", "Инженерно-экологические изыскания"),
+            ]:
+                upsert_ref("se_reporting_type", code, value)
         for mark_code, mark_name, discipline_code in DEFAULT_MARKS:
             upsert_ref("mark", mark_code, mark_name)
             upsert_ref("mark_discipline", mark_code, discipline_code)

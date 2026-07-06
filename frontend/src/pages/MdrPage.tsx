@@ -45,11 +45,12 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
   const [deletingMdrLoading, setDeletingMdrLoading] = useState(false);
   const normalizePdCipher = (value: string): string => {
     const raw = String(value || "").trim().toUpperCase();
-    const rx = /^([A-Z]{3})-([A-Z]{3})-PD-(\d{4})-([A-Z0-9]{2,5})-(\d{1,2})(?:-)?([0-9.]{1,5})?$/;
+    // PD и SE (инженерные изыскания) — одна схема шифра.
+    const rx = /^([A-Z]{3})-([A-Z]{3})-(PD|SE)-(\d{4})-([A-Z0-9]{2,8})-(\d{1,2})(?:-)?([0-9.]{1,5})?$/;
     const match = rx.exec(raw);
     if (!match) return raw;
-    const [, projectCode, originatorCode, title, section, part, book] = match;
-    return `${projectCode}-${originatorCode}-PD-${title}-${section}${part}${book ? `.${book}` : ""}`;
+    const [, projectCode, originatorCode, cat, title, section, part, book] = match;
+    return `${projectCode}-${originatorCode}-${cat}-${title}-${section}${part}${book ? `.${book}` : ""}`;
   };
 
   const [form] = Form.useForm();
@@ -78,30 +79,30 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
     .slice(0, 3);
 
   const categoryOptions = useMemo(() => {
-    if (selectedProject?.document_category) {
-      const byCode = projectReferences.find(
-        (ref) => ref.ref_type === "document_category" && ref.code === selectedProject.document_category,
-      );
-      return [
-        {
-          value: selectedProject.document_category,
-          label: byCode
-            ? `${selectedProject.document_category} - ${byCode.value}`
-            : selectedProject.document_category,
-        },
-      ];
-    }
-    return projectReferences
+    const active = projectReferences
       .filter((ref) => ref.ref_type === "document_category" && ref.is_active)
       .map((ref) => ({ value: ref.code, label: `${ref.code} - ${ref.value}` }));
+    if (selectedProject?.document_category) {
+      // Категория проекта — первой; остальные активные категории справочника
+      // (например SE — инженерные изыскания) доступны дополнительно.
+      const primary = selectedProject.document_category;
+      const byCode = projectReferences.find(
+        (ref) => ref.ref_type === "document_category" && ref.code === primary,
+      );
+      const first = { value: primary, label: byCode ? `${primary} - ${byCode.value}` : primary };
+      return [first, ...active.filter((o) => o.value !== primary)];
+    }
+    return active;
   }, [projectReferences, selectedProject?.document_category]);
-  const disciplineOptions = useMemo(
-    () =>
-      projectReferences
-        .filter((ref) => (ref.ref_type === "pd_section" || ref.ref_type === "discipline") && ref.is_active)
-        .map((ref) => ({ value: ref.code, label: `${ref.code} - ${ref.value}` })),
-    [projectReferences],
-  );
+  const isSeCategory = String(currentCategory || "").toUpperCase() === "SE";
+  const disciplineOptions = useMemo(() => {
+    // Для SE (инженерные изыскания) раздел шифра — вид отчёта из справочника
+    // «SE отчеты» (se_reporting_type); для остальных — раздел ПД/дисциплина.
+    const wantedTypes = isSeCategory ? ["se_reporting_type"] : ["pd_section", "discipline"];
+    return projectReferences
+      .filter((ref) => wantedTypes.includes(ref.ref_type) && ref.is_active)
+      .map((ref) => ({ value: ref.code, label: `${ref.code} - ${ref.value}` }));
+  }, [projectReferences, isSeCategory]);
   const titleObjectOptions = useMemo(
     () =>
       projectReferences
@@ -603,8 +604,15 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
         okButtonProps={{ loading: submitting }}
       >
         <Form form={form} layout="vertical">
-          <Form.Item name="category" hidden>
-            <Input />
+          <Form.Item name="category" label="Категория документа" rules={[{ required: true }]}>
+            <Select
+              options={categoryOptions}
+              placeholder="PD — проектная документация / SE — изыскания"
+              onChange={() => {
+                // Раздел зависит от категории (pd_section ↔ se_reporting_type).
+                form.setFieldsValue({ discipline_code: undefined });
+              }}
+            />
           </Form.Item>
           <Form.Item name="document_key" label="Уникальный ID документа" rules={[{ required: true }]}>
             <Input readOnly={Boolean(editingMdrId)} />
@@ -631,12 +639,23 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
           <Form.Item name="title_object" label="Титульный объект" rules={[{ required: true }]}>
             <Select showSearch optionFilterProp="label" options={titleObjectOptions} placeholder="Из справочника проекта" />
           </Form.Item>
-          <Form.Item name="discipline_code" label="Раздел ПД" rules={[{ required: true }]}>
-            <Select showSearch optionFilterProp="label" options={disciplineOptions} placeholder="Из справочника разделов ПД" />
+          <Form.Item
+            name="discipline_code"
+            label={isSeCategory ? "Вид отчёта (SE)" : "Раздел ПД"}
+            rules={[{ required: true }]}
+          >
+            <Select
+              showSearch
+              optionFilterProp="label"
+              options={disciplineOptions}
+              placeholder={isSeCategory ? "Из справочника «SE отчеты»" : "Из справочника разделов ПД"}
+            />
           </Form.Item>
-          <Form.Item label="Номер раздела (инфо)">
-            <Input value={currentSectionNumber} readOnly />
-          </Form.Item>
+          {!isSeCategory && (
+            <Form.Item label="Номер раздела (инфо)">
+              <Input value={currentSectionNumber} readOnly />
+            </Form.Item>
+          )}
           <Form.Item
             name="doc_type"
             label="Часть (необязательно, 1-2 цифры)"

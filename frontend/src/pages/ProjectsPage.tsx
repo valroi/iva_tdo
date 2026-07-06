@@ -427,10 +427,14 @@ export default function ProjectsPage({
   const projectMdrIds = useMemo(() => new Set(projectMdr.map((row) => row.id)), [projectMdr]);
   const projectDocuments = useMemo(() => documents.filter((item) => projectMdrIds.has(item.mdr_id)), [documents, projectMdrIds]);
   const disciplineOptions = useMemo(
-    () =>
-      references
+    () => [
+      // Условный раздел для инженерных изысканий: назначение на него
+      // покрывает ВСЕ документы категории SE (независимо от вида отчёта).
+      { value: "SE", label: "SE — Инженерные изыскания (все отчёты)" },
+      ...references
         .filter((ref) => ref.ref_type === "pd_section" && ref.is_active)
         .map((ref) => ({ value: ref.code, label: `${ref.code} - ${ref.value}` })),
+    ],
     [references],
   );
   const hierarchyTree = useMemo(
@@ -1155,12 +1159,12 @@ export default function ProjectsPage({
         }}
       >
         <Form form={matrixForm} layout="vertical" initialValues={{ level: 1, state: "R" }}>
-          <Form.Item name="discipline_code" label="Раздел ПД" rules={[{ required: true }]}>
+          <Form.Item name="discipline_code" label="Раздел (ПД / SE)" rules={[{ required: true }]}>
             <Select
               showSearch
               optionFilterProp="label"
               options={disciplineOptions}
-              placeholder="Выберите раздел ПД"
+              placeholder="Раздел ПД или SE — изыскания (вся категория)"
             />
           </Form.Item>
           <Form.Item name="user_id" label="Сотрудник" rules={[{ required: true }]}>

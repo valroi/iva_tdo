@@ -296,35 +296,68 @@ export default function DocumentsRegistryPage({ currentUser, onOpenRevision, pre
         </Space>
       </Card>
 
-      <div style={{ width: "100%", maxWidth: "100%", overflowX: "auto" }}>
-      <Table
-        rowKey="document_id"
-        loading={loading}
-        columns={columns}
-        dataSource={rows}
-        size="small"
-        expandable={{
-          expandedRowRender: (row) => (
-            <div style={{ width: "100%", maxWidth: "100%", overflowX: "auto" }}>
-              <Table
-                rowKey="id"
-                columns={revisionColumns}
-                dataSource={row.revisions}
-                size="small"
-                pagination={false}
-                tableLayout="fixed"
-                scroll={{ x: 900 }}
-                locale={{ emptyText: "По документу еще нет ревизий." }}
-              />
-            </div>
-          ),
-        }}
-        pagination={{ pageSize: 20 }}
-        tableLayout="fixed"
-        scroll={{ x: 1500 }}
-        locale={{ emptyText: "Реестр пуст. Уточните фильтры или проверьте выбранный проект." }}
-      />
-      </div>
+      {(() => {
+        const CATEGORY_LABEL: Record<string, string> = {
+          PD: "Проектная документация",
+          SE: "Инженерные изыскания",
+        };
+        const categories = Array.from(new Set(rows.map((r) => r.category || "—")));
+        const renderTable = (data: DocumentRegistryItem[]) => (
+          <div style={{ width: "100%", maxWidth: "100%", overflowX: "auto" }}>
+            <Table
+              rowKey="document_id"
+              loading={loading}
+              columns={columns}
+              dataSource={data}
+              size="small"
+              expandable={{
+                expandedRowRender: (row) => (
+                  <div style={{ width: "100%", maxWidth: "100%", overflowX: "auto" }}>
+                    <Table
+                      rowKey="id"
+                      columns={revisionColumns}
+                      dataSource={row.revisions}
+                      size="small"
+                      pagination={false}
+                      tableLayout="fixed"
+                      scroll={{ x: 900 }}
+                      locale={{ emptyText: "По документу еще нет ревизий." }}
+                    />
+                  </div>
+                ),
+              }}
+              pagination={{ pageSize: 20 }}
+              tableLayout="fixed"
+              scroll={{ x: 1500 }}
+              locale={{ emptyText: "Реестр пуст. Уточните фильтры или проверьте выбранный проект." }}
+            />
+          </div>
+        );
+        // Одна категория — как раньше. Несколько (PD + SE) — секции по категориям.
+        if (categories.length <= 1) return renderTable(rows);
+        return (
+          <Space direction="vertical" size={12} style={{ width: "100%" }}>
+            {categories.sort().map((cat) => {
+              const data = rows.filter((r) => (r.category || "—") === cat);
+              return (
+                <Card
+                  key={cat}
+                  size="small"
+                  title={
+                    <Space>
+                      <Tag color={cat === "SE" ? "geekblue" : "blue"}>{cat}</Tag>
+                      <Typography.Text strong>{CATEGORY_LABEL[cat] ?? cat}</Typography.Text>
+                      <Typography.Text type="secondary">({data.length})</Typography.Text>
+                    </Space>
+                  }
+                >
+                  {renderTable(data)}
+                </Card>
+              );
+            })}
+          </Space>
+        );
+      })()}
     </div>
   );
 }
