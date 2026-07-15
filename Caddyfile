@@ -6,14 +6,28 @@
 {$DOMAIN} {
 	encode gzip
 
-	# Безопасность: HSTS + базовые заголовки (дублируют backend-middleware —
-	# так фронтовые ответы тоже покрыты).
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "DENY"
 		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Robots-Tag "noindex, nofollow, noarchive"
 		-Server
+	}
+
+	# Внутренняя система — не для публичной индексации/сканирования.
+	# Известные поисковые/AI-краулеры и массовые сканеры отсекаем по UA ДО
+	# прокси на бэкенд/фронт (они не тратят наши ресурсы вообще). ВАЖНО:
+	# это должен быть именно `handle`, а не голый `respond` — `handle`-блоки
+	# в Caddy обрабатываются по порядку и терминальны, поэтому этот блок
+	# обязан идти ПЕРЕД остальными handle-блоками ниже, иначе catch-all
+	# `handle {}` перехватит запрос раньше, чем сработает блокировка.
+	# X-Robots-Tag выше — вежливая просьба индексаторам не индексировать,
+	# даже если кто-то доберётся с незнакомым UA. Это снижает шум/индексацию,
+	# НЕ заменяет авторизацию как защиту доступа.
+	@bots header_regexp UA User-Agent "(?i)bot|crawl|spider|slurp|bingpreview|facebookexternalhit|semrush|ahrefs|mj12bot|dotbot|petalbot|yandexbot|googlebot|bytespider|gptbot|ccbot|claudebot|scrapy|masscan|nmap|nikto|zgrab|censys|shodan"
+	handle @bots {
+		respond 403
 	}
 
 	# API → backend. Фронт ходит на относительный /api (VITE_API_URL пустой),
