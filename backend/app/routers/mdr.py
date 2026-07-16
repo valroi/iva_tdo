@@ -15,11 +15,14 @@ from openpyxl import Workbook, load_workbook
 from app.database import get_db
 from app.deps import get_current_user, has_permission, require_permissions
 from app.models import (
+    CarryOverDecision,
     Comment,
     CipherTemplate,
     CipherTemplateField,
     Document,
+    DocumentAttachment,
     MDRRecord,
+    Notification,
     Project,
     ProjectReference,
     Revision,
@@ -488,16 +491,59 @@ def delete_mdr(
     if not mdr:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="MDR not found")
 
+    # Полный каскад в FK-безопасном порядке. Раньше не чистились
+    # document_attachments / carry_over_decisions / notifications —
+    # Postgres отбивал удаление IntegrityError'ом (500), и «Удалить»
+    # в UI выглядело как «ничего не происходит».
+    file_paths: list[str] = []
     document_ids = [row[0] for row in db.query(Document.id).filter(Document.mdr_id == mdr_id).all()]
     if document_ids:
         revision_ids = [row[0] for row in db.query(Revision.id).filter(Revision.document_id.in_(document_ids)).all()]
         if revision_ids:
+            comment_ids = [row[0] for row in db.query(Comment.id).filter(Comment.revision_id.in_(revision_ids)).all()]
+            if comment_ids:
+                db.query(CarryOverDecision).filter(
+                    CarryOverDecision.source_comment_id.in_(comment_ids)
+                ).delete(synchronize_session=False)
+            db.query(CarryOverDecision).filter(
+                CarryOverDecision.target_revision_id.in_(revision_ids)
+            ).delete(synchronize_session=False)
+            # Уведомления участников по ревизиям этого документа.
+            db.query(Notification).filter(Notification.revision_id.in_(revision_ids)).delete(synchronize_session=False)
             db.query(Comment).filter(Comment.revision_id.in_(revision_ids)).delete(synchronize_session=False)
+            # PDF ревизий — собрать пути, файлы стереть после успешного коммита.
+            file_paths += [
+                row[0]
+                for row in db.query(Revision.file_path).filter(Revision.id.in_(revision_ids)).all()
+                if row[0]
+            ]
+        file_paths += [
+            row[0]
+            for row in db.query(DocumentAttachment.file_path)
+            .filter(DocumentAttachment.document_id.in_(document_ids))
+            .all()
+            if row[0]
+        ]
+        db.query(DocumentAttachment).filter(
+            DocumentAttachment.document_id.in_(document_ids)
+        ).delete(synchronize_session=False)
         db.query(Revision).filter(Revision.document_id.in_(document_ids)).delete(synchronize_session=False)
         db.query(Document).filter(Document.id.in_(document_ids)).delete(synchronize_session=False)
 
+    # Контекстные уведомления по шифру документа (без revision_id).
+    db.query(Notification).filter(Notification.document_num == mdr.doc_number).delete(synchronize_session=False)
+
     db.delete(mdr)
     db.commit()
+
+    # Файлы чистим только после успешного коммита БД — сбой ФС не ломает удаление.
+    import os
+
+    for path in file_paths:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
 
 
 @router.get("/template")
