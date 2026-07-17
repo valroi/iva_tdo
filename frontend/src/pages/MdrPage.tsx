@@ -45,8 +45,9 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
   const [deletingMdrLoading, setDeletingMdrLoading] = useState(false);
   const normalizePdCipher = (value: string): string => {
     const raw = String(value || "").trim().toUpperCase();
-    // PD и SE (инженерные изыскания) — одна схема шифра.
-    const rx = /^([A-Z]{3})-([A-Z]{3})-(PD|SE)-(\d{4})-([A-Z0-9]{2,8})-(\d{1,2})(?:-)?([0-9.]{1,5})?$/;
+    // Схема со сжатым разделом/книгой — только у PD. У SE и остальных
+    // категорий шифр плоский (7 сегментов через дефис), сжимать нечего.
+    const rx = /^([A-Z]{3})-([A-Z]{3})-(PD)-(\d{4})-([A-Z0-9]{2,8})-(\d{1,2})(?:-)?([0-9.]{1,5})?$/;
     const match = rx.exec(raw);
     if (!match) return raw;
     const [, projectCode, originatorCode, cat, title, section, part, book] = match;
@@ -94,15 +95,25 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
     }
     return active;
   }, [projectReferences, selectedProject?.document_category]);
+  const isPdCategory = String(currentCategory || "").toUpperCase() === "PD";
   const isSeCategory = String(currentCategory || "").toUpperCase() === "SE";
   const disciplineOptions = useMemo(() => {
-    // Для SE (инженерные изыскания) раздел шифра — вид отчёта из справочника
-    // «SE отчеты» (se_reporting_type); для остальных — раздел ПД/дисциплина.
-    const wantedTypes = isSeCategory ? ["se_reporting_type"] : ["pd_section", "discipline"];
+    // PD — раздел ПД (pd_section); SE (инженерные изыскания) — вид отчёта
+    // из справочника «SE отчеты» (se_reporting_type); остальные категории
+    // (шифр без сжатия: IMP-CTR-CAT-1001-ДИСЦ-ТИП-001) — общий справочник
+    // «Дисциплина» (discipline).
+    const wantedTypes = isPdCategory ? ["pd_section"] : isSeCategory ? ["se_reporting_type"] : ["discipline"];
     return projectReferences
       .filter((ref) => wantedTypes.includes(ref.ref_type) && ref.is_active)
       .map((ref) => ({ value: ref.code, label: `${ref.code} - ${ref.value}` }));
-  }, [projectReferences, isSeCategory]);
+  }, [projectReferences, isPdCategory, isSeCategory]);
+  const documentTypeOptions = useMemo(
+    () =>
+      projectReferences
+        .filter((ref) => ref.ref_type === "document_type" && ref.is_active)
+        .map((ref) => ({ value: ref.code, label: `${ref.code} - ${ref.value}` })),
+    [projectReferences],
+  );
   const titleObjectOptions = useMemo(
     () =>
       projectReferences
@@ -341,6 +352,9 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
       }
     } else {
       const required = [values.project_code, values.originator_code, values.category, values.title_object, values.discipline_code];
+      if (String(values.category || "").toUpperCase() !== "PD") {
+        required.push(values.doc_type, values.serial_number);
+      }
       if (required.some((item) => !item)) return null;
     }
 
@@ -384,10 +398,29 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
 
   useEffect(() => {
     if (!currentProjectCode || !currentDisciplineCode || !serialAutoMode) return;
+    if (isPdCategory) {
+      // PD: «Книга» — необязательный суффикс, область — проект+раздел.
+      const maxIdx = mdr.reduce((max, item) => {
+        if (item.project_code !== currentProjectCode || item.discipline_code !== currentDisciplineCode) {
+          return max;
+        }
+        const match = /^(\d+)$/.exec(item.serial_number ?? "");
+        const value = match ? Number(match[1]) : 0;
+        return Math.max(max, value);
+      }, 0);
+      form.setFieldValue("serial_number", String(maxIdx + 1).padStart(4, "0"));
+      return;
+    }
+    // Остальные категории: порядковый номер уникален для полной комбинации
+    // project+category+title_object+discipline_code+doc_type.
+    if (!currentCategory || !currentTitleObject || !currentDocType) return;
     const maxIdx = mdr.reduce((max, item) => {
       if (
         item.project_code !== currentProjectCode ||
-        item.discipline_code !== currentDisciplineCode
+        item.category !== currentCategory ||
+        item.title_object !== currentTitleObject ||
+        item.discipline_code !== currentDisciplineCode ||
+        item.doc_type !== currentDocType
       ) {
         return max;
       }
@@ -395,8 +428,18 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
       const value = match ? Number(match[1]) : 0;
       return Math.max(max, value);
     }, 0);
-    form.setFieldValue("serial_number", String(maxIdx + 1).padStart(4, "0"));
-  }, [currentProjectCode, currentDisciplineCode, serialAutoMode, mdr, form]);
+    form.setFieldValue("serial_number", String(maxIdx + 1).padStart(3, "0"));
+  }, [
+    currentProjectCode,
+    currentCategory,
+    currentTitleObject,
+    currentDisciplineCode,
+    currentDocType,
+    isPdCategory,
+    serialAutoMode,
+    mdr,
+    form,
+  ]);
 
   useEffect(() => {
     if (!selectedProject?.document_category) return;
@@ -426,7 +469,8 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
       currentOriginatorCode &&
       currentCategory &&
       currentTitleObject &&
-      currentDisciplineCode;
+      currentDisciplineCode &&
+      (isPdCategory || (currentDocType && currentSerialNumber));
 
     if (!(hasTemplate ? templateReady : legacyReady)) {
       setDocNumberExists(null);
@@ -451,6 +495,9 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
     currentCategory,
     currentTitleObject,
     currentDisciplineCode,
+    currentDocType,
+    currentSerialNumber,
+    isPdCategory,
   ]);
 
   const handleImportFile = async (file: File, dryRun: boolean): Promise<void> => {
@@ -641,28 +688,39 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
           </Form.Item>
           <Form.Item
             name="discipline_code"
-            label={isSeCategory ? "Вид отчёта (SE)" : "Раздел ПД"}
+            label={isPdCategory ? "Раздел ПД" : isSeCategory ? "Вид отчёта (SE)" : "Дисциплина"}
             rules={[{ required: true }]}
           >
             <Select
               showSearch
               optionFilterProp="label"
               options={disciplineOptions}
-              placeholder={isSeCategory ? "Из справочника «SE отчеты»" : "Из справочника разделов ПД"}
+              placeholder={isPdCategory ? "Из справочника разделов ПД" : isSeCategory ? "Из справочника «SE отчеты»" : "Из справочника «Дисциплина»"}
             />
           </Form.Item>
-          {!isSeCategory && (
+          {isPdCategory && (
             <Form.Item label="Номер раздела (инфо)">
               <Input value={currentSectionNumber} readOnly />
             </Form.Item>
           )}
-          <Form.Item
-            name="doc_type"
-            label="Часть (необязательно, 1-2 цифры)"
-            normalize={(value: string) => (value ?? "").replace(/\D/g, "").slice(0, 2)}
-          >
-            <Input placeholder="1" maxLength={2} />
-          </Form.Item>
+          {isPdCategory ? (
+            <Form.Item
+              name="doc_type"
+              label="Часть (необязательно, 1-2 цифры)"
+              normalize={(value: string) => (value ?? "").replace(/\D/g, "").slice(0, 2)}
+            >
+              <Input placeholder="1" maxLength={2} />
+            </Form.Item>
+          ) : (
+            <Form.Item name="doc_type" label="Тип документов" rules={[{ required: true }]}>
+              <Select
+                showSearch
+                optionFilterProp="label"
+                options={documentTypeOptions}
+                placeholder="Из справочника «Тип документов»"
+              />
+            </Form.Item>
+          )}
           {[]
             .filter(
               (field) =>
@@ -690,32 +748,62 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
                 )}
               </Form.Item>
             ))}
-          <Form.Item
-            name="serial_number"
-            label="Книга (необязательно, 1-5 символов: цифры и точка)"
-            normalize={(value: string) => (value ?? "").replace(/[^0-9.]/g, "").slice(0, 5)}
-          >
-            <Input
-              placeholder="1.1"
-              maxLength={5}
-              onChange={(event) => {
-                const next = event.target.value.replace(/[^0-9.]/g, "").slice(0, 5);
-                form.setFieldValue("serial_number", next);
-                setSerialAutoMode(false);
-              }}
-              addonAfter={
-                <Button
-                  size="small"
-                  type="link"
-                  onClick={() => {
-                    setSerialAutoMode(true);
-                  }}
-                >
-                  авто
-                </Button>
-              }
-            />
-          </Form.Item>
+          {isPdCategory ? (
+            <Form.Item
+              name="serial_number"
+              label="Книга (необязательно, 1-5 символов: цифры и точка)"
+              normalize={(value: string) => (value ?? "").replace(/[^0-9.]/g, "").slice(0, 5)}
+            >
+              <Input
+                placeholder="1.1"
+                maxLength={5}
+                onChange={(event) => {
+                  const next = event.target.value.replace(/[^0-9.]/g, "").slice(0, 5);
+                  form.setFieldValue("serial_number", next);
+                  setSerialAutoMode(false);
+                }}
+                addonAfter={
+                  <Button
+                    size="small"
+                    type="link"
+                    onClick={() => {
+                      setSerialAutoMode(true);
+                    }}
+                  >
+                    авто
+                  </Button>
+                }
+              />
+            </Form.Item>
+          ) : (
+            <Form.Item
+              name="serial_number"
+              label="Порядковый номер (авто, уникален для комбинации кодов)"
+              rules={[{ required: true }]}
+              normalize={(value: string) => (value ?? "").replace(/\D/g, "").slice(0, 6)}
+            >
+              <Input
+                placeholder="001"
+                maxLength={6}
+                onChange={(event) => {
+                  const next = event.target.value.replace(/\D/g, "").slice(0, 6);
+                  form.setFieldValue("serial_number", next);
+                  setSerialAutoMode(false);
+                }}
+                addonAfter={
+                  <Button
+                    size="small"
+                    type="link"
+                    onClick={() => {
+                      setSerialAutoMode(true);
+                    }}
+                  >
+                    авто
+                  </Button>
+                }
+              />
+            </Form.Item>
+          )}
           <Form.Item name="doc_number" label="Шифр документа (авто)" rules={[{ required: true }]}>
             <Input placeholder="IVA-PD-0001" readOnly />
           </Form.Item>

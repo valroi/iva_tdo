@@ -76,10 +76,8 @@ def _compose_legacy_cipher(payload: ComposeCipherPayload) -> tuple[str, str]:
     part_code = (payload.doc_type or "").strip()
     book_code = (payload.serial_number or "").strip()
 
-    if category in ("PD", "SE"):
-        # PD: IMP-CTR-PD-0001-AR(.1)(.1.2)  — раздел из справочника pd_section.
-        # SE: IMP-CTR-SE-0001-IGDI(...)     — тот же принцип, код отчёта из
-        #     справочника se_reporting_type (инженерные изыскания).
+    if category == "PD":
+        # PD: IMP-CTR-PD-0001-AR(.1)(.1.2) — раздел из справочника pd_section.
         if not re.fullmatch(r"\d{4}", title_number):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"title_object must be 4 digits for {category}")
         if not re.fullmatch(r"[A-Z0-9]{2,8}", section_code):
@@ -98,19 +96,33 @@ def _compose_legacy_cipher(payload: ComposeCipherPayload) -> tuple[str, str]:
             cipher = f"{cipher}.{book_code}"
         return cipher, f"{category}_SIMPLE"
 
+    # Все категории кроме PD (SE и далее — рабочая документация получит
+    # свою маску отдельно): IMP-CTR-SE-1001-SE-REP-001 — код Титульного
+    # объекта, Дисциплина (для SE — вид отчёта из справочника
+    # se_reporting_type, для остальных — из общего справочника discipline),
+    # тип документов (справочник document_type), порядковый номер —
+    # уникальный для комбинации project+category+title_object+discipline+doc_type.
+    doc_type_code = (payload.doc_type or "").strip().upper()
     serial_number = (payload.serial_number or "").strip()
-    if not serial_number:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="serial_number is required")
+    if not title_number or not re.fullmatch(r"[A-Z0-9]{1,10}", title_number):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="title_object must be 1-10 alnum chars")
+    if not re.fullmatch(r"[A-Z0-9]{2,8}", section_code):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="discipline_code must be 2-8 alnum chars")
+    if not doc_type_code or not re.fullmatch(r"[A-Z0-9]{2,8}", doc_type_code):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="doc_type must be 2-8 alnum chars (from document_type reference)")
+    if not serial_number or not re.fullmatch(r"\d{1,6}", serial_number):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="serial_number must be 1-6 digits")
+
     parts = [
         payload.project_code.upper(),
         payload.originator_code.upper(),
         category,
         title_number,
         section_code,
-        (payload.doc_type or "").strip().upper(),
-        serial_number.upper(),
+        doc_type_code,
+        serial_number,
     ]
-    return "-".join(parts), category
+    return "-".join(parts), f"{category}_GENERIC"
 
 
 def _template_read(template: CipherTemplate, project_code: str, db: Session) -> CipherTemplateRead:
@@ -216,13 +228,15 @@ def _validate_weight_limit(
     db: Session,
     *,
     project_code: str,
-    doc_type: str,
+    category: str,
     new_weight: float,
     exclude_id: int | None = None,
 ) -> None:
+    # Вес 1000 считается отдельно на каждую категорию документации
+    # (1000 у PD, свои 1000 у SE и т.д.), не на весь проект разом.
     query = db.query(func.coalesce(func.sum(MDRRecord.doc_weight), 0.0)).filter(
         MDRRecord.project_code == project_code,
-        MDRRecord.doc_type == doc_type,
+        MDRRecord.category == category,
     )
     if exclude_id is not None:
         query = query.filter(MDRRecord.id != exclude_id)
@@ -230,7 +244,7 @@ def _validate_weight_limit(
     if current_total + new_weight > 1000:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Weight limit exceeded for {project_code}/{doc_type}: {current_total + new_weight:.2f} > 1000",
+            detail=f"Weight limit exceeded for {project_code}/{category}: {current_total + new_weight:.2f} > 1000",
         )
 
 
@@ -400,7 +414,7 @@ def create_mdr(
     _validate_weight_limit(
         db,
         project_code=payload.project_code,
-        doc_type=payload.doc_type,
+        category=payload.category.upper(),
         new_weight=payload.doc_weight,
     )
 
@@ -450,11 +464,11 @@ def update_mdr(
     for field, value in changes.items():
         setattr(mdr, field, value)
 
-    if "doc_weight" in changes or "doc_type" in changes:
+    if "doc_weight" in changes:
         _validate_weight_limit(
             db,
             project_code=mdr.project_code,
-            doc_type=mdr.doc_type,
+            category=mdr.category,
             new_weight=mdr.doc_weight,
             exclude_id=mdr.id,
         )
@@ -733,11 +747,12 @@ def import_mdr(
     errors: list[MdrImportError] = []
     auto_serial_next_by_field: dict[int, int] = {}
 
+    # Вес 1000 — на категорию (весь импорт идёт под одной category), а не на doc_type.
     weight_totals = {
-        row_doc_type: float(total_weight or 0.0)
-        for row_doc_type, total_weight in db.query(MDRRecord.doc_type, func.coalesce(func.sum(MDRRecord.doc_weight), 0.0))
+        row_category: float(total_weight or 0.0)
+        for row_category, total_weight in db.query(MDRRecord.category, func.coalesce(func.sum(MDRRecord.doc_weight), 0.0))
         .filter(MDRRecord.project_code == project_code)
-        .group_by(MDRRecord.doc_type)
+        .group_by(MDRRecord.category)
         .all()
     }
 
@@ -844,10 +859,10 @@ def import_mdr(
             except ValueError:
                 line_errors.append("Field planned_dev_start must be ISO date (YYYY-MM-DD)")
 
-        if not line_errors and doc_type:
-            projected = weight_totals.get(doc_type, 0.0) + doc_weight
+        if not line_errors and category:
+            projected = weight_totals.get(category, 0.0) + doc_weight
             if projected > 1000:
-                line_errors.append(f"Weight limit exceeded for {project_code}/{doc_type}: {projected:.2f} > 1000")
+                line_errors.append(f"Weight limit exceeded for {project_code}/{category}: {projected:.2f} > 1000")
 
         if line_errors:
             errors.append(MdrImportError(row=row_idx, message="; ".join(line_errors)))
@@ -877,7 +892,7 @@ def import_mdr(
         )
         if not dry_run:
             db.add(mdr)
-        weight_totals[doc_type] = weight_totals.get(doc_type, 0.0) + doc_weight
+        weight_totals[category] = weight_totals.get(category, 0.0) + doc_weight
         imported += 1
 
     if not dry_run:
