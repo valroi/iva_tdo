@@ -223,6 +223,17 @@ class MDRCreate(MDRBase):
 
 
 class MDRUpdate(BaseModel):
+    # Поля шифра: редактируемы, чтобы можно было исправить ошибочно
+    # созданный документ (шифр пересобирается на фронте, бэк проверяет
+    # уникальность и синхронизирует связанный Document).
+    document_key: str | None = None
+    originator_code: str | None = None
+    category: str | None = None
+    title_object: str | None = None
+    discipline_code: str | None = None
+    doc_type: str | None = None
+    serial_number: str | None = None
+    doc_number: str | None = None
     doc_name: str | None = None
     planned_dev_start: date | None = None
     progress_percent: float | None = None

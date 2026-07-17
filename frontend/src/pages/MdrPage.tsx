@@ -67,7 +67,6 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
   const currentOriginatorCode = Form.useWatch("originator_code", form);
   const currentTitleObject = Form.useWatch("title_object", form);
   const currentSerialNumber = Form.useWatch("serial_number", form);
-  const currentDocNumber = Form.useWatch("doc_number", form);
   const allFormValues = Form.useWatch([], form) as Record<string, unknown> | undefined;
   const isSingleProject = projects.length === 1;
   const defaultProjectCode = projects[0]?.code;
@@ -138,23 +137,19 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
     ]);
   }, []);
   const currentSectionNumber = (pdSectionNumberByCode.get(String(currentDisciplineCode || "").toUpperCase()) ?? "—");
-  const referenceOptionsByType = useMemo(() => {
-    const map = new Map<string, { value: string; label: string }[]>();
-    projectReferences.forEach((ref) => {
-      if (!ref.is_active) return;
-      const list = map.get(ref.ref_type) ?? [];
-      list.push({ value: ref.code, label: `${ref.code} - ${ref.value}` });
-      map.set(ref.ref_type, list);
-    });
-    return map;
-  }, [projectReferences]);
-
   const categoryWeight = useMemo(() => {
     if (!currentProjectCode || !currentCategory) return 0;
+    // При редактировании собственный вес документа исключается — иначе он
+    // учитывается дважды и форма ложно кричит «лимит превышен».
     return mdr
-      .filter((row) => row.project_code === currentProjectCode && row.category === currentCategory)
+      .filter(
+        (row) =>
+          row.project_code === currentProjectCode &&
+          row.category === currentCategory &&
+          row.id !== editingMdrId,
+      )
       .reduce((acc, row) => acc + (row.doc_weight ?? 0), 0);
-  }, [currentCategory, currentProjectCode, mdr]);
+  }, [currentCategory, currentProjectCode, mdr, editingMdrId]);
 
   const columns: ColumnsType<MDRRecord> = [
     {
@@ -215,6 +210,12 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
                 <Button
                   size="small"
                   onClick={() => {
+                    // Полный сброс перед заполнением: остатки прошлого
+                    // открытия (категория, шифр) не должны протекать сюда.
+                    form.resetFields();
+                    // В редактировании номер не пересчитывается автоматом —
+                    // показываем фактический номер документа как есть.
+                    setSerialAutoMode(false);
                     form.setFieldsValue({
                       ...row,
                       category: row.category,
@@ -369,7 +370,13 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
       form.setFieldValue("doc_number", normalizedCipher);
       return normalizedCipher;
     } catch (error) {
-      form.setFieldValue("doc_number", undefined);
+      if (editingMdrId && editingOriginalDocNumber) {
+        // В редактировании неудачная перекомпоновка не должна стирать
+        // рабочий шифр — возвращаем исходный.
+        form.setFieldValue("doc_number", normalizePdCipher(editingOriginalDocNumber));
+      } else {
+        form.setFieldValue("doc_number", undefined);
+      }
       message.error(error instanceof Error ? error.message : "Не удалось сформировать шифр");
       return null;
     } finally {
@@ -383,14 +390,19 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
       setDocNumberExists(null);
       return;
     }
+    // Собственный (неизменённый) шифр редактируемого документа — не дубликат.
+    if (
+      editingMdrId &&
+      editingOriginalDocNumber &&
+      normalizePdCipher(values.doc_number) === normalizePdCipher(editingOriginalDocNumber)
+    ) {
+      setDocNumberExists(false);
+      return;
+    }
     setChecking(true);
     try {
       const result = await checkMdrCipher(values.project_code, values.doc_number);
-      if (result.exists) {
-        setDocNumberExists(true);
-      } else {
-        setDocNumberExists(false);
-      }
+      setDocNumberExists(result.exists);
     } finally {
       setChecking(false);
     }
@@ -398,37 +410,43 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
 
   useEffect(() => {
     if (!currentProjectCode || !currentDisciplineCode || !serialAutoMode) return;
+    // Авто-номер = НАИМЕНЬШИЙ свободный, а не max+1: после удаления
+    // документа его номер снова доступен. Редактируемый документ
+    // исключается — иначе форма затирала бы его собственный номер.
+    const collectUsed = (matches: (item: MDRRecord) => boolean): Set<number> => {
+      const used = new Set<number>();
+      mdr.forEach((item) => {
+        if (item.id === editingMdrId || !matches(item)) return;
+        const match = /^(\d+)$/.exec(item.serial_number ?? "");
+        if (match) used.add(Number(match[1]));
+      });
+      return used;
+    };
+    const lowestFree = (used: Set<number>): number => {
+      let candidate = 1;
+      while (used.has(candidate)) candidate += 1;
+      return candidate;
+    };
     if (isPdCategory) {
       // PD: «Книга» — необязательный суффикс, область — проект+раздел.
-      const maxIdx = mdr.reduce((max, item) => {
-        if (item.project_code !== currentProjectCode || item.discipline_code !== currentDisciplineCode) {
-          return max;
-        }
-        const match = /^(\d+)$/.exec(item.serial_number ?? "");
-        const value = match ? Number(match[1]) : 0;
-        return Math.max(max, value);
-      }, 0);
-      form.setFieldValue("serial_number", String(maxIdx + 1).padStart(4, "0"));
+      const used = collectUsed(
+        (item) => item.project_code === currentProjectCode && item.discipline_code === currentDisciplineCode,
+      );
+      form.setFieldValue("serial_number", String(lowestFree(used)).padStart(4, "0"));
       return;
     }
     // Остальные категории: порядковый номер уникален для полной комбинации
     // project+category+title_object+discipline_code+doc_type.
     if (!currentCategory || !currentTitleObject || !currentDocType) return;
-    const maxIdx = mdr.reduce((max, item) => {
-      if (
-        item.project_code !== currentProjectCode ||
-        item.category !== currentCategory ||
-        item.title_object !== currentTitleObject ||
-        item.discipline_code !== currentDisciplineCode ||
-        item.doc_type !== currentDocType
-      ) {
-        return max;
-      }
-      const match = /^(\d+)$/.exec(item.serial_number ?? "");
-      const value = match ? Number(match[1]) : 0;
-      return Math.max(max, value);
-    }, 0);
-    form.setFieldValue("serial_number", String(maxIdx + 1).padStart(3, "0"));
+    const used = collectUsed(
+      (item) =>
+        item.project_code === currentProjectCode &&
+        item.category === currentCategory &&
+        item.title_object === currentTitleObject &&
+        item.discipline_code === currentDisciplineCode &&
+        item.doc_type === currentDocType,
+    );
+    form.setFieldValue("serial_number", String(lowestFree(used)).padStart(3, "0"));
   }, [
     currentProjectCode,
     currentCategory,
@@ -437,14 +455,20 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
     currentDocType,
     isPdCategory,
     serialAutoMode,
+    editingMdrId,
     mdr,
     form,
   ]);
 
   useEffect(() => {
+    // Автоподстановка категории проекта — ТОЛЬКО при создании. В режиме
+    // редактирования этот эффект затирал реальную категорию документа:
+    // resetFields→setFieldsValue мигает project_code, dep меняется,
+    // и категория строки (SE) подменялась дефолтной (PD).
+    if (editingMdrId) return;
     if (!selectedProject?.document_category) return;
     form.setFieldValue("category", selectedProject.document_category);
-  }, [form, selectedProject?.document_category]);
+  }, [form, editingMdrId, selectedProject?.document_category]);
 
   useEffect(() => {
     setCipherTemplateFields([]);
@@ -623,6 +647,9 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
               setEditingMdrId(null);
               setEditingOriginalDocNumber(null);
               setEditingHistoryLines([]);
+              form.resetFields();
+              setSerialAutoMode(true);
+              setDocNumberExists(null);
               form.setFieldsValue({
                 document_key: nextDocumentKey,
                 project_code: defaultProjectCode,
@@ -646,6 +673,8 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
           setEditingMdrId(null);
           setEditingOriginalDocNumber(null);
           setEditingHistoryLines([]);
+          setDocNumberExists(null);
+          form.resetFields();
         }}
         onOk={submit}
         okButtonProps={{ loading: submitting }}
@@ -721,33 +750,6 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
               />
             </Form.Item>
           )}
-          {[]
-            .filter(
-              (field) =>
-                !["project_code", "originator_code", "category", "title_object", "discipline_code", "doc_type", "serial_number"].includes(
-                  field.field_key,
-                ) && field.source_type !== "STATIC" && field.source_type !== "AUTO_SERIAL",
-            )
-            .sort((a, b) => a.order_index - b.order_index)
-            .map((field) => (
-              <Form.Item
-                key={field.field_key}
-                name={field.field_key}
-                label={field.label}
-                rules={field.required ? [{ required: true }] : undefined}
-              >
-                {field.source_type === "REFERENCE" ? (
-                  <Select
-                    showSearch
-                    optionFilterProp="label"
-                    options={referenceOptionsByType.get(field.source_ref_type ?? "") ?? []}
-                    placeholder={`Из справочника ${field.source_ref_type ?? ""}`}
-                  />
-                ) : (
-                  <Input maxLength={field.length ?? 100} placeholder={field.field_key} />
-                )}
-              </Form.Item>
-            ))}
           {isPdCategory ? (
             <Form.Item
               name="serial_number"
@@ -804,8 +806,22 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
               />
             </Form.Item>
           )}
-          <Form.Item name="doc_number" label="Шифр документа (авто)" rules={[{ required: true }]}>
-            <Input placeholder="IVA-PD-0001" readOnly />
+          <Form.Item
+            name="doc_number"
+            label="Шифр документа (авто)"
+            rules={[{ required: true }]}
+            validateStatus={docNumberExists === true ? "error" : undefined}
+            help={
+              composing || checking
+                ? "Формируем шифр…"
+                : docNumberExists === true
+                  ? "Шифр уже существует в этом проекте"
+                  : docNumberExists === false
+                    ? "Шифр уникален"
+                    : undefined
+            }
+          >
+            <Input placeholder="IMP-CTR-SE-1001-SE-RPT-001" readOnly />
           </Form.Item>
           {editingMdrId && editingHistoryLines.length > 0 && (
             <div style={{ marginBottom: 8 }}>
@@ -817,8 +833,6 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
               ))}
             </div>
           )}
-          {docNumberExists === true && <Typography.Text type="danger">Шифр уже существует в этом проекте</Typography.Text>}
-          {docNumberExists === false && <Typography.Text type="success">Шифр уникален</Typography.Text>}
           <Form.Item name="doc_name" label="Наименование" rules={[{ required: true }]}>
             <Input placeholder="Piping layout" />
           </Form.Item>

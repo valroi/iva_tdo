@@ -455,6 +455,27 @@ def update_mdr(
         if exists_key:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="document_key already exists")
 
+    if "category" in changes and changes["category"] and changes["category"] != mdr.category:
+        # Та же проверка, что и при создании: категория проекта либо
+        # активная категория из справочника document_category.
+        project = db.query(Project).filter(Project.code == mdr.project_code).first()
+        if project and project.document_category and changes["category"].upper() != project.document_category.upper():
+            allowed = (
+                db.query(ProjectReference.id)
+                .filter(
+                    ProjectReference.project_id == project.id,
+                    ProjectReference.ref_type == "document_category",
+                    ProjectReference.code == changes["category"].upper(),
+                    ProjectReference.is_active.is_(True),
+                )
+                .first()
+            )
+            if allowed is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Category must match project category ({project.document_category}) or an active document_category reference",
+                )
+
     changed_fields: dict[str, dict[str, object]] = {}
     for field, value in changes.items():
         old_value = getattr(mdr, field)
@@ -464,7 +485,8 @@ def update_mdr(
     for field, value in changes.items():
         setattr(mdr, field, value)
 
-    if "doc_weight" in changes:
+    if "doc_weight" in changes or "category" in changes:
+        # Смена категории переносит вес в другой бюджет 1000 — перепроверяем.
         _validate_weight_limit(
             db,
             project_code=mdr.project_code,
@@ -472,6 +494,15 @@ def update_mdr(
             new_weight=mdr.doc_weight,
             exclude_id=mdr.id,
         )
+
+    # documents.document_num/discipline/title/weight дублируют поля MDR —
+    # без синхронизации карточка ревизий продолжала бы жить под старым шифром.
+    if changed_fields.keys() & {"doc_number", "discipline_code", "doc_name", "doc_weight"}:
+        for doc in db.query(Document).filter(Document.mdr_id == mdr.id).all():
+            doc.document_num = mdr.doc_number
+            doc.discipline = mdr.discipline_code
+            doc.title = mdr.doc_name
+            doc.weight = mdr.doc_weight
 
     if changed_fields:
         dates_payload = dict(mdr.dates or {})
