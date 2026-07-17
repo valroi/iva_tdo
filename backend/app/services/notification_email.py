@@ -83,6 +83,39 @@ def _deliver(item: dict) -> None:
         db.close()
 
 
+def _login_url() -> str:
+    base = (settings.public_base_url or "").rstrip("/")
+    return base or "http://localhost:3000"
+
+
+def _deliver_welcome(*, to_email: str, full_name: str, password: str) -> None:
+    try:
+        subject = "Доступ к IvaMaris TDO"
+        body = "\n".join([
+            f"Здравствуйте, {full_name}!",
+            "",
+            "Для вас создана учётная запись в системе технического документооборота IvaMaris TDO.",
+            "",
+            f"Ссылка для входа: {_login_url()}",
+            f"Логин (email): {to_email}",
+            f"Временный пароль: {password}",
+            "",
+            "После первого входа рекомендуем сменить пароль (Профиль → сменить пароль).",
+            "",
+            "Это автоматическое письмо. Отвечать на него не нужно.",
+        ])
+        send_email(to=to_email, subject=subject, body=body)
+    except Exception:  # noqa: BLE001 — email не должен ронять создание пользователя
+        logger.exception("Не удалось отправить приветственное письмо на %s", to_email)
+
+
+def send_welcome_email(*, to_email: str, full_name: str, password: str) -> None:
+    """Приветственное письмо новому пользователю: ссылка на систему, логин,
+    временный пароль, просьба сменить. Не блокирует запрос — реальная
+    отправка идёт в фоновом потоке (тот же пул, что и для уведомлений)."""
+    _executor.submit(_deliver_welcome, to_email=to_email, full_name=full_name, password=password)
+
+
 @event.listens_for(OrmSession, "after_flush")
 def _collect_new_notifications(session: OrmSession, _flush_context) -> None:
     pending = [

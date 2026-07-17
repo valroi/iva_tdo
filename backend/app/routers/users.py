@@ -9,6 +9,7 @@ from app.auth import get_password_hash
 from app.config import get_settings
 from app.database import get_db
 from app.seed import seed_default_data
+from app.services.notification_email import send_welcome_email
 from app.deps import (
     default_permissions_for_role,
     get_effective_permissions,
@@ -283,6 +284,11 @@ def create_user(
     db.add(user)
     db.commit()
     db.refresh(user)
+
+    # Приветственное письмо с логином/паролем — не блокирует ответ (фон).
+    # Пароль берём из payload (открытый текст, до хеширования), а не из БД.
+    send_welcome_email(to_email=user.email, full_name=user.full_name, password=payload.password)
+
     return UserRead.model_validate(user, from_attributes=True).model_copy(
         update={"permissions": get_effective_permissions(user)}
     )
