@@ -264,6 +264,28 @@ def seed_default_data(db: Session) -> None:
 
         upsert_ref("document_category", "PD", "Проектная документация")
         upsert_ref("document_category", "SE", "Инженерные изыскания")
+        # PM — как PF: обычная не-PD категория (generic-маска шифра, свой вес
+        # 1000). Сеем только если записи нет, чтобы не затирать переименование
+        # пользователя при каждом старте.
+        has_pm = (
+            db.query(ProjectReference.id)
+            .filter(
+                ProjectReference.project_id == project.id,
+                ProjectReference.ref_type == "document_category",
+                ProjectReference.code == "PM",
+            )
+            .first()
+        )
+        if has_pm is None:
+            db.add(
+                ProjectReference(
+                    project_id=project.id,
+                    ref_type="document_category",
+                    code="PM",
+                    value="Документы по управлению проектом / Project Management Documents",
+                    is_active=True,
+                )
+            )
         for code, value in DEFAULT_TITLE_OBJECTS:
             upsert_ref("title_object", code, value)
         for code, value in DEFAULT_PD_SECTIONS:
