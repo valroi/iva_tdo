@@ -87,6 +87,25 @@ REVISION_STATUS_TRANSITIONS: dict[str, set[str]] = {
 }
 
 
+def _observer_project_codes(db: Session, current_user: User) -> set[str]:
+    """Коды проектов, где пользователь — наблюдатель.
+
+    Наблюдатель смотрит весь реестр проекта (read-only), поэтому фильтр
+    заказчика «только ревизии, переданные на рассмотрение» к нему не
+    применяется — иначе до первой передачи ревизии он видел бы пустой список.
+    """
+    rows = (
+        db.query(Project.code)
+        .join(ProjectMember, ProjectMember.project_id == Project.id)
+        .filter(
+            ProjectMember.user_id == current_user.id,
+            ProjectMember.member_role == ProjectMemberRole.observer,
+        )
+        .all()
+    )
+    return {row[0] for row in rows}
+
+
 def _owner_can_access_revision(current_user: User, revision: Revision) -> bool:
     if current_user.role.value == "admin":
         return True
@@ -817,6 +836,7 @@ def list_documents(db: Session = Depends(get_db), current_user: User = Depends(g
             return []
         docs_query = docs_query.filter(MDRRecord.project_code.in_(allowed_project_codes))
     docs = docs_query.order_by(Document.id.desc()).all()
+    observer_codes = _observer_project_codes(db, current_user) if current_user.role.value != "admin" else set()
     result: list[DocumentRead] = []
     for doc in docs:
         latest = (
@@ -825,7 +845,11 @@ def list_documents(db: Session = Depends(get_db), current_user: User = Depends(g
             .order_by(Revision.id.desc())
             .first()
         )
-        if current_user.role.value != "admin" and current_user.company_type == CompanyType.owner:
+        if (
+            current_user.role.value != "admin"
+            and current_user.company_type == CompanyType.owner
+            and doc.mdr.project_code not in observer_codes
+        ):
             if latest is None or latest.status not in OWNER_VISIBLE_REVISION_STATUSES:
                 continue
         result.append(
@@ -871,6 +895,7 @@ def list_documents_registry(
             return []
         docs_query = docs_query.filter(MDRRecord.project_code.in_(allowed_project_codes))
     docs = docs_query.order_by(Document.id.desc()).all()
+    observer_codes = _observer_project_codes(db, current_user) if current_user.role.value != "admin" else set()
 
     normalized_scope = (comments_scope or "").upper()
     result: list[DocumentRegistryRead] = []
@@ -879,16 +904,17 @@ def list_documents_registry(
         mdr = db.query(MDRRecord).filter(MDRRecord.id == doc.mdr_id).first()
         if mdr is None:
             continue
+        skip_owner_filter = bypass_owner_filter or mdr.project_code in observer_codes
         revisions = (
             db.query(Revision)
             .filter(Revision.document_id == doc.id)
             .order_by(Revision.id.desc())
             .all()
         )
-        if current_user.role.value != "admin" and current_user.company_type == CompanyType.owner and not bypass_owner_filter:
+        if current_user.role.value != "admin" and current_user.company_type == CompanyType.owner and not skip_owner_filter:
             revisions = [item for item in revisions if item.status in OWNER_VISIBLE_REVISION_STATUSES]
         latest = revisions[0] if revisions else None
-        if current_user.role.value != "admin" and current_user.company_type == CompanyType.owner and not bypass_owner_filter and latest is None:
+        if current_user.role.value != "admin" and current_user.company_type == CompanyType.owner and not skip_owner_filter and latest is None:
             continue
 
         if project_code and mdr.project_code != project_code:

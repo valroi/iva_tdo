@@ -515,7 +515,27 @@ export default function ProjectsPage({
           />
         </Space>
         <Divider style={{ margin: "0 0 12px 0" }} />
-        <Tree defaultExpandAll treeData={hierarchyTree} style={{ marginBottom: 16 }} />
+        <Tree
+          defaultExpandAll
+          treeData={hierarchyTree}
+          style={{ marginBottom: 16 }}
+          onSelect={(selectedKeys) => {
+            // Клик по документу в дереве открывает его карточку во вкладке
+            // «Ревизии и комментарии» (тот же механизм, что и клик по шифру
+            // в таблице реестра). Клики по проекту/категории игнорируются.
+            const key = String(selectedKeys[0] ?? "");
+            if (!key.startsWith("mdr-")) return;
+            const mdrId = Number(key.slice(4));
+            const item = projectMdr.find((row) => row.id === mdrId);
+            if (!item) return;
+            setLocalNotificationTarget({
+              project_code: selectedProject?.code ?? null,
+              document_num: item.doc_number,
+              revision_id: null,
+            });
+            setActiveTabKey("documents");
+          }}
+        />
         <Tabs
           activeKey={activeTabKey}
           onChange={setActiveTabKey}
