@@ -524,6 +524,13 @@ class UserPasswordUpdate(BaseModel):
     new_password: str = Field(min_length=6)
 
 
+class MyPasswordUpdate(BaseModel):
+    # Самостоятельная смена пароля: текущий пароль обязателен, чтобы
+    # оставленную без присмотра сессию нельзя было превратить в захват аккаунта.
+    current_password: str
+    new_password: str = Field(min_length=6)
+
+
 class UserUpdate(BaseModel):
     email: EmailStr | None = None
     full_name: str | None = None

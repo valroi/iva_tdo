@@ -5,13 +5,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.auth import get_password_hash
+from app.auth import get_password_hash, verify_password
 from app.config import get_settings
 from app.database import get_db
 from app.seed import seed_default_data
 from app.services.notification_email import send_welcome_email
 from app.deps import (
     default_permissions_for_role,
+    get_current_user,
     get_effective_permissions,
     is_main_admin,
     require_main_admin,
@@ -47,6 +48,7 @@ from app.schemas import (
     UserActivationUpdate,
     UserCreate,
     UserPermissionsUpdate,
+    MyPasswordUpdate,
     UserPasswordUpdate,
     UserRead,
     UserRoleUpdate,
@@ -615,6 +617,24 @@ def update_user(
     return UserRead.model_validate(user, from_attributes=True).model_copy(
         update={"permissions": get_effective_permissions(user)}
     )
+
+
+@router.put("/me/password", status_code=status.HTTP_204_NO_CONTENT)
+def update_my_password(
+    payload: MyPasswordUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Самостоятельная смена пароля — доступна любой роли.
+
+    Маршрут обязан стоять ВЫШЕ /{user_id}/password: иначе "me" попадёт
+    в int-парсер user_id и вернётся 422 вместо этого обработчика.
+    """
+    if not verify_password(payload.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Текущий пароль неверен")
+    current_user.hashed_password = get_password_hash(payload.new_password)
+    db.add(current_user)
+    db.commit()
 
 
 @router.put("/{user_id}/password", status_code=status.HTTP_204_NO_CONTENT)

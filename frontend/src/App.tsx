@@ -22,6 +22,7 @@ import {
   listProjects,
   me,
 } from "./api";
+import ChangePasswordModal from "./components/ChangePasswordModal";
 import LoginForm from "./components/LoginForm";
 import DashboardPage from "./pages/DashboardPage";
 import HelpPage from "./pages/HelpPage";
@@ -173,6 +174,7 @@ function MainApp(): JSX.Element {
   const [activeModule, setActiveModule] = useState<AppModule>(initialHash.module);
 
   const [user, setUser] = useState<User | null>(null);
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [mdr, setMdr] = useState<MDRRecord[]>([]);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [projects, setProjects] = useState<ProjectItem[]>([]);
@@ -373,13 +375,19 @@ function MainApp(): JSX.Element {
             />
           )}
 
-          <div className="sider-user-card">
+          <div
+            className="sider-user-card"
+            style={{ cursor: "pointer" }}
+            title="Сменить пароль"
+            onClick={() => setChangePasswordOpen(true)}
+          >
             <Avatar>{user?.full_name?.slice(0, 1).toUpperCase() ?? "U"}</Avatar>
             <div className="sider-user-info">
               <div className="name">{user?.full_name}</div>
               <div className="email">{user?.email}</div>
             </div>
           </div>
+          <ChangePasswordModal open={changePasswordOpen} onClose={() => setChangePasswordOpen(false)} />
         </Sider>
 
         <Layout className="app-main-layout">

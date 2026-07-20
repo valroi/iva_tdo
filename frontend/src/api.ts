@@ -476,6 +476,13 @@ export function updateUserPassword(userId: number, newPassword: string): Promise
   });
 }
 
+export function changeMyPassword(currentPassword: string, newPassword: string): Promise<void> {
+  return request<void>(`/users/me/password`, {
+    method: "PUT",
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+}
+
 export function updateUser(
   userId: number,
   payload: { email?: string; full_name?: string; company_code?: string; company_type?: CompanyType; is_active?: boolean },
