@@ -420,6 +420,61 @@ class SystemSetting(Base):
     )
 
 
+class ReviewEvent(Base):
+    """Журнал действий рассмотрения по ревизии.
+
+    Одна запись = одно событие цикла (кому улетело, кто рассмотрел, дедлайн).
+    Питает: таймлайн истории на карточке ревизии, отчёт по действиям R/LR и
+    разработчиков, напоминания о дедлайнах. Пишется в ключевых точках workflow
+    без изменения самой бизнес-логики этих точек.
+
+    event_type: SENT_TO_OWNER | R_NO_COMMENTS | R_COMMENTED | LR_COMMENTED |
+                LR_SENT_TO_CONTRACTOR | AP_SET | DEADLINE_REMINDER
+    actor_role: TDO | R | LR | CONTRACTOR | ADMIN | SYSTEM
+    """
+
+    __tablename__ = "review_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    revision_id: Mapped[int] = mapped_column(ForeignKey("revisions.id"), nullable=False, index=True)
+    project_code: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    document_num: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    discipline_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    revision_code: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    actor_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    actor_role: Mapped[str] = mapped_column(String(20), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    target_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    deadline: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+class RevisionReviewerState(Base):
+    """Текущее состояние конкретного ревьювера (R/LR) по ревизии.
+
+    no_comments=True — ревьювер нажал «Рассмотрено, без замечаний» (NC).
+    Если системная настройка review_nc_locks_commenting=true, после NC его
+    комментирование по этой ревизии закрыто (открыть может только админ,
+    сняв флаг глобально).
+    """
+
+    __tablename__ = "revision_reviewer_states"
+    __table_args__ = (
+        UniqueConstraint("revision_id", "user_id", name="uq_revision_reviewer_state"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    revision_id: Mapped[int] = mapped_column(ForeignKey("revisions.id"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    no_comments: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+
 # =====================================================================
 #  Модуль Vendors (VQM) — отработка предложений подрядчиков по поставке
 #  оборудования. Иерархия: Project → MR → Tag. Подрядчики приходят по

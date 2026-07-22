@@ -30,11 +30,14 @@ from app.models import (
     ProjectMemberRole,
     ReviewMatrixMember,
     ReviewCode,
+    ReviewEvent,
     ProjectReference,
     Revision,
+    RevisionReviewerState,
     SystemSetting,
     User,
 )
+from app.services import review_events as review_events_service
 from app.schemas import (
     CommentCreate,
     CarryDecisionRead,
@@ -60,6 +63,10 @@ from app.schemas import (
     RevisionRegistryCommentRead,
     RevisionRegistryRead,
     DocumentRegistryRead,
+    ReviewEventRead,
+    ReviewerStateRead,
+    ReviewReportRow,
+    RevisionReviewerSummary,
     TdoQueueItem,
 )
 
@@ -582,6 +589,14 @@ def list_owner_review_queue(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # Подстраховка демона: при заходе в очередь досоздаём напоминания о
+    # дедлайне (идемпотентно) — на случай перезапуска backend-процесса.
+    try:
+        from app.services.deadline_reminders import scan_and_notify
+
+        scan_and_notify(db)
+    except Exception:  # noqa: BLE001 — фоновая мелочь не должна ронять очередь
+        pass
     membership_project_ids = {
         item.project_id for item in db.query(ProjectMember).filter(ProjectMember.user_id == current_user.id).all()
     }
@@ -1531,6 +1546,16 @@ def set_revision_review_code(
 
     revision.review_code = ReviewCode.AP
     revision.reviewed_at = datetime.utcnow()
+    review_events_service.record_event(
+        db,
+        revision=revision,
+        document=document,
+        mdr=mdr,
+        actor=current_user,
+        actor_role="ADMIN" if current_user.role.value == "admin" else "LR",
+        event_type="AP_SET",
+        note="Документ согласован (AP)",
+    )
     if revision.status in {"UNDER_REVIEW", "OWNER_COMMENTS_SENT", "CONTRACTOR_REPLY_I"}:
         _set_revision_status(revision, "CONTRACTOR_REPLY_A")
     receiver_code = _project_reference_value(
@@ -1580,6 +1605,377 @@ def set_revision_review_code(
     db.commit()
     db.refresh(revision)
     return revision
+
+
+def _revision_context(db: Session, revision: Revision):
+    document = db.query(Document).filter(Document.id == revision.document_id).first()
+    if document is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    mdr = db.query(MDRRecord).filter(MDRRecord.id == document.mdr_id).first()
+    if mdr is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="MDR not found")
+    project = db.query(Project).filter(Project.code == mdr.project_code).first()
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    return document, mdr, project
+
+
+def _assigned_owner_reviewers(db: Session, *, project_id: int, discipline_code: str | None):
+    """Матричные ревьюеры (R/LR) уровня 1 по дисциплине документа."""
+    return (
+        db.query(ReviewMatrixMember)
+        .filter(
+            ReviewMatrixMember.project_id == project_id,
+            ReviewMatrixMember.discipline_code == discipline_code,
+            ReviewMatrixMember.level == 1,
+            ReviewMatrixMember.state.in_(["LR", "R"]),
+        )
+        .all()
+    )
+
+
+@router.post("/revisions/{revision_id}/no-comments", response_model=RevisionReviewerSummary)
+def mark_revision_no_comments(
+    revision_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """R/LR отмечает «Рассмотрено, без замечаний» (NC).
+
+    LR видит, что его ревьюер посмотрел. После NC комментирование этого
+    ревьюера закрывается (если включена настройка review_nc_locks_commenting)."""
+    revision = db.query(Revision).filter(Revision.id == revision_id).first()
+    if revision is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
+    document, mdr, project = _revision_context(db, revision)
+    discipline = _matrix_discipline(mdr)
+
+    role = _owner_matrix_role_for_document(
+        db,
+        current_user=current_user,
+        project_id=project.id,
+        discipline_code=discipline,
+        doc_type=mdr.doc_type,
+    )
+    if current_user.role.value != "admin" and role not in {"LR", "R"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет назначения по матрице для этого документа")
+
+    has_comments = (
+        db.query(Comment.id)
+        .filter(Comment.revision_id == revision.id, Comment.author_id == current_user.id)
+        .first()
+        is not None
+    )
+    if has_comments:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="У вас уже есть замечания по ревизии — «нет замечаний» недоступно",
+        )
+
+    state = review_events_service.get_or_create_reviewer_state(db, revision_id=revision.id, user_id=current_user.id)
+    state.no_comments = True
+    state.decided_at = datetime.utcnow()
+    db.add(state)
+
+    review_events_service.record_event(
+        db,
+        revision=revision,
+        document=document,
+        mdr=mdr,
+        actor=current_user,
+        actor_role="LR" if role == "LR" else "R",
+        event_type="R_NO_COMMENTS",
+        note="Рассмотрено, без замечаний",
+    )
+
+    # Уведомляем LR, что ревьюер посмотрел.
+    actor_name = current_user.full_name or current_user.email
+    for member in _assigned_owner_reviewers(db, project_id=project.id, discipline_code=discipline):
+        if member.state == "LR" and member.user_id != current_user.id:
+            db.add(
+                Notification(
+                    user_id=member.user_id,
+                    event_type="R_NO_COMMENTS",
+                    message=(
+                        f"Ревьювер {actor_name} рассмотрел без замечаний: "
+                        f"{document.document_num}, ревизия {revision.revision_code}."
+                    ),
+                    project_code=mdr.project_code,
+                    document_num=document.document_num,
+                    revision_id=revision.id,
+                )
+            )
+    _mark_notifications_read(
+        db,
+        user_id=current_user.id,
+        revision_id=revision.id,
+        event_types=["TDO_SENT_TO_OWNER", "OWNER_COMMENT_CREATED", "NEW_COMMENT", "CARRY_OVER_DECISION"],
+    )
+    db.commit()
+    return _build_reviewer_summary(db, revision, project, discipline, current_user)
+
+
+def _build_reviewer_summary(db, revision, project, discipline, current_user) -> RevisionReviewerSummary:
+    members = _assigned_owner_reviewers(db, project_id=project.id, discipline_code=discipline)
+    states = {
+        s.user_id: s
+        for s in db.query(RevisionReviewerState).filter(RevisionReviewerState.revision_id == revision.id).all()
+    }
+    commented_ids = {
+        row[0]
+        for row in db.query(Comment.author_id).filter(Comment.revision_id == revision.id).distinct().all()
+    }
+    user_ids = {m.user_id for m in members}
+    users = {u.id: u for u in db.query(User).filter(User.id.in_(user_ids)).all()} if user_ids else {}
+    reviewers: list[ReviewerStateRead] = []
+    r_members = [m for m in members if m.state == "R"]
+    for member in members:
+        user = users.get(member.user_id)
+        if user is None:
+            continue
+        st = states.get(member.user_id)
+        reviewers.append(
+            ReviewerStateRead(
+                user_id=member.user_id,
+                full_name=user.full_name or user.email,
+                email=user.email,
+                role=member.state,
+                no_comments=bool(st and st.no_comments),
+                has_comments=member.user_id in commented_ids,
+                decided_at=st.decided_at if st else None,
+            )
+        )
+    all_r_no_comments = bool(r_members) and all(
+        (states.get(m.user_id) and states[m.user_id].no_comments) and (m.user_id not in commented_ids)
+        for m in r_members
+    )
+    return RevisionReviewerSummary(
+        revision_id=revision.id,
+        reviewers=sorted(reviewers, key=lambda r: (r.role != "LR", r.full_name)),
+        all_reviewers_no_comments=all_r_no_comments,
+        nc_locks_commenting=review_events_service.nc_locks_commenting(db),
+        my_locked=review_events_service.reviewer_commenting_locked(db, revision_id=revision.id, user_id=current_user.id),
+    )
+
+
+@router.get("/revisions/{revision_id}/reviewer-states", response_model=RevisionReviewerSummary)
+def get_revision_reviewer_states(
+    revision_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    revision = db.query(Revision).filter(Revision.id == revision_id).first()
+    if revision is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
+    if not _owner_can_access_revision(current_user, revision):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
+    _document, mdr, project = _revision_context(db, revision)
+    return _build_reviewer_summary(db, revision, project, _matrix_discipline(mdr), current_user)
+
+
+@router.get("/revisions/{revision_id}/events", response_model=list[ReviewEventRead])
+def list_revision_events(
+    revision_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    revision = db.query(Revision).filter(Revision.id == revision_id).first()
+    if revision is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
+    if not _owner_can_access_revision(current_user, revision):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
+    events = (
+        db.query(ReviewEvent)
+        .filter(ReviewEvent.revision_id == revision.id)
+        .order_by(ReviewEvent.created_at.asc(), ReviewEvent.id.asc())
+        .all()
+    )
+    user_ids = {e.actor_id for e in events if e.actor_id} | {e.target_user_id for e in events if e.target_user_id}
+    users = {u.id: u for u in db.query(User).filter(User.id.in_(user_ids)).all()} if user_ids else {}
+    result: list[ReviewEventRead] = []
+    for e in events:
+        actor = users.get(e.actor_id) if e.actor_id else None
+        target = users.get(e.target_user_id) if e.target_user_id else None
+        result.append(
+            ReviewEventRead(
+                id=e.id,
+                revision_id=e.revision_id,
+                project_code=e.project_code,
+                document_num=e.document_num,
+                discipline_code=e.discipline_code,
+                revision_code=e.revision_code,
+                actor_id=e.actor_id,
+                actor_name=(actor.full_name or actor.email) if actor else None,
+                actor_role=e.actor_role,
+                event_type=e.event_type,
+                target_user_id=e.target_user_id,
+                target_name=(target.full_name or target.email) if target else None,
+                deadline=e.deadline,
+                note=e.note,
+                created_at=e.created_at,
+            )
+        )
+    return result
+
+
+_ACTION_EVENTS_BY_ROLE = {
+    "R": {"R_NO_COMMENTS", "R_COMMENTED"},
+    "LR": {"LR_COMMENTED", "LR_SENT_TO_CONTRACTOR", "AP_SET"},
+}
+_ACTION_LABELS = {
+    "R_NO_COMMENTS": "Рассмотрено без замечаний",
+    "R_COMMENTED": "Оставлено замечание",
+    "LR_COMMENTED": "Оставлено замечание",
+    "LR_SENT_TO_CONTRACTOR": "Замечания переданы подрядчику",
+    "AP_SET": "Согласовано (AP)",
+}
+
+
+def _build_review_report_rows(
+    db: Session,
+    *,
+    project_code: str | None,
+    date_from: date | None,
+    date_to: date | None,
+) -> list[ReviewReportRow]:
+    """Детализация по документам: каждое назначение на рассмотрение (кому,
+    дедлайн) + закрывающее действие ревьюера + статус в срок/просрочено."""
+    q = db.query(ReviewEvent).filter(ReviewEvent.event_type == "SENT_TO_OWNER")
+    if project_code:
+        q = q.filter(ReviewEvent.project_code == project_code)
+    if date_from:
+        q = q.filter(ReviewEvent.created_at >= datetime.combine(date_from, datetime.min.time()))
+    if date_to:
+        q = q.filter(ReviewEvent.created_at <= datetime.combine(date_to, datetime.max.time()))
+    assignments = q.order_by(ReviewEvent.created_at.asc()).all()
+
+    # Роли ревьюеров по (project, discipline) из матрицы — чтобы знать R/LR.
+    matrix = db.query(ReviewMatrixMember).filter(ReviewMatrixMember.level == 1).all()
+    role_by = {(m.project_id, m.discipline_code, m.user_id): m.state for m in matrix}
+    project_id_by_code = {p.code: p.id for p in db.query(Project).all()}
+
+    # Закрывающие действия: (revision_id, actor_id) -> самое раннее действие после назначения.
+    actions = (
+        db.query(ReviewEvent)
+        .filter(ReviewEvent.event_type.in_(["R_NO_COMMENTS", "R_COMMENTED", "LR_COMMENTED", "LR_SENT_TO_CONTRACTOR", "AP_SET"]))
+        .order_by(ReviewEvent.created_at.asc())
+        .all()
+    )
+    actions_by_key: dict[tuple[int, int], list[ReviewEvent]] = defaultdict(list)
+    for a in actions:
+        if a.actor_id is not None:
+            actions_by_key[(a.revision_id, a.actor_id)].append(a)
+
+    user_ids = {a.target_user_id for a in assignments if a.target_user_id}
+    users = {u.id: u for u in db.query(User).filter(User.id.in_(user_ids)).all()} if user_ids else {}
+    today = date.today()
+    rows: list[ReviewReportRow] = []
+    for asg in assignments:
+        reviewer = users.get(asg.target_user_id) if asg.target_user_id else None
+        if reviewer is None:
+            continue
+        pid = project_id_by_code.get(asg.project_code)
+        role = role_by.get((pid, asg.discipline_code, asg.target_user_id), "R")
+        allowed = _ACTION_EVENTS_BY_ROLE.get(role, _ACTION_EVENTS_BY_ROLE["R"])
+        closing = next(
+            (
+                a
+                for a in actions_by_key.get((asg.revision_id, asg.target_user_id), [])
+                if a.event_type in allowed and a.created_at >= asg.created_at
+            ),
+            None,
+        )
+        deadline = asg.deadline
+        if closing is not None:
+            acted_at = closing.created_at
+            late = bool(deadline and acted_at.date() > deadline)
+            status_code = "DONE_LATE" if late else "DONE_ON_TIME"
+            days_over = (acted_at.date() - deadline).days if late and deadline else None
+            action_label = _ACTION_LABELS.get(closing.event_type, closing.event_type)
+        else:
+            acted_at = None
+            overdue = bool(deadline and today > deadline)
+            status_code = "OVERDUE" if overdue else "OPEN_ON_TIME"
+            days_over = (today - deadline).days if overdue and deadline else None
+            action_label = "Не рассмотрено"
+        rows.append(
+            ReviewReportRow(
+                document_num=asg.document_num,
+                revision_code=asg.revision_code,
+                discipline_code=asg.discipline_code,
+                reviewer_name=reviewer.full_name or reviewer.email,
+                reviewer_role=role,
+                assigned_at=asg.created_at,
+                deadline=deadline,
+                acted_at=acted_at,
+                action_label=action_label,
+                status=status_code,
+                days_overdue=days_over,
+            )
+        )
+    return rows
+
+
+@router.get("/reports/review-actions", response_model=list[ReviewReportRow])
+def review_actions_report(
+    project_code: str | None = Query(default=None),
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role.value != "admin" and not get_effective_permissions(current_user).get("can_view_reporting"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Отчёт доступен только администратору")
+    return _build_review_report_rows(db, project_code=project_code, date_from=date_from, date_to=date_to)
+
+
+@router.get("/reports/review-actions.xlsx")
+def review_actions_report_xlsx(
+    project_code: str | None = Query(default=None),
+    date_from: date | None = Query(default=None),
+    date_to: date | None = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role.value != "admin" and not get_effective_permissions(current_user).get("can_view_reporting"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Отчёт доступен только администратору")
+    from io import BytesIO
+    from openpyxl import Workbook
+    from fastapi.responses import StreamingResponse
+
+    rows = _build_review_report_rows(db, project_code=project_code, date_from=date_from, date_to=date_to)
+    status_label = {
+        "DONE_ON_TIME": "В срок",
+        "DONE_LATE": "Просрочено (сделано)",
+        "OPEN_ON_TIME": "В работе",
+        "OVERDUE": "Просрочено (не сделано)",
+    }
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Действия R-LR"
+    ws.append(["Документ", "Ревизия", "Дисциплина", "Ревьювер", "Роль", "Назначено", "Дедлайн", "Факт", "Действие", "Статус", "Дней просрочки"])
+    for r in rows:
+        ws.append([
+            r.document_num,
+            r.revision_code or "",
+            r.discipline_code or "",
+            r.reviewer_name,
+            r.reviewer_role,
+            r.assigned_at.strftime("%Y-%m-%d %H:%M") if r.assigned_at else "",
+            r.deadline.strftime("%Y-%m-%d") if r.deadline else "",
+            r.acted_at.strftime("%Y-%m-%d %H:%M") if r.acted_at else "",
+            r.action_label,
+            status_label.get(r.status, r.status),
+            r.days_overdue if r.days_overdue is not None else "",
+        ])
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=review-actions.xlsx"},
+    )
 
 
 @router.get("/revisions/{revision_id}/carry-decisions", response_model=list[CarryDecisionRead])
@@ -2010,6 +2406,23 @@ def make_tdo_decision(
                     revision_id=revision.id,
                 )
             )
+            # Журнал: кому улетело на рассмотрение и с каким дедлайном.
+            review_events_service.record_event(
+                db,
+                revision=revision,
+                document=doc,
+                mdr=mdr,
+                actor=current_user,
+                actor_role="TDO",
+                event_type="SENT_TO_OWNER",
+                target_user_id=receiver_id,
+                deadline=revision.review_deadline,
+            )
+        # Новая отправка на рассмотрение обнуляет прошлые отметки «нет замечаний»
+        # (ревизия пересматривается заново).
+        db.query(RevisionReviewerState).filter(
+            RevisionReviewerState.revision_id == revision.id
+        ).delete(synchronize_session=False)
         db.query(Notification).filter(
             Notification.user_id == current_user.id,
             Notification.revision_id == revision.id,
@@ -2599,10 +3012,36 @@ def create_comment(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No matrix assignment for this document")
         if payload.review_code is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="review_code is required for owner comment")
+        # После «нет замечаний» (NC) комментирование этого R закрыто — открыть
+        # может только админ, сняв глобальную настройку review_nc_locks_commenting.
+        if review_events_service.reviewer_commenting_locked(db, revision_id=rev.id, user_id=current_user.id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Комментирование закрыто: вы отметили «нет замечаний». Открыть может только администратор.",
+            )
 
     comment = Comment(**payload.model_dump(), author_id=current_user.id, is_published_to_contractor=False)
     db.add(comment)
     db.flush()
+
+    if current_user.company_type == CompanyType.owner and current_user.role.value != "admin":
+        owner_role = _owner_matrix_role_for_document(
+            db,
+            current_user=current_user,
+            project_id=project.id,
+            discipline_code=_matrix_discipline(mdr),
+            doc_type=mdr.doc_type,
+        )
+        review_events_service.record_event(
+            db,
+            revision=rev,
+            document=document,
+            mdr=mdr,
+            actor=current_user,
+            actor_role="LR" if owner_role == "LR" else "R",
+            event_type="LR_COMMENTED" if owner_role == "LR" else "R_COMMENTED",
+            note=f"Замечание ({payload.review_code.value})",
+        )
 
     recipients = {document.created_by_id}
     lr_rows = (
@@ -3122,6 +3561,16 @@ def publish_revision_comments_to_contractor(
     if comments:
         _set_revision_status(revision, "OWNER_COMMENTS_SENT")
         db.add(revision)
+        review_events_service.record_event(
+            db,
+            revision=revision,
+            document=document,
+            mdr=mdr,
+            actor=current_user,
+            actor_role="ADMIN" if current_user.role.value == "admin" else "LR",
+            event_type="LR_SENT_TO_CONTRACTOR",
+            note=f"Передано замечаний: {len(comments)}",
+        )
         target_author_id = revision.author_id or document.created_by_id
         db.add(
             Notification(

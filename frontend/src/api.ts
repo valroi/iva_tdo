@@ -347,6 +347,107 @@ export function listCarryDecisions(revisionId: number): Promise<CarryDecisionIte
   return request<CarryDecisionItem[]>(`/revisions/${revisionId}/carry-decisions`);
 }
 
+export interface ReviewEventItem {
+  id: number;
+  revision_id: number;
+  document_num: string;
+  discipline_code: string | null;
+  revision_code: string | null;
+  actor_id: number | null;
+  actor_name: string | null;
+  actor_role: string;
+  event_type: string;
+  target_user_id: number | null;
+  target_name: string | null;
+  deadline: string | null;
+  note: string | null;
+  created_at: string;
+}
+
+export interface ReviewerStateItem {
+  user_id: number;
+  full_name: string;
+  email: string;
+  role: "LR" | "R";
+  no_comments: boolean;
+  has_comments: boolean;
+  decided_at: string | null;
+}
+
+export interface RevisionReviewerSummary {
+  revision_id: number;
+  reviewers: ReviewerStateItem[];
+  all_reviewers_no_comments: boolean;
+  nc_locks_commenting: boolean;
+  my_locked: boolean;
+}
+
+export interface ReviewReportRow {
+  document_num: string;
+  revision_code: string | null;
+  discipline_code: string | null;
+  reviewer_name: string;
+  reviewer_role: "LR" | "R";
+  assigned_at: string;
+  deadline: string | null;
+  acted_at: string | null;
+  action_label: string;
+  status: "DONE_ON_TIME" | "DONE_LATE" | "OPEN_ON_TIME" | "OVERDUE";
+  days_overdue: number | null;
+}
+
+export function listRevisionEvents(revisionId: number): Promise<ReviewEventItem[]> {
+  return request<ReviewEventItem[]>(`/revisions/${revisionId}/events`);
+}
+
+export function getRevisionReviewerStates(revisionId: number): Promise<RevisionReviewerSummary> {
+  return request<RevisionReviewerSummary>(`/revisions/${revisionId}/reviewer-states`);
+}
+
+export function markRevisionNoComments(revisionId: number): Promise<RevisionReviewerSummary> {
+  return request<RevisionReviewerSummary>(`/revisions/${revisionId}/no-comments`, { method: "POST" });
+}
+
+export function getReviewActionsReport(params: {
+  project_code?: string | null;
+  date_from?: string | null;
+  date_to?: string | null;
+}): Promise<ReviewReportRow[]> {
+  const qs = new URLSearchParams();
+  if (params.project_code) qs.set("project_code", params.project_code);
+  if (params.date_from) qs.set("date_from", params.date_from);
+  if (params.date_to) qs.set("date_to", params.date_to);
+  return request<ReviewReportRow[]>(`/reports/review-actions?${qs.toString()}`);
+}
+
+export async function downloadReviewActionsReport(params: {
+  project_code?: string | null;
+  date_from?: string | null;
+  date_to?: string | null;
+}): Promise<void> {
+  const qs = new URLSearchParams();
+  if (params.project_code) qs.set("project_code", params.project_code);
+  if (params.date_from) qs.set("date_from", params.date_from);
+  if (params.date_to) qs.set("date_to", params.date_to);
+  const blob = await requestBlob(`/reports/review-actions.xlsx?${qs.toString()}`);
+  downloadBlob(blob, `review-actions.xlsx`);
+}
+
+export interface ReviewFlags {
+  nc_locks_commenting: boolean;
+}
+
+export function getReviewFlags(): Promise<ReviewFlags> {
+  return request<ReviewFlags>("/users/admin-settings/review-flags");
+}
+
+export function updateReviewFlags(payload: ReviewFlags): Promise<ReviewFlags> {
+  return request<ReviewFlags>("/users/admin-settings/review-flags", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function setCarryDecision(revisionId: number, payload: { source_comment_id: number; status: "OPEN" | "CLOSED" }): Promise<CarryDecisionItem> {
   return request<CarryDecisionItem>(`/revisions/${revisionId}/carry-decisions`, {
     method: "POST",

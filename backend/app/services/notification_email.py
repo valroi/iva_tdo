@@ -52,6 +52,8 @@ _SUBJECT_BY_EVENT = {
     "COMMENT_RESPONSE": "Ответ на замечание",
     "OWNER_COMMENT_PUBLISHED": "Замечание опубликовано",
     "REGISTRATION_REQUEST": "Новая заявка на регистрацию",
+    "R_NO_COMMENTS": "Ревьювер рассмотрел без замечаний",
+    "REVIEW_DEADLINE_SOON": "Скоро дедлайн рассмотрения",
 }
 
 

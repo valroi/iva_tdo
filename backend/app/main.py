@@ -61,6 +61,10 @@ def on_startup() -> None:
     init_db()
     with SessionLocal() as db:
         seed_default_data(db)
+    # Фоновые напоминания о приближающемся дедлайне рассмотрения (R/LR).
+    from app.services.deadline_reminders import start_daemon
+
+    start_daemon()
 
 
 @app.get("/health")

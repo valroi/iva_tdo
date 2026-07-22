@@ -2,7 +2,8 @@ import { Alert, App, Button, Card, Descriptions, Modal, Space, Steps, Switch, Ta
 import { UploadOutlined } from "@ant-design/icons";
 import { useEffect, useMemo, useState } from "react";
 
-import { addCommentToCrs, createComment, deleteOwnerComment, downloadRevisionAttachmentsArchive, getRevisionCard, listCarryDecisions, ownerCommentDecision, setCarryDecision, setRevisionReviewCode, uploadRevisionPdf } from "../api";
+import { addCommentToCrs, createComment, deleteOwnerComment, downloadRevisionAttachmentsArchive, getRevisionCard, getRevisionReviewerStates, listCarryDecisions, listRevisionEvents, markRevisionNoComments, ownerCommentDecision, setCarryDecision, setRevisionReviewCode, uploadRevisionPdf } from "../api";
+import type { ReviewEventItem, RevisionReviewerSummary } from "../api";
 import ProcessHint from "../components/ProcessHint";
 import RevisionPdfAnnotator from "../components/RevisionPdfAnnotator";
 import type { CarryDecisionItem, CommentItem, RevisionCard, User } from "../types";
@@ -18,6 +19,16 @@ interface Props {
   onBack: () => void;
 }
 
+const REVIEW_EVENT_LABELS: Record<string, string> = {
+  SENT_TO_OWNER: "Направлено на рассмотрение",
+  R_NO_COMMENTS: "Рассмотрено без замечаний",
+  R_COMMENTED: "Замечание R",
+  LR_COMMENTED: "Замечание LR",
+  LR_SENT_TO_CONTRACTOR: "Замечания переданы подрядчику",
+  AP_SET: "Согласовано (AP)",
+  DEADLINE_REMINDER: "Напоминание о дедлайне",
+};
+
 export default function RevisionCardPage({ revisionId, currentUser, onBack }: Props): JSX.Element {
   const { message, modal } = App.useApp();
   const [card, setCard] = useState<RevisionCard | null>(null);
@@ -31,6 +42,22 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
   const [pdfFocusCommentId, setPdfFocusCommentId] = useState<number | null>(null);
   const [carryClosedByRevision, setCarryClosedByRevision] = useState<Record<number, number[]>>({});
   const [carryDecisionsByRevision, setCarryDecisionsByRevision] = useState<Record<number, CarryDecisionItem[]>>({});
+  const [reviewerSummary, setReviewerSummary] = useState<RevisionReviewerSummary | null>(null);
+  const [reviewEvents, setReviewEvents] = useState<ReviewEventItem[]>([]);
+  const [markingNoComments, setMarkingNoComments] = useState(false);
+
+  const loadReviewMeta = async (revId: number): Promise<void> => {
+    try {
+      const [summary, events] = await Promise.all([
+        getRevisionReviewerStates(revId).catch(() => null),
+        listRevisionEvents(revId).catch(() => [] as ReviewEventItem[]),
+      ]);
+      setReviewerSummary(summary);
+      setReviewEvents(events);
+    } catch {
+      /* мета необязательна — карточка работает и без неё */
+    }
+  };
 
   const loadCard = async (): Promise<void> => {
     try {
@@ -48,6 +75,11 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
   useEffect(() => {
     void loadCard();
   }, [revisionId]);
+
+  useEffect(() => {
+    if (selectedRevisionId) void loadReviewMeta(selectedRevisionId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRevisionId]);
 
   // Polling карточки и замечаний каждые 8 секунд: пока пользователь
   // смотрит документ (в том числе при открытой модалке PDF), другие
@@ -338,6 +370,50 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
             </Button>
           </Tooltip>
         )}
+        {card?.current_user_matrix_role === "R" &&
+          currentUser.role !== "admin" &&
+          selectedRevision?.id === latestRevisionId &&
+          selectedRevision?.review_code !== "AP" &&
+          canCommentOnSelectedRevision &&
+          (() => {
+            const my = reviewerSummary?.reviewers.find((r) => r.user_id === currentUser.id);
+            const alreadyNc = Boolean(my?.no_comments);
+            const hasMy = Boolean(my?.has_comments);
+            return (
+              <Tooltip
+                title={
+                  alreadyNc
+                    ? "Вы уже отметили «нет замечаний»"
+                    : hasMy
+                      ? "У вас есть замечания по ревизии — отметка недоступна"
+                      : "Отметить, что вы рассмотрели и замечаний нет (LR это увидит)"
+                }
+              >
+                <Button
+                  size="small"
+                  loading={markingNoComments}
+                  disabled={alreadyNc || hasMy}
+                  onClick={async () => {
+                    if (!selectedRevision) return;
+                    setMarkingNoComments(true);
+                    try {
+                      const summary = await markRevisionNoComments(selectedRevision.id);
+                      setReviewerSummary(summary);
+                      message.success("Отмечено: рассмотрено без замечаний");
+                      await loadReviewMeta(selectedRevision.id);
+                      await loadCard();
+                    } catch (error: unknown) {
+                      message.error(error instanceof Error ? error.message : "Не удалось отметить");
+                    } finally {
+                      setMarkingNoComments(false);
+                    }
+                  }}
+                >
+                  Рассмотрено, без замечаний
+                </Button>
+              </Tooltip>
+            );
+          })()}
         {selectedRevision?.id === latestRevisionId &&
           selectedRevision?.review_code !== "AP" &&
           canSetApByRole &&
@@ -395,6 +471,67 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
           </Tooltip>
         )}
       </Space>
+      {reviewerSummary && reviewerSummary.reviewers.length > 0 && (
+        <Card size="small" style={{ marginBottom: 12 }} title="Рассмотрение ревьюверами">
+          {reviewerSummary.all_reviewers_no_comments && canSetApByRole && (
+            <Alert
+              type="success"
+              showIcon
+              style={{ marginBottom: 8 }}
+              message="Все ревьюверы (R) — без замечаний"
+              description="Можно согласовать документ: нажмите «Поставить AP» выше."
+            />
+          )}
+          <Space direction="vertical" size={4} style={{ width: "100%" }}>
+            {reviewerSummary.reviewers.map((r) => (
+              <Space key={r.user_id} size={8}>
+                <Tag color={r.role === "LR" ? "blue" : "default"}>{r.role}</Tag>
+                <Typography.Text>{r.full_name}</Typography.Text>
+                {r.no_comments ? (
+                  <Tag color="success">без замечаний{r.decided_at ? ` · ${formatDateTimeRu(r.decided_at)}` : ""}</Tag>
+                ) : r.has_comments ? (
+                  <Tag color="orange">есть замечания</Tag>
+                ) : (
+                  <Tag>рассматривает</Tag>
+                )}
+              </Space>
+            ))}
+          </Space>
+        </Card>
+      )}
+      {reviewEvents.length > 0 && (
+        <Card size="small" style={{ marginBottom: 12 }}>
+          <Tabs
+            size="small"
+            items={[
+              {
+                key: "history",
+                label: `История действий (${reviewEvents.length})`,
+                children: (
+                  <Space direction="vertical" size={4} style={{ width: "100%" }}>
+                    {reviewEvents.map((e) => (
+                      <Space key={e.id} size={8} wrap>
+                        <Typography.Text type="secondary" style={{ minWidth: 130, display: "inline-block" }}>
+                          {formatDateTimeRu(e.created_at)}
+                        </Typography.Text>
+                        <Tag>{REVIEW_EVENT_LABELS[e.event_type] ?? e.event_type}</Tag>
+                        {e.actor_name && <Typography.Text>{e.actor_name}</Typography.Text>}
+                        {e.actor_role && <Typography.Text type="secondary">({e.actor_role})</Typography.Text>}
+                        {e.target_name && (
+                          <Typography.Text type="secondary">→ {e.target_name}</Typography.Text>
+                        )}
+                        {e.deadline && (
+                          <Typography.Text type="secondary">дедлайн {formatDateTimeRu(e.deadline)}</Typography.Text>
+                        )}
+                      </Space>
+                    ))}
+                  </Space>
+                ),
+              },
+            ]}
+          />
+        </Card>
+      )}
       <ProcessHint
         style={{ marginBottom: 12 }}
         title="Как читать карточку ревизии"

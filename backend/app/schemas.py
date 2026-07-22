@@ -712,6 +712,66 @@ class AdminReviewSlaSettingsUpdate(BaseModel):
     owner_stamp_days: float = Field(ge=0.1, le=60)
 
 
+class ReviewEventRead(BaseModel):
+    id: int
+    revision_id: int
+    project_code: str
+    document_num: str
+    discipline_code: str | None = None
+    revision_code: str | None = None
+    actor_id: int | None = None
+    actor_name: str | None = None
+    actor_role: str
+    event_type: str
+    target_user_id: int | None = None
+    target_name: str | None = None
+    deadline: date | None = None
+    note: str | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ReviewerStateRead(BaseModel):
+    user_id: int
+    full_name: str
+    email: str
+    role: str  # LR | R
+    no_comments: bool
+    has_comments: bool
+    decided_at: datetime | None = None
+
+
+class RevisionReviewerSummary(BaseModel):
+    revision_id: int
+    reviewers: list[ReviewerStateRead]
+    all_reviewers_no_comments: bool
+    nc_locks_commenting: bool
+    my_locked: bool
+
+
+class ReviewFlagsRead(BaseModel):
+    nc_locks_commenting: bool
+
+
+class ReviewFlagsUpdate(BaseModel):
+    nc_locks_commenting: bool
+
+
+class ReviewReportRow(BaseModel):
+    document_num: str
+    revision_code: str | None = None
+    discipline_code: str | None = None
+    reviewer_name: str
+    reviewer_role: str  # LR | R
+    assigned_at: datetime
+    deadline: date | None = None
+    acted_at: datetime | None = None
+    action_label: str  # что сделал (или «не рассмотрено»)
+    status: str  # DONE_ON_TIME | DONE_LATE | OPEN_ON_TIME | OVERDUE
+    days_overdue: int | None = None
+
+
 class FileUploadResponse(BaseModel):
     file_name: str
     file_path: str

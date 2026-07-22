@@ -40,6 +40,8 @@ import {
   revokeUserSession,
   getAdminReviewSlaSettings,
   updateAdminReviewSlaSettings,
+  getReviewFlags,
+  updateReviewFlags,
   clearAllNotifications,
 } from "../api";
 import type { CompanyType, QuickDemoSetupResult, RegistrationRequest, User, UserPermissions, UserRole, UserSession } from "../types";
@@ -162,6 +164,7 @@ export default function AdminPage({ currentUser, onGlobalReload }: Props): JSX.E
   const [users, setUsers] = useState<User[]>([]);
   const [requests, setRequests] = useState<RegistrationRequest[]>([]);
   const [isMainAdmin, setIsMainAdmin] = useState(false);
+  const [ncLocksCommenting, setNcLocksCommenting] = useState(true);
   const [loading, setLoading] = useState(false);
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -222,6 +225,12 @@ export default function AdminPage({ currentUser, onGlobalReload }: Props): JSX.E
       try {
         const sla = await getAdminReviewSlaSettings();
         slaForm.setFieldsValue(sla);
+      } catch {
+        // ignore for non-main admins
+      }
+      try {
+        const flags = await getReviewFlags();
+        setNcLocksCommenting(flags.nc_locks_commenting);
       } catch {
         // ignore for non-main admins
       }
@@ -580,6 +589,31 @@ export default function AdminPage({ currentUser, onGlobalReload }: Props): JSX.E
                     Сохранить SLA
                   </Button>
                 </Form>
+                <Card size="small" style={{ marginTop: 16 }} title="Замечания ревьюеров (R)">
+                  <Space align="start">
+                    <Switch
+                      checked={ncLocksCommenting}
+                      disabled={!isMainAdmin}
+                      onChange={async (checked) => {
+                        try {
+                          await updateReviewFlags({ nc_locks_commenting: checked });
+                          setNcLocksCommenting(checked);
+                          message.success("Настройка сохранена");
+                        } catch (error) {
+                          message.error(error instanceof Error ? error.message : "Не удалось сохранить");
+                        }
+                      }}
+                    />
+                    <div>
+                      <Typography.Text strong>Закрывать комментирование после «нет замечаний» (NC)</Typography.Text>
+                      <br />
+                      <Typography.Text type="secondary">
+                        Включено: когда ревьювер (R) отметил «рассмотрено без замечаний», он больше не может
+                        добавлять замечания по этой ревизии. Выключите, чтобы разрешить R комментировать после NC.
+                      </Typography.Text>
+                    </div>
+                  </Space>
+                </Card>
               </Card>
             ),
           },

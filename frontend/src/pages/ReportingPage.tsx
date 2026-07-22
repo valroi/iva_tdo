@@ -1,4 +1,6 @@
-import { Card, Empty, Select, Space, Statistic, Typography } from "antd";
+import { Button, Card, DatePicker, Empty, Select, Space, Statistic, Table, Tag, Typography } from "antd";
+import { FileExcelOutlined } from "@ant-design/icons";
+import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
 import {
   CartesianGrid,
@@ -12,7 +14,9 @@ import {
   YAxis,
 } from "recharts";
 
-import { getAdminReviewSlaSettings, listDocumentsRegistry } from "../api";
+import { downloadReviewActionsReport, getAdminReviewSlaSettings, getReviewActionsReport, listDocumentsRegistry } from "../api";
+import type { ReviewReportRow } from "../api";
+import { formatDateTimeRu } from "../utils/datetime";
 import type { DocumentRegistryItem, MDRRecord, ProjectItem, RegistryRevisionItem } from "../types";
 
 interface Props {
@@ -124,6 +128,58 @@ export default function ReportingPage({ projects, mdr }: Props): JSX.Element {
   const [rows, setRows] = useState<DocumentRegistryItem[]>([]);
   const [sla, setSla] = useState<AdminSla | null>(null);
   const [loading, setLoading] = useState(false);
+  const [reviewRows, setReviewRows] = useState<ReviewReportRow[]>([]);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewFrom, setReviewFrom] = useState<string | null>(null);
+  const [reviewTo, setReviewTo] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!projectCode) {
+      setReviewRows([]);
+      return;
+    }
+    setReviewLoading(true);
+    void getReviewActionsReport({ project_code: projectCode, date_from: reviewFrom, date_to: reviewTo })
+      .then(setReviewRows)
+      .catch(() => setReviewRows([]))
+      .finally(() => setReviewLoading(false));
+  }, [projectCode, reviewFrom, reviewTo]);
+
+  const reviewStatusMeta: Record<ReviewReportRow["status"], { label: string; color: string }> = {
+    DONE_ON_TIME: { label: "В срок", color: "success" },
+    DONE_LATE: { label: "Просрочено (сделано)", color: "warning" },
+    OPEN_ON_TIME: { label: "В работе", color: "processing" },
+    OVERDUE: { label: "Просрочено", color: "error" },
+  };
+  const reviewColumns: ColumnsType<ReviewReportRow> = [
+    { title: "Документ", dataIndex: "document_num", key: "document_num", width: 200 },
+    { title: "Рев.", dataIndex: "revision_code", key: "revision_code", width: 60 },
+    { title: "Дисц.", dataIndex: "discipline_code", key: "discipline_code", width: 70 },
+    {
+      title: "Ревьювер",
+      key: "reviewer",
+      render: (_: unknown, r: ReviewReportRow) => (
+        <Space size={6}>
+          <Tag color={r.reviewer_role === "LR" ? "blue" : "default"}>{r.reviewer_role}</Tag>
+          <span>{r.reviewer_name}</span>
+        </Space>
+      ),
+    },
+    { title: "Дедлайн", dataIndex: "deadline", key: "deadline", width: 110, render: (v: string | null) => (v ? formatDateTimeRu(v).slice(0, 10) : "—") },
+    { title: "Факт", dataIndex: "acted_at", key: "acted_at", width: 140, render: (v: string | null) => (v ? formatDateTimeRu(v) : "—") },
+    { title: "Действие", dataIndex: "action_label", key: "action_label" },
+    {
+      title: "Статус",
+      key: "status",
+      width: 180,
+      render: (_: unknown, r: ReviewReportRow) => (
+        <Space size={4}>
+          <Tag color={reviewStatusMeta[r.status].color}>{reviewStatusMeta[r.status].label}</Tag>
+          {r.days_overdue ? <Typography.Text type="danger">+{r.days_overdue}д</Typography.Text> : null}
+        </Space>
+      ),
+    },
+  ];
 
   useEffect(() => {
     if (!projects.length) {
@@ -300,6 +356,42 @@ export default function ReportingPage({ projects, mdr }: Props): JSX.Element {
             </LineChart>
           </ResponsiveContainer>
         )}
+      </Card>
+
+      <Card
+        title="Действия ревьюверов (R / LR): дедлайны и просрочки"
+        style={{ marginTop: 16 }}
+        extra={
+          <Button
+            icon={<FileExcelOutlined />}
+            onClick={() => void downloadReviewActionsReport({ project_code: projectCode, date_from: reviewFrom, date_to: reviewTo })}
+            disabled={reviewRows.length === 0}
+          >
+            Excel
+          </Button>
+        }
+      >
+        <Space style={{ marginBottom: 12 }} wrap>
+          <DatePicker
+            placeholder="Дата c"
+            onChange={(d) => setReviewFrom(d ? d.format("YYYY-MM-DD") : null)}
+          />
+          <DatePicker
+            placeholder="Дата по"
+            onChange={(d) => setReviewTo(d ? d.format("YYYY-MM-DD") : null)}
+          />
+          <Typography.Text type="secondary">Каждая строка — назначение на рассмотрение и его исход.</Typography.Text>
+        </Space>
+        <Table
+          rowKey={(r) => `${r.document_num}-${r.revision_code}-${r.reviewer_name}-${r.assigned_at}`}
+          size="small"
+          loading={reviewLoading}
+          columns={reviewColumns}
+          dataSource={reviewRows}
+          pagination={{ pageSize: 20, hideOnSinglePage: true }}
+          scroll={{ x: 1000 }}
+          locale={{ emptyText: "Нет назначений на рассмотрение за выбранный период." }}
+        />
       </Card>
 
       <Typography.Paragraph type="secondary" style={{ marginTop: 12, fontSize: 12 }}>

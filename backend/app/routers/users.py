@@ -45,6 +45,8 @@ from app.schemas import (
     RegistrationRequestRead,
     AdminReviewSlaSettingsRead,
     AdminReviewSlaSettingsUpdate,
+    ReviewFlagsRead,
+    ReviewFlagsUpdate,
     UserActivationUpdate,
     UserCreate,
     UserPermissionsUpdate,
@@ -186,6 +188,33 @@ def update_admin_review_sla_settings(
         db.add(item)
     db.commit()
     return AdminReviewSlaSettingsRead(**payload.model_dump())
+
+
+@router.get("/admin-settings/review-flags", response_model=ReviewFlagsRead)
+def get_review_flags(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_main_admin),
+):
+    item = db.query(SystemSetting).filter(SystemSetting.key == "review_nc_locks_commenting").first()
+    locks = True if item is None else str(item.value).strip().lower() in ("1", "true", "yes", "on")
+    return ReviewFlagsRead(nc_locks_commenting=locks)
+
+
+@router.put("/admin-settings/review-flags", response_model=ReviewFlagsRead)
+def update_review_flags(
+    payload: ReviewFlagsUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_main_admin),
+):
+    item = db.query(SystemSetting).filter(SystemSetting.key == "review_nc_locks_commenting").first()
+    value = "true" if payload.nc_locks_commenting else "false"
+    if item is None:
+        item = SystemSetting(key="review_nc_locks_commenting", value=value)
+    else:
+        item.value = value
+    db.add(item)
+    db.commit()
+    return ReviewFlagsRead(nc_locks_commenting=payload.nc_locks_commenting)
 
 
 @router.delete("/admin-tools/project-data", status_code=status.HTTP_200_OK)
