@@ -426,17 +426,28 @@ export default function ProjectsPage({
   );
   const projectMdrIds = useMemo(() => new Set(projectMdr.map((row) => row.id)), [projectMdr]);
   const projectDocuments = useMemo(() => documents.filter((item) => projectMdrIds.has(item.mdr_id)), [documents, projectMdrIds]);
-  const disciplineOptions = useMemo(
-    () => [
-      // Условный раздел для инженерных изысканий: назначение на него
-      // покрывает ВСЕ документы категории SE (независимо от вида отчёта).
-      { value: "SE", label: "SE — Инженерные изыскания (все отчёты)" },
-      ...references
-        .filter((ref) => ref.ref_type === "pd_section" && ref.is_active)
+  // Каскад в матрице назначений: сначала категория документа, затем раздел.
+  // PD — разделы ПД; SE — один условный раздел «SE» (покрывает все отчёты
+  // изысканий); остальные категории (PF, PM, ...) — общий справочник
+  // «Дисциплина» (матчинг с documents идёт по discipline_code документа).
+  const matrixCategoryOptions = useMemo(
+    () =>
+      references
+        .filter((ref) => ref.ref_type === "document_category" && ref.is_active)
         .map((ref) => ({ value: ref.code, label: `${ref.code} - ${ref.value}` })),
-    ],
     [references],
   );
+  const matrixCategory = Form.useWatch("category", matrixForm) as string | undefined;
+  const disciplineOptions = useMemo(() => {
+    const category = (matrixCategory || "").toUpperCase();
+    if (category === "SE") {
+      return [{ value: "SE", label: "SE — Инженерные изыскания (все отчёты)" }];
+    }
+    const refType = category === "PD" ? "pd_section" : "discipline";
+    return references
+      .filter((ref) => ref.ref_type === refType && ref.is_active)
+      .map((ref) => ({ value: ref.code, label: `${ref.code} - ${ref.value}` }));
+  }, [references, matrixCategory]);
   const hierarchyTree = useMemo(
     () => {
       const treeTitle = (value: string, maxWidth = 560) => (
@@ -1163,9 +1174,12 @@ export default function ProjectsPage({
           try {
             if (!selectedProjectId) return;
             const values = await matrixForm.validateFields();
+            // category — только UI-фильтр каскада; матчинг с документами
+            // идёт по discipline_code, на бэк категория не отправляется.
+            const { category: _category, ...payload } = values;
             await createReviewMatrixItem(selectedProjectId, {
-              ...values,
-              doc_type: values.discipline_code,
+              ...payload,
+              doc_type: payload.discipline_code,
               level: 1,
             });
             message.success("Строка матрицы добавлена");
@@ -1179,12 +1193,39 @@ export default function ProjectsPage({
         }}
       >
         <Form form={matrixForm} layout="vertical" initialValues={{ level: 1, state: "R" }}>
-          <Form.Item name="discipline_code" label="Раздел (ПД / SE)" rules={[{ required: true }]}>
+          <Form.Item name="category" label="Категория документа" rules={[{ required: true }]}>
+            <Select
+              showSearch
+              optionFilterProp="label"
+              options={matrixCategoryOptions}
+              placeholder="PD / SE / PF / PM ..."
+              onChange={(value) => {
+                // Раздел зависит от категории: PD — разделы ПД, SE — один
+                // условный раздел (сразу подставляем), прочие — дисциплины.
+                matrixForm.setFieldValue(
+                  "discipline_code",
+                  String(value).toUpperCase() === "SE" ? "SE" : undefined,
+                );
+              }}
+            />
+          </Form.Item>
+          <Form.Item
+            name="discipline_code"
+            label={
+              (matrixCategory || "").toUpperCase() === "PD"
+                ? "Раздел ПД"
+                : (matrixCategory || "").toUpperCase() === "SE"
+                  ? "Раздел (SE — все отчёты)"
+                  : "Дисциплина"
+            }
+            rules={[{ required: true }]}
+          >
             <Select
               showSearch
               optionFilterProp="label"
               options={disciplineOptions}
-              placeholder="Раздел ПД или SE — изыскания (вся категория)"
+              disabled={!matrixCategory}
+              placeholder={!matrixCategory ? "Сначала выберите категорию" : "Из справочника"}
             />
           </Form.Item>
           <Form.Item name="user_id" label="Сотрудник" rules={[{ required: true }]}>

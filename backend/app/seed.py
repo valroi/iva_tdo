@@ -309,6 +309,23 @@ def seed_default_data(db: Session) -> None:
             upsert_ref("mark", mark_code, mark_name)
             upsert_ref("mark_discipline", mark_code, discipline_code)
 
+        # Общие справочники «Дисциплина» и «Тип документа» нужны не-PD
+        # категориям (PF/PM/...): сегменты шифра и каскад в матрице
+        # назначений. При создании проекта через API они сеются в
+        # _default_project_references, но дефолтный проект создаётся здесь —
+        # досеиваем только если пусто (на проде наполнены, не трогаем).
+        from app.routers.projects import DISCIPLINES, DOCUMENT_TYPES
+
+        for ref_type, pairs in (("discipline", DISCIPLINES), ("document_type", DOCUMENT_TYPES)):
+            has_any = (
+                db.query(ProjectReference.id)
+                .filter(ProjectReference.project_id == project.id, ProjectReference.ref_type == ref_type)
+                .first()
+            )
+            if has_any is None:
+                for code, value in pairs:
+                    upsert_ref(ref_type, code, value)
+
     demo_user_by_email: dict[str, User] = {}
 
     if settings.seed_demo_users:
