@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.auth import TokenError, decode_token
 from app.config import get_settings
 from app.database import get_db
-from app.models import CompanyType, User, UserRole
+from app.models import CompanyType, ReviewMatrixMember, User, UserRole
 
 bearer_scheme = HTTPBearer(auto_error=False)
 settings = get_settings()
@@ -48,6 +48,8 @@ def get_current_user(
     user = db.query(User).filter(User.email == subject).first()
     if user is None or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Inactive or missing user")
+    # Транзиентный атрибут (не колонка) — в БД не сохраняется.
+    setattr(user, _MATRIX_GRANTS_ATTR, matrix_permission_grants(db, user))
     return user
 
 
@@ -115,11 +117,43 @@ def default_permissions_for_role(
     return perms
 
 
+# Назначение в матрице рассмотрения САМО даёт право на действия ревьювера.
+# Иначе получалось дублирование: админ ставит человека LR по дисциплине, а
+# кнопки у него нет, потому что отдельно не выдан флаг can_publish_comments.
+# Область действия по конкретному документу всё равно проверяется на каждом
+# эндпоинте (_is_lr_for_document / матрица по дисциплине) — здесь только снятие
+# «глобального» замка.
+_MATRIX_GRANTS_ATTR = "_matrix_permission_grants"
+
+
+def matrix_permission_grants(db: Session, user: User) -> dict[str, bool]:
+    if user.role == UserRole.admin:
+        return {}
+    states = {
+        row[0]
+        for row in db.query(ReviewMatrixMember.state)
+        .filter(ReviewMatrixMember.user_id == user.id, ReviewMatrixMember.level == 1)
+        .all()
+    }
+    if not states:
+        return {}
+    grants = {"can_comment": True, "can_raise_comments": True}
+    if "LR" in states:
+        # LR консолидирует замечания и ставит AP.
+        grants["can_publish_comments"] = True
+    return grants
+
+
 def get_effective_permissions(user: User) -> dict[str, bool]:
     defaults = default_permissions_for_role(user.role)
     custom = user.permissions or {}
     # Respect explicit False values in stored custom permissions.
-    return {key: bool(custom[key]) if key in custom else bool(defaults[key]) for key in PERMISSION_KEYS}
+    effective = {key: bool(custom[key]) if key in custom else bool(defaults[key]) for key in PERMISSION_KEYS}
+    # Права из матрицы только ДОБАВЛЯЮТСЯ (никогда не отнимают).
+    for key, value in (getattr(user, _MATRIX_GRANTS_ATTR, None) or {}).items():
+        if value and key in effective:
+            effective[key] = True
+    return effective
 
 
 def has_permission(user: User, permission: str) -> bool:

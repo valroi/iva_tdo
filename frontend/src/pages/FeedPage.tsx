@@ -13,6 +13,7 @@ import {
   Space,
   Table,
   Tag,
+  Tooltip,
   Typography,
   Upload,
 } from "antd";
@@ -267,26 +268,45 @@ export default function FeedPage({ currentUser }: Props): JSX.Element {
     {
       title: "Файлы (версии)",
       key: "files",
-      width: 260,
+      width: 340,
       render: (_, row) => (
-        <Space direction="vertical" size={2}>
-          {row.files.filter((f) => f.kind === "REVISION").map((f) => (
-            <Space key={f.id} size={4}>
+        <Space direction="vertical" size={2} style={{ width: "100%" }}>
+          {/* PDF (главные версии) сверху, редактируемые исходники — ниже:
+              иначе в узкой колонке они перемешивались и было непонятно, что
+              из этого «настоящий» документ. */}
+          {[...row.files.filter((f) => f.kind === "REVISION")]
+            .sort((a, b) => Number(a.is_editable) - Number(b.is_editable))
+            .map((f) => {
+              const ext = (f.file_name.split(".").pop() ?? "").toLowerCase();
+              return (
+            <Space key={f.id} size={4} style={{ width: "100%" }}>
               <Tag color={f.is_editable ? "default" : LANG_COLOR[f.lang]} style={{ marginRight: 0 }}>{LANG_LABEL[f.lang]}</Tag>
-              {f.is_editable && (
-                <Tag color="gold" style={{ marginRight: 0 }} title="Не-PDF (редактируемый исходник) — не считается главной версией">ред.</Tag>
-              )}
-              {!f.is_editable && (
-                <Button size="small" type="link" icon={<EyeOutlined />} style={{ padding: 0 }} title="Просмотр без скачивания"
-                  onClick={() => void openPreview(f.id, f.file_name)} />
-              )}
+              {f.is_editable ? (
+                <Tag color="gold" style={{ marginRight: 0 }} title="Редактируемый исходник (не PDF) — предпросмотр недоступен, только скачивание">
+                  ред. {ext || "исходник"}
+                </Tag>
+              ) : null}
+              {/* Кнопка просмотра показывается ВСЕГДА: для «ред.» она выключена
+                  с подсказкой — раньше её просто не было, люди жали соседние
+                  кнопки и упирались в ошибку «Only PDF preview supported». */}
+              <Tooltip title={f.is_editable ? `Предпросмотр только для PDF. ${ext ? `Это .${ext}` : "Это исходник"} — нажмите «скачать».` : "Просмотр без скачивания"}>
+                <Button
+                  size="small"
+                  type="link"
+                  icon={<EyeOutlined />}
+                  style={{ padding: 0 }}
+                  disabled={f.is_editable}
+                  onClick={() => void openPreview(f.id, f.file_name)}
+                />
+              </Tooltip>
               <Button size="small" type="link" icon={<DownloadOutlined />} style={{ padding: 0 }}
                 onClick={() => void downloadFeedFile(f.id, f.file_name)}>
                 {f.rev ? `rev ${f.rev}` : f.file_name.slice(0, 16)}
               </Button>
               <Button size="small" type="link" danger style={{ padding: 0 }} onClick={async () => { await deleteFeedFile(f.id); await loadDocs(projectId); }}>✕</Button>
             </Space>
-          ))}
+              );
+            })}
           {/* Дозагрузка ещё одной языковой версии под тот же шифр */}
           <Upload showUploadList={false} beforeUpload={(file) => {
             void uploadFeedFile(row.id, file, "REVISION").then(() => loadDocs(projectId)).catch((e) => message.error(e.message));

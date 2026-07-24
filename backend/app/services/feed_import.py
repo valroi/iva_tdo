@@ -188,30 +188,92 @@ _TITLE_HINT = re.compile(
 )
 _TITLE_STOP = re.compile(r"PROJECT|TITLE|SUBCONTRACTOR|CONTRACTOR|OWNER|PHASE|CLASS|DOC|DISC|SHEET|PAGE|REV\b|SERIAL", re.IGNORECASE)
 
+# Русские маркеры названия инженерного документа. Раньше RU-заголовком
+# бралась ПЕРВАЯ попавшаяся кириллическая строка — из штампа чертежа лезло
+# «резервуар для», «12 А5004 шт», «350350 250250К1К1». Теперь как у EN:
+# строка обязана содержать маркер вида документа.
+_TITLE_HINT_RU = re.compile(
+    r"(СХЕМА|ПЛАН\b|РАЗРЕЗ|УЗЕЛ|УЗЛЫ|ФАСАД|ВЕДОМОСТЬ|СПЕЦИФИКАЦИЯ|ПЕРЕЧЕНЬ|ЧЕРТЕЖ|ЧЕРТЁЖ|"
+    r"ОПРОСНЫЙ\s+ЛИСТ|ЗАПИСКА|ОТЧЕТ|ОТЧЁТ|РАСЧЕТ|РАСЧЁТ|ПРОГРАММА|ПРОЦЕДУРА|ИНСТРУКЦИЯ|"
+    r"ТЕХНИЧЕСКИЕ\s+ТРЕБОВАНИЯ|ТЕХНИЧЕСКОЕ\s+ЗАДАНИЕ|ЗАДАНИЕ\b|КАРКАС|ФУНДАМЕНТ|РОСТВЕРК|"
+    r"КОНСТРУКЦИИ|РАСПОЛОЖЕНИ|КОМПОНОВК|РАЗМЕЩЕНИ|ТРУБОПРОВОД|ОБОРУДОВАНИ|"
+    r"ТАБЛИЦА|КАРТА|ПРОФИЛЬ|ФИЛОСОФИЯ|ОСНОВНЫЕ\s+ТЕХНИЧЕСКИЕ)",
+    re.IGNORECASE,
+)
+# Служебные поля штампа/рамки — не название.
+_TITLE_STOP_RU = re.compile(
+    r"(НАИМЕНОВАНИЕ|ЗАКАЗЧИК|ПОДРЯДЧИК|СУБПОДРЯДЧИК|СТАДИЯ|ЛИСТ\b|ЛИСТОВ|ИЗМ\b|КОЛ\.?УЧ|"
+    r"ПОДПИС|ДАТА|ШИФР|РЕВИЗИЯ|ИНВ\.?\s*№|ВЗАМ\.?|СОГЛАСОВАН|УТВЕРЖДАЮ|РАЗРАБОТАЛ|ПРОВЕРИЛ|"
+    r"Н\.?\s*КОНТР|ГИП\b|ТИП\s+ДОК|ДИСЦИПЛИН|ИНСТИТУТ|ООО\b|АО\b|ЗАО\b|СТР\.?\s*\d)",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_junk(line: str) -> bool:
+    """Отсев строк из тела чертежа: размеры, позиции, обрывки."""
+    letters = len(re.findall(r"[A-Za-zА-Яа-яЁё]", line))
+    if letters < 6:
+        return True
+    # Доля букв мала → это размерная цепочка вида «350350 250250К1К1».
+    if letters / max(len(line.replace(" ", "")), 1) < 0.55:
+        return True
+    # Повтор одного «слова» подряд (К1К1К1) — характерно для выносок.
+    if re.search(r"(\b\w{1,3}\b)(\s*\1){2,}", line):
+        return True
+    # Заканчивается предлогом/союзом → обрезанный фрагмент («резервуар для»).
+    if re.search(r"\s(для|на|в|с|из|по|к|от|и|или|под|при)$", line, re.IGNORECASE):
+        return True
+    return False
+
+
+def _score_title(line: str) -> int:
+    """Чем длиннее осмысленная строка с маркером — тем вероятнее это название."""
+    words = len(line.split())
+    score = min(words, 12) * 2
+    if 20 <= len(line) <= 80:
+        score += 6
+    if line.endswith((".", ",", ":")):
+        score -= 3
+    return score
+
 
 def extract_titles(text: str) -> tuple[str | None, str | None]:
     """Заголовок документа: ищем «осмысленную» строку-название.
-    EN — латинская строка с маркером (System/List/...), RU — кириллическая
-    рядом. Грубо, но лучше чем мусор из штампа; всё правится вручную."""
-    lines = [re.sub(r"\s+", " ", ln).strip(" .:-") for ln in text.splitlines()]
-    title_en = None
-    title_ru = None
+
+    И EN, и RU обязаны содержать маркер вида документа (System/List/... ,
+    Схема/План/Ведомость/...), не быть служебным полем штампа и не выглядеть
+    мусором из тела чертежа. Из подходящих берём наиболее «титульную» по
+    скорингу, а не первую попавшуюся. Всё правится вручную в карточке."""
+    lines = [re.sub(r"\s+", " ", ln).strip(" .:-|") for ln in text.splitlines()]
+    best_en: tuple[int, str] | None = None
+    best_ru: tuple[int, str] | None = None
     for ln in lines:
-        if len(ln) < 6 or len(ln) > 90:
-            continue
-        if _TITLE_STOP.search(ln):
+        if len(ln) < 8 or len(ln) > 90:
             continue
         has_cyr = bool(re.search(r"[А-Яа-яЁё]", ln))
         has_lat = bool(re.search(r"[A-Za-z]", ln))
-        if title_en is None and has_lat and not has_cyr and _TITLE_HINT.search(ln):
-            # Не аббревиатура из штампа (минимум 2 слова)
-            if len(ln.split()) >= 2:
-                title_en = ln.title() if ln.isupper() else ln
-        if title_ru is None and has_cyr and not has_lat and len(ln.split()) >= 2:
-            title_ru = ln
-        if title_en and title_ru:
-            break
-    return title_en, title_ru
+        if _looks_like_junk(ln):
+            continue
+        if has_lat and not has_cyr:
+            if _TITLE_STOP.search(ln) or not _TITLE_HINT.search(ln):
+                continue
+            if len(ln.split()) < 2:
+                continue
+            candidate = ln.title() if ln.isupper() else ln
+            score = _score_title(candidate)
+            if best_en is None or score > best_en[0]:
+                best_en = (score, candidate)
+        elif has_cyr:
+            # Кириллица может соседствовать с латиницей (единицы, марки стали) —
+            # это нормально для русского названия, поэтому has_lat не запрещаем.
+            if _TITLE_STOP_RU.search(ln) or not _TITLE_HINT_RU.search(ln):
+                continue
+            if len(ln.split()) < 2:
+                continue
+            score = _score_title(ln)
+            if best_ru is None or score > best_ru[0]:
+                best_ru = (score, ln)
+    return (best_en[1] if best_en else None), (best_ru[1] if best_ru else None)
 
 
 def parse_feed_file(file_name: str, raw: bytes) -> dict[str, Any]:

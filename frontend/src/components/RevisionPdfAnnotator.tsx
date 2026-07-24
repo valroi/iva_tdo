@@ -1,4 +1,5 @@
 import { Alert, Button, Form, Input, Modal, Select, Space, Tabs, Tag, Tooltip, Typography, App } from "antd";
+import { DownloadOutlined } from "@ant-design/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 
@@ -390,7 +391,29 @@ export default function RevisionPdfAnnotator({
   return (
     <>
     <Modal
-      title="Просмотр PDF и аннотация"
+      title={
+        <Space style={{ width: "100%", justifyContent: "space-between", paddingRight: 32 }}>
+          <span>Просмотр PDF и аннотация</span>
+          {/* Скачивание доступно всем ролям: PDF уже загружен в blob, качаем
+              из него — повторный запрос к серверу не нужен. */}
+          <Button
+            size="small"
+            icon={<DownloadOutlined />}
+            disabled={!pdfBlobUrl}
+            onClick={() => {
+              if (!pdfBlobUrl) return;
+              const link = document.createElement("a");
+              link.href = pdfBlobUrl;
+              link.download = `revision_${revisionId ?? "document"}.pdf`;
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+            }}
+          >
+            Скачать PDF
+          </Button>
+        </Space>
+      }
       open={open}
       width={980}
       onCancel={onClose}

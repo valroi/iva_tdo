@@ -658,3 +658,74 @@ def reindex_feed_agent(
     except feed_rag.RagUnavailable as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
     return {"status": "ok", **stats}
+
+
+@router.post("/feed/reparse-titles")
+def reparse_feed_titles(
+    project_id: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Перечитать названия документов из уже извлечённого текста (search_text).
+
+    Нужен после починки парсера: в старых карточках в названии лежит мусор из
+    штампа/тела чертежа («резервуар для», «350350 250250К1К1»). Осмысленные и
+    вручную поправленные названия НЕ трогаем — перезаписываем только те, что не
+    проходят текущую валидацию. Только админ."""
+    from app.deps import has_permission
+    from app.services.feed_import import (
+        _TITLE_HINT,
+        _TITLE_HINT_RU,
+        _TITLE_STOP,
+        _TITLE_STOP_RU,
+        _looks_like_junk,
+        extract_titles,
+    )
+
+    if not has_permission(current_user, "can_manage_users"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+
+    def looks_valid(value: str | None, *, ru: bool) -> bool:
+        if not value:
+            return False
+        line = value.strip()
+        if len(line) < 8 or _looks_like_junk(line):
+            return False
+        if ru:
+            return bool(_TITLE_HINT_RU.search(line)) and not _TITLE_STOP_RU.search(line)
+        return bool(_TITLE_HINT.search(line)) and not _TITLE_STOP.search(line)
+
+    query = db.query(FeedDocument)
+    if project_id is not None:
+        query = query.filter(FeedDocument.project_id == project_id)
+    docs = query.all()
+
+    updated = 0
+    cleared = 0
+    kept = 0
+    for doc in docs:
+        ru_ok = looks_valid(doc.title_ru, ru=True)
+        en_ok = looks_valid(doc.title_en, ru=False)
+        if ru_ok and en_ok:
+            kept += 1
+            continue
+        new_en, new_ru = extract_titles(doc.search_text or "") if doc.search_text else (None, None)
+        changed = False
+        if not ru_ok:
+            if new_ru:
+                doc.title_ru, changed = new_ru, True
+            elif doc.title_ru:
+                # Мусор и заменить нечем — лучше пусто, чем вводящее в заблуждение.
+                doc.title_ru, changed = None, True
+                cleared += 1
+        if not en_ok:
+            if new_en:
+                doc.title_en, changed = new_en, True
+            elif doc.title_en:
+                doc.title_en, changed = None, True
+                cleared += 1
+        if changed:
+            db.add(doc)
+            updated += 1
+    db.commit()
+    return {"status": "ok", "documents": len(docs), "updated": updated, "cleared_junk": cleared, "kept_valid": kept}
