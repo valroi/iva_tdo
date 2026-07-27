@@ -1978,6 +1978,120 @@ def review_actions_report_xlsx(
     )
 
 
+@router.get("/reports/comments-export.xlsx")
+def export_comments_xlsx(
+    project_code: str | None = Query(default=None),
+    document_num: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Большая выгрузка всех замечаний и ответов: кто, ФИО, даты, статусы,
+    код замечания, ревизия, документ, CRS. Доступна всем ролям — область
+    ограничена проектами, где пользователь участник (админ — все проекты)."""
+    from io import BytesIO
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    from fastapi.responses import StreamingResponse
+
+    # Область видимости: как в list_documents — только свои проекты.
+    allowed_codes: set[str] | None = None
+    if current_user.role.value != "admin":
+        rows = (
+            db.query(Project.code)
+            .join(ProjectMember, ProjectMember.project_id == Project.id)
+            .filter(ProjectMember.user_id == current_user.id)
+            .all()
+        )
+        allowed_codes = {r[0] for r in rows}
+        if not allowed_codes:
+            allowed_codes = set()
+
+    q = (
+        db.query(Comment, Revision, Document, MDRRecord, User)
+        .join(Revision, Revision.id == Comment.revision_id)
+        .join(Document, Document.id == Revision.document_id)
+        .join(MDRRecord, MDRRecord.id == Document.mdr_id)
+        .outerjoin(User, User.id == Comment.author_id)
+    )
+    if project_code:
+        q = q.filter(MDRRecord.project_code == project_code)
+    if document_num:
+        q = q.filter(Document.document_num == document_num)
+    if allowed_codes is not None:
+        q = q.filter(MDRRecord.project_code.in_(list(allowed_codes) or ["__none__"]))
+    records = q.order_by(MDRRecord.project_code, Document.document_num, Revision.id, Comment.id).all()
+
+    # ФИО автора родительского замечания (для строк-ответов).
+    parent_ids = {c.parent_id for c, *_ in records if c.parent_id}
+    parents = {c.id: c for c in db.query(Comment).filter(Comment.id.in_(parent_ids)).all()} if parent_ids else {}
+    parent_author_ids = {p.author_id for p in parents.values()}
+    parent_authors = (
+        {u.id: u for u in db.query(User).filter(User.id.in_(parent_author_ids)).all()} if parent_author_ids else {}
+    )
+
+    status_label = {
+        "OPEN": "Открыто",
+        "IN_PROGRESS": "В работе",
+        "RESOLVED": "Устранено",
+        "REJECTED": "Отклонено",
+    }
+    contractor_label = {"A": "Согласен (A)", "I": "Не согласен (I)"}
+    side_label = {"owner": "Заказчик", "contractor": "Подрядчик", "admin": "Администратор"}
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Замечания"
+    headers = [
+        "Проект", "Документ", "Ревизия", "Тип", "ID", "Родит. ID",
+        "Автор (ФИО)", "Сторона", "Текст", "Код замечания", "Статус",
+        "Ответ подрядчика", "В CRS", "№ CRS", "Опубл. подрядчику",
+        "Дата создания", "Дата решения",
+    ]
+    ws.append(headers)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+
+    def fmt(dt) -> str:
+        return dt.strftime("%Y-%m-%d %H:%M") if dt else ""
+
+    for comment, revision, document, mdr, author in records:
+        is_reply = comment.parent_id is not None
+        author_name = (author.full_name or author.email) if author else "—"
+        side = side_label.get(author.company_type.value, "—") if author and author.company_type else "—"
+        ws.append([
+            mdr.project_code,
+            document.document_num,
+            revision.revision_code,
+            "Ответ" if is_reply else "Замечание",
+            comment.id,
+            comment.parent_id or "",
+            author_name,
+            side,
+            comment.text or "",
+            (comment.review_code.value if comment.review_code else ""),
+            status_label.get(comment.status.value if comment.status else "", ""),
+            contractor_label.get(comment.contractor_status.value if comment.contractor_status else "", ""),
+            "Да" if comment.in_crs else "",
+            comment.crs_number or "",
+            "Да" if comment.is_published_to_contractor else "",
+            fmt(comment.created_at),
+            fmt(comment.resolved_at),
+        ])
+
+    widths = [10, 26, 8, 12, 8, 10, 26, 14, 60, 14, 12, 18, 8, 14, 16, 18, 18]
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
+
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=comments-export.xlsx"},
+    )
+
+
 @router.get("/revisions/{revision_id}/carry-decisions", response_model=list[CarryDecisionRead])
 def list_carry_decisions(
     revision_id: int,

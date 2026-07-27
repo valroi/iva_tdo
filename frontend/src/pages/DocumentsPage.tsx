@@ -28,6 +28,7 @@ import {
   addCommentToCrs,
   createComment,
   createRevision,
+  downloadCommentsExport,
   type AdminReviewSlaSettings,
   getAdminReviewSlaSettings,
   getRevisionCard,
@@ -1225,10 +1226,27 @@ export default function DocumentsPage({
 
   return (
     <>
-      <Space style={{ marginBottom: 12 }}>
+      <Space style={{ marginBottom: 12 }} wrap>
         <Typography.Title level={4} style={{ margin: 0 }}>
           Ревизии и комментарии
         </Typography.Title>
+        {/* Выгрузка всех замечаний/ответов в Excel — доступна всем ролям.
+            Область ограничена проектами пользователя (админ — все). */}
+        <Tooltip title="Выгрузить в Excel все замечания и ответы: автор, ФИО, даты, статусы, коды, ревизия, CRS">
+          <Button
+            icon={<DownloadOutlined />}
+            onClick={async () => {
+              try {
+                await downloadCommentsExport({ project_code: selectedMdr?.project_code ?? null });
+                message.success("Выгрузка замечаний сформирована");
+              } catch (error) {
+                message.error(error instanceof Error ? error.message : "Не удалось выгрузить замечания");
+              }
+            }}
+          >
+            Выгрузить замечания (Excel)
+          </Button>
+        </Tooltip>
         {/* Кнопка «+ Ревизия» появляется только когда подрядчик действительно
             может создать ревизию: выбран документ, не завершён, и предыдущая
             ревизия НЕ в работе. В остальных случаях кнопки нет совсем —

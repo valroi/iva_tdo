@@ -6,6 +6,7 @@ from app.database import SessionLocal, init_db
 from app.routers import api_router
 from app.seed import seed_default_data
 from app.services import notification_email  # noqa: F401 — регистрирует SQLAlchemy-хук email-рассылки уведомлений
+from app.services import comment_audit  # noqa: F401 — регистрирует SQLAlchemy-хук append-only аудита замечаний
 
 settings = get_settings()
 

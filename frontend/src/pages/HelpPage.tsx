@@ -85,64 +85,87 @@ function WorkflowGraph(): JSX.Element {
   );
   return (
     <div style={{ overflowX: "auto" }}>
-      <svg viewBox="0 0 980 320" style={{ minWidth: 900, width: "100%" }} role="img" aria-label="Граф процесса ТДО">
+      <svg viewBox="0 0 1010 360" style={{ minWidth: 940, width: "100%" }} role="img" aria-label="Граф процесса ТДО">
         <defs>
           <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
             <path d="M0,0 L8,4 L0,8 z" fill="#667085" />
           </marker>
         </defs>
-        <rect x={8} y={28} width={964} height={118} rx={12} fill="#f6ffed" opacity={0.6} />
-        <rect x={8} y={172} width={964} height={118} rx={12} fill="#e6f4ff" opacity={0.6} />
-        <text x={20} y={20} fontSize={12} fontWeight={700} fill="#3f6600">ПОДРЯДЧИК (рук. ТДО · разработчик)</text>
-        <text x={20} y={166} fontSize={12} fontWeight={700} fill="#003eb3">ЗАКАЗЧИК (LR · R)</text>
+        {/* Две дорожки: подрядчик (зелёная) и заказчик (синяя). */}
+        <rect x={8} y={34} width={994} height={120} rx={12} fill="#f6ffed" opacity={0.6} />
+        <rect x={8} y={196} width={994} height={120} rx={12} fill="#e6f4ff" opacity={0.6} />
+        <text x={20} y={26} fontSize={12} fontWeight={700} fill="#3f6600">ПОДРЯДЧИК · рук. ТДО и разработчик</text>
+        <text x={20} y={188} fontSize={12} fontWeight={700} fill="#003eb3">ЗАКАЗЧИК · ЛР (лидер-ревьювер) и Р (ревьювер)</text>
 
-        {box(20, 58, 145, "1. Документ в МДР", "рук. ТДО · план сроков")}
-        {box(195, 58, 140, "2. Ревизия + PDF", "разработчик · IFR")}
-        {box(365, 58, 140, "3. Очередь ТРМ", "рук. ТДО · решение")}
-        {box(365, 205, 150, "4. Ревью заказчика", "LR + R · замечания")}
-        {box(550, 205, 120, "5. CRS", "LR · отправка")}
-        {box(550, 58, 150, "6. Ответ подрядчика", "разработчик · A / I")}
-        {box(715, 205, 140, "7. Carry-over", "LR · устранено?")}
-        {box(730, 58, 115, "Новая ревизия", "цикл B, C…", "#fffbe6")}
-        {box(870, 131, 102, "AFD + AP", "закрыт · 100%", "#f6ffed")}
+        {/* Дорожка подрядчика */}
+        {box(20, 66, 150, "1. Документ в реестре", "рук. ТДО · сроки")}
+        {box(190, 66, 145, "2. Ревизия и PDF", "разработчик · выпуск IFR")}
+        {box(355, 66, 150, "3. Входной контроль", "рук. ТДО · очередь ТРМ")}
+        {box(560, 66, 155, "6. Ответ на замечания", "разработчик · согл./не согл.")}
+        {box(748, 66, 130, "Новая ревизия", "цикл B, C…", "#fffbe6")}
 
-        {arrow(165, 85, 195, 85)}
-        {arrow(335, 85, 365, 85)}
-        {arrow(435, 112, 435, 205)}
-        {arrow(515, 232, 550, 232)}
-        {arrow(610, 205, 615, 112)}
-        {arrow(700, 92, 760, 205)}
-        {arrow(770, 205, 785, 112, true)}
-        {arrow(855, 219, 902, 185)}
-        <text x={700} y={168} fontSize={10} fill="#ad6800">не устранено → новый цикл</text>
-        <text x={856} y={240} fontSize={10} fill="#3f6600">всё устранено</text>
+        {/* Дорожка заказчика */}
+        {box(355, 224, 165, "4. Рассмотрение", "Р · замечания либо «без замечаний»")}
+        {box(560, 224, 155, "5. Свод замечаний", "ЛР · отправка (CRS)")}
+        {box(748, 224, 165, "7. Проверка устранения", "ЛР · carry-over")}
+
+        {/* Итог — между дорожками справа */}
+        {box(886, 145, 110, "Документ закрыт", "AFD + AP · 100%", "#f6ffed")}
+
+        {/* Переходы */}
+        {arrow(170, 93, 190, 93)}
+        {arrow(335, 93, 355, 93)}
+        {arrow(430, 120, 437, 224)}
+        {arrow(520, 251, 560, 251)}
+        {arrow(637, 224, 637, 120)}
+        {arrow(715, 100, 800, 224)}
+        {arrow(830, 224, 890, 175)}
+        {arrow(831, 224, 813, 120, true)}
+
+        <text x={445} y={188} fontSize={10} fill="#003eb3">передача заказчику</text>
+        <text x={523} y={244} fontSize={10} fill="#003eb3">Р → ЛР</text>
+        <text x={645} y={180} fontSize={10} fill="#ad6800">замечания подрядчику</text>
+        <text x={720} y={168} fontSize={10} fill="#003eb3">ответ на проверку</text>
+        <text x={835} y={205} fontSize={10} fill="#3f6600">устранено → AP</text>
+        <text x={706} y={148} fontSize={10} fill="#ad6800">не устранено → новый цикл</text>
+        {/* Ветка «все Р без замечаний → ЛР ставит AP напрямую» */}
+        {arrow(520, 236, 892, 168, true)}
+        <text x={548} y={214} fontSize={10} fill="#3f6600">все Р без замечаний → AP</text>
       </svg>
+      <Typography.Paragraph type="secondary" style={{ margin: "8px 0 0", fontSize: 12 }}>
+        <b>ЛР</b> — лидер-ревьювер заказчика (сводит замечания и ставит код AP). <b>Р</b> — ревьювер-специалист
+        (даёт замечания или отмечает «рассмотрено без замечаний»). <b>CRS</b> — свод замечаний, направляемый подрядчику.
+      </Typography.Paragraph>
     </div>
   );
 }
 
 // ----------------------------------------------------------------- матрица прав
 interface MatrixRow {
-  key: string; process: string; tdoLead: boolean; developer: boolean; ownerLr: boolean; ownerReviewer: boolean;
+  key: string; process: string; tdoLead: boolean; developer: boolean; ownerLr: boolean; ownerReviewer: boolean; observer: boolean;
 }
 const matrixRows: MatrixRow[] = [
-  { key: "p1", process: "Создание документа в МДР (PD и SE)", tdoLead: true, developer: false, ownerLr: false, ownerReviewer: false },
-  { key: "p2", process: "Создание ревизии и загрузка PDF", tdoLead: true, developer: true, ownerLr: false, ownerReviewer: false },
-  { key: "p3", process: "Отправка ревизии в ревью (очередь ТРМ)", tdoLead: true, developer: false, ownerLr: false, ownerReviewer: false },
-  { key: "p4", process: "Создание замечаний к PDF", tdoLead: false, developer: false, ownerLr: true, ownerReviewer: true },
-  { key: "p5", process: "Согласование/отклонение замечаний", tdoLead: false, developer: false, ownerLr: true, ownerReviewer: false },
-  { key: "p6", process: "CRS: сбор и отправка подрядчику", tdoLead: false, developer: false, ownerLr: true, ownerReviewer: false },
-  { key: "p7", process: "Ответ на замечания (A / I)", tdoLead: true, developer: true, ownerLr: false, ownerReviewer: false },
-  { key: "p8", process: "Carry-over решения и код AP", tdoLead: false, developer: false, ownerLr: true, ownerReviewer: false },
-  { key: "p9", process: "Отчётность", tdoLead: false, developer: false, ownerLr: true, ownerReviewer: true },
+  { key: "p1", process: "Создание документа в МДР (PD и SE)", tdoLead: true, developer: false, ownerLr: false, ownerReviewer: false, observer: false },
+  { key: "p2", process: "Создание ревизии и загрузка PDF", tdoLead: true, developer: true, ownerLr: false, ownerReviewer: false, observer: false },
+  { key: "p3", process: "Отправка ревизии в ревью (очередь ТРМ)", tdoLead: true, developer: false, ownerLr: false, ownerReviewer: false, observer: false },
+  { key: "p4", process: "Создание замечаний к PDF", tdoLead: false, developer: false, ownerLr: true, ownerReviewer: true, observer: false },
+  { key: "p4a", process: "Отметка «рассмотрено без замечаний» (R)", tdoLead: false, developer: false, ownerLr: true, ownerReviewer: true, observer: false },
+  { key: "p5", process: "Согласование/отклонение замечаний", tdoLead: false, developer: false, ownerLr: true, ownerReviewer: false, observer: false },
+  { key: "p6", process: "CRS: сбор и отправка подрядчику", tdoLead: false, developer: false, ownerLr: true, ownerReviewer: false, observer: false },
+  { key: "p7", process: "Ответ на замечания (A / I)", tdoLead: true, developer: true, ownerLr: false, ownerReviewer: false, observer: false },
+  { key: "p8", process: "Carry-over решения и код AP", tdoLead: false, developer: false, ownerLr: true, ownerReviewer: false, observer: false },
+  { key: "p9", process: "Просмотр реестра, ревизий, замечаний", tdoLead: true, developer: true, ownerLr: true, ownerReviewer: true, observer: true },
+  { key: "p10", process: "Выгрузка замечаний в Excel", tdoLead: true, developer: true, ownerLr: true, ownerReviewer: true, observer: true },
+  { key: "p11", process: "Отчётность", tdoLead: false, developer: false, ownerLr: true, ownerReviewer: true, observer: false },
 ];
 const yesNo = (v: boolean): JSX.Element => (v ? <Tag color="green">Да</Tag> : <Tag color="red">Нет</Tag>);
 const matrixColumns: ColumnsType<MatrixRow> = [
-  { title: "Процесс", dataIndex: "process", key: "process", width: 320 },
+  { title: "Процесс", dataIndex: "process", key: "process", width: 300 },
   { title: "Рук. ТДО подрядчика", dataIndex: "tdoLead", key: "tdoLead", render: yesNo },
   { title: "Разработчик", dataIndex: "developer", key: "developer", render: yesNo },
   { title: "LR заказчика", dataIndex: "ownerLr", key: "ownerLr", render: yesNo },
   { title: "R заказчика", dataIndex: "ownerReviewer", key: "ownerReviewer", render: yesNo },
+  { title: "Наблюдатель", dataIndex: "observer", key: "observer", render: yesNo },
 ];
 
 // ----------------------------------------------------------------- треки ролей
@@ -254,6 +277,22 @@ function RTrack(): JSX.Element {
   );
 }
 
+function ObserverTrack(): JSX.Element {
+  return (
+    <Space direction="vertical" size={16} style={{ width: "100%" }}>
+      <Card title="Наблюдатель — доступ только на просмотр" size="small">
+        <ProcMeta goal="Видеть весь ход работ по проекту без права что-либо менять" who="Наблюдатель (участник проекта без роли в матрице)" where="Проекты · Документы · Отчётность" />
+        <Steppo steps={[
+          { title: "Что видно", body: <>Весь реестр документов проекта, ревизии, замечания и ответы, статусы и дедлайны — в режиме чтения. Никакие изменения недоступны.</>, tip: "Наблюдатель видит документы независимо от статуса ревизии — в отличие от ролей заказчика, которым видно только переданное на рассмотрение." },
+          { title: "Как стать наблюдателем", body: <>Администратор добавляет человека участником проекта <b>без назначения роли</b> в матрице. Пока в матрице нет строки LR/R для этого сотрудника — он наблюдатель.</> },
+          { title: "Как получить право действий", body: <>Как только администратор назначает сотрудника <b>LR</b> или <b>R</b> по дисциплине в матрице назначений — у него появляются кнопки замечаний / согласования. Отдельные «галочки прав» выдавать не нужно: назначение в матрице само даёт права.</>, tip: "Убрали дублирование: раньше нужны были и роль в матрице, и отдельный флаг права — теперь достаточно матрицы." },
+          { title: "Выгрузки", body: <>Кнопка <Kbd>Выгрузить замечания (Excel)</Kbd> во вкладке «Документы» доступна и наблюдателю — по проектам, где он участник.</> },
+        ]} />
+      </Card>
+    </Space>
+  );
+}
+
 function AdminTrack(): JSX.Element {
   return (
     <Space direction="vertical" size={16} style={{ width: "100%" }}>
@@ -309,6 +348,7 @@ export default function HelpPage({ currentUser }: Props): JSX.Element {
             { key: "developer", label: "Разработчик", children: <DeveloperTrack /> },
             { key: "owner-lr", label: "LR заказчика", children: <LrTrack /> },
             { key: "owner-r", label: "R заказчика", children: <RTrack /> },
+            { key: "observer", label: "Наблюдатель", children: <ObserverTrack /> },
             { key: "admin", label: "Администратор", children: <AdminTrack /> },
           ]}
         />

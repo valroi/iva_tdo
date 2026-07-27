@@ -450,6 +450,40 @@ class ReviewEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 
 
+class CommentAudit(Base):
+    """Append-only снимок каждого замечания при создании и изменении.
+
+    Физический журнал: даже если строку в `comments` потом изменят или удалят,
+    здесь остаётся полная история (текст, автор, статус, даты, CRS) — можно
+    восстановить данные. Пишется автоматически SQLAlchemy-хуком на любой
+    insert/update Comment, без правки бизнес-логики эндпоинтов. Только запись,
+    никогда не обновляется и не удаляется приложением.
+    """
+
+    __tablename__ = "comment_audit"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    comment_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    action: Mapped[str] = mapped_column(String(10), nullable=False)  # INSERT | UPDATE
+    revision_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    parent_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    document_num: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, index=True)
+    project_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    revision_code: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    author_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    author_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+    review_code: Mapped[Optional[str]] = mapped_column(String(4), nullable=True)
+    contractor_status: Mapped[Optional[str]] = mapped_column(String(4), nullable=True)
+    in_crs: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    crs_number: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
+    is_published_to_contractor: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    comment_created_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
 class RevisionReviewerState(Base):
     """Текущее состояние конкретного ревьювера (R/LR) по ревизии.
 

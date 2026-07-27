@@ -433,6 +433,14 @@ export async function downloadReviewActionsReport(params: {
   downloadBlob(blob, `review-actions.xlsx`);
 }
 
+export async function downloadCommentsExport(params: { project_code?: string | null; document_num?: string | null } = {}): Promise<void> {
+  const qs = new URLSearchParams();
+  if (params.project_code) qs.set("project_code", params.project_code);
+  if (params.document_num) qs.set("document_num", params.document_num);
+  const blob = await requestBlob(`/reports/comments-export.xlsx?${qs.toString()}`);
+  downloadBlob(blob, `comments-export.xlsx`);
+}
+
 export interface ReviewFlags {
   nc_locks_commenting: boolean;
 }
