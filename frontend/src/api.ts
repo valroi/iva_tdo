@@ -177,6 +177,16 @@ export function createMdr(payload: Record<string, unknown>): Promise<MDRRecord> 
   });
 }
 
+export function createChildMdr(
+  parentId: number,
+  payload: { doc_name: string; doc_weight?: number; planned_dev_start?: string | null; serial?: string | null },
+): Promise<MDRRecord> {
+  return request<MDRRecord>(`/mdr/${parentId}/child`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function updateMdr(mdrId: number, payload: Record<string, unknown>): Promise<MDRRecord> {
   return request<MDRRecord>(`/mdr/${mdrId}`, {
     method: "PUT",

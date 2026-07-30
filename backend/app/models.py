@@ -242,6 +242,10 @@ class MDRRecord(Base):
     doc_type: Mapped[str] = mapped_column(String(50), nullable=False)
     serial_number: Mapped[str] = mapped_column(String(50), nullable=False)
     doc_number: Mapped[str] = mapped_column(String(120), unique=True, nullable=False, index=True)
+    # Вложенный документ (напр. программа изысканий под финальным отчётом):
+    # шифр = шифр родителя + "-" + порядковый; своя карточка и тот же цикл
+    # рассмотрения. NULL — обычный документ верхнего уровня.
+    parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("mdr_records.id"), nullable=True, index=True)
 
     doc_name: Mapped[str] = mapped_column(String(255), nullable=False)
     planned_dev_start: Mapped[Optional[date]] = mapped_column(Date, nullable=True)

@@ -472,13 +472,34 @@ export default function ProjectsPage({
                 }, {}),
               ).map(([category, items]) => {
                 const usedWeight = items.reduce((sum, item) => sum + Number(item.doc_weight || 0), 0);
+                // Вложенные документы (программы изысканий и т.п.) показываем
+                // раскрываемой веткой под родителем, а не отдельными строками.
+                const childrenByParent = new Map<number, typeof items>();
+                for (const item of items) {
+                  if (item.parent_id != null) {
+                    const list = childrenByParent.get(item.parent_id) ?? [];
+                    list.push(item);
+                    childrenByParent.set(item.parent_id, list);
+                  }
+                }
+                const topLevel = items.filter((item) => item.parent_id == null);
                 return {
                   key: `category-${category}`,
                   title: treeTitle(`${category} (вес: ${usedWeight.toFixed(1)} / 1000)`, 300),
-                  children: items.map((item) => ({
-                    key: `mdr-${item.id}`,
-                    title: treeTitle(`${item.doc_number} - ${item.doc_name}`),
-                  })),
+                  children: topLevel.map((item) => {
+                    const kids = childrenByParent.get(item.id) ?? [];
+                    const parentLabel = kids.length
+                      ? `${item.doc_number} - ${item.doc_name}  (вложений: ${kids.length})`
+                      : `${item.doc_number} - ${item.doc_name}`;
+                    return {
+                      key: `mdr-${item.id}`,
+                      title: treeTitle(parentLabel),
+                      children: kids.map((kid) => ({
+                        key: `mdr-${kid.id}`,
+                        title: treeTitle(`↳ ${kid.doc_number} - ${kid.doc_name}`, 520),
+                      })),
+                    };
+                  }),
                 };
               }),
             },

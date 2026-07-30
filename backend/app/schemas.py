@@ -216,10 +216,20 @@ class MDRBase(BaseModel):
     owner_responsible_id: int | None = None
     note: str | None = None
     is_confidential: bool = False
+    parent_id: int | None = None
 
 
 class MDRCreate(MDRBase):
     pass
+
+
+class MDRChildCreate(BaseModel):
+    """Вложенный документ под родительским (напр. программа изысканий).
+    Наследует шифровочные поля родителя; шифр = шифр родителя + "-" + номер."""
+    doc_name: str
+    doc_weight: float = 0
+    planned_dev_start: date | None = None
+    serial: str | None = None  # если пусто — авто (следующий среди детей)
 
 
 class MDRUpdate(BaseModel):
@@ -234,6 +244,7 @@ class MDRUpdate(BaseModel):
     doc_type: str | None = None
     serial_number: str | None = None
     doc_number: str | None = None
+    parent_id: int | None = None
     doc_name: str | None = None
     planned_dev_start: date | None = None
     progress_percent: float | None = None

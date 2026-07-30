@@ -64,6 +64,7 @@ export interface MDRRecord {
   review_code: "AP" | "AN" | "CO" | "RJ" | null;
   status: string;
   dates?: Record<string, unknown>;
+  parent_id?: number | null;
   created_at: string;
 }
 

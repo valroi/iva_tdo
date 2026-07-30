@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   checkMdrCipher,
   composeMdrCipher,
+  createChildMdr,
   createDocument,
   createMdr,
   downloadMdrTemplate,
@@ -43,6 +44,9 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
   const [editingHistoryLines, setEditingHistoryLines] = useState<string[]>([]);
   const [deletingMdrId, setDeletingMdrId] = useState<number | null>(null);
   const [deletingMdrLoading, setDeletingMdrLoading] = useState(false);
+  const [childParent, setChildParent] = useState<MDRRecord | null>(null);
+  const [childSubmitting, setChildSubmitting] = useState(false);
+  const [childForm] = Form.useForm();
   const normalizePdCipher = (value: string): string => {
     const raw = String(value || "").trim().toUpperCase();
     // Схема со сжатым разделом/книгой — только у PD. У SE и остальных
@@ -157,19 +161,23 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
       dataIndex: "doc_number",
       key: "doc_number",
       width: 280,
-      render: (value: string) => (
-        <Button
-          type="link"
-          style={{ padding: 0 }}
-          onClick={() => onOpenDocument?.(normalizePdCipher(value))}
-        >
-          <Typography.Text
-            ellipsis={{ tooltip: normalizePdCipher(value) }}
-            style={{ whiteSpace: "nowrap", display: "inline-block", maxWidth: 260 }}
+      render: (value: string, row: MDRRecord) => (
+        <Space size={4} style={{ paddingLeft: row.parent_id ? 16 : 0 }}>
+          {row.parent_id ? <Typography.Text type="secondary">↳</Typography.Text> : null}
+          <Button
+            type="link"
+            style={{ padding: 0 }}
+            onClick={() => onOpenDocument?.(normalizePdCipher(value))}
           >
-            {normalizePdCipher(value)}
-          </Typography.Text>
-        </Button>
+            <Typography.Text
+              ellipsis={{ tooltip: normalizePdCipher(value) }}
+              style={{ whiteSpace: "nowrap", display: "inline-block", maxWidth: row.parent_id ? 240 : 260 }}
+            >
+              {normalizePdCipher(value)}
+            </Typography.Text>
+          </Button>
+          {row.parent_id ? <Tag color="geekblue" style={{ marginInlineStart: 0 }}>вложенный</Tag> : null}
+        </Space>
       ),
     },
     { title: "Проект", dataIndex: "project_code", key: "project_code" },
@@ -204,7 +212,7 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
           {
             title: "Действие",
             key: "action",
-            width: 210,
+            width: 320,
             render: (_: unknown, row: MDRRecord) => (
               <Space>
                 <Button
@@ -239,6 +247,19 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
                 >
                   Открыть / Ред.
                 </Button>
+                {/* Вложенный документ (напр. программа изысканий) — только под
+                    документом верхнего уровня, не под другим вложенным. */}
+                {!row.parent_id && (
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      childForm.resetFields();
+                      setChildParent(row);
+                    }}
+                  >
+                    + Вложенный
+                  </Button>
+                )}
                 {isAdmin && (
                   <Button
                     size="small"
@@ -871,6 +892,59 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
         }}
       >
         Будут удалены связанные документы/ревизии/комментарии.
+      </Modal>
+
+      <Modal
+        open={childParent !== null}
+        title={childParent ? `Вложенный документ под ${childParent.doc_number}` : "Вложенный документ"}
+        okText="Создать вложенный"
+        cancelText="Отмена"
+        okButtonProps={{ loading: childSubmitting }}
+        onCancel={() => {
+          setChildParent(null);
+          childForm.resetFields();
+        }}
+        onOk={async () => {
+          if (!childParent) return;
+          const values = await childForm.validateFields();
+          setChildSubmitting(true);
+          try {
+            await createChildMdr(childParent.id, {
+              doc_name: values.doc_name,
+              doc_weight: values.doc_weight ?? 0,
+              planned_dev_start: values.planned_dev_start || null,
+              serial: values.serial || null,
+            });
+            message.success("Вложенный документ создан");
+            setChildParent(null);
+            childForm.resetFields();
+            await onCreated();
+          } catch (error) {
+            message.error(error instanceof Error ? error.message : "Не удалось создать вложенный документ");
+          } finally {
+            setChildSubmitting(false);
+          }
+        }}
+      >
+        <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
+          Часть большего документа (напр. программа изысканий под отчётом). Шифр, категория,
+          дисциплина и порядок рассмотрения — как у родителя; шифр = <b>{childParent?.doc_number ?? "…"}-NN</b>.
+          Наименование — своё.
+        </Typography.Paragraph>
+        <Form form={childForm} layout="vertical">
+          <Form.Item name="doc_name" label="Наименование вложенного документа" rules={[{ required: true, message: "Укажите наименование" }]}>
+            <Input placeholder="Программа инженерно-геодезических изысканий" />
+          </Form.Item>
+          <Form.Item name="serial" label="Порядковый номер (необязательно, авто)" tooltip="1-4 символа. Пусто — следующий свободный (01, 02, …)">
+            <Input placeholder="авто" maxLength={4} />
+          </Form.Item>
+          <Form.Item name="doc_weight" label="Вес (в бюджете категории)">
+            <InputNumber min={0} style={{ width: "100%" }} placeholder="0" />
+          </Form.Item>
+          <Form.Item name="planned_dev_start" label="План выдачи ревизии A">
+            <Input type="date" />
+          </Form.Item>
+        </Form>
       </Modal>
     </>
   );

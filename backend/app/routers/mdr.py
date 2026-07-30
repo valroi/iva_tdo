@@ -32,6 +32,7 @@ from app.schemas import (
     CipherTemplateFieldRead,
     CipherTemplateRead,
     CipherTemplateUpsert,
+    MDRChildCreate,
     MDRCreate,
     MDRRead,
     MDRUpdate,
@@ -423,6 +424,98 @@ def create_mdr(
     db.commit()
     db.refresh(mdr)
     return mdr
+
+
+@router.post("/{parent_id}/child", response_model=MDRRead, status_code=status.HTTP_201_CREATED)
+def create_child_mdr(
+    parent_id: int,
+    payload: MDRChildCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permissions("can_create_mdr")),
+):
+    """Вложенный документ под родительским (напр. программа изысканий под
+    отчётом). Шифровочные поля берём у родителя, шифр = шифр родителя + "-" +
+    порядковый. Создаёт и MDRRecord, и Document — чтобы карточка и цикл
+    рассмотрения работали так же, как у обычного документа."""
+    parent = db.query(MDRRecord).filter(MDRRecord.id == parent_id).first()
+    if parent is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Parent MDR not found")
+    if parent.parent_id is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Вложенность только один уровень (нельзя под вложенным)")
+
+    # Порядковый номер ребёнка: задан или авто = следующий среди детей.
+    serial = (payload.serial or "").strip()
+    if serial:
+        if not re.fullmatch(r"[A-Za-z0-9]{1,4}", serial):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="serial: 1-4 буквы/цифры")
+    else:
+        siblings = db.query(MDRRecord.serial_number).filter(MDRRecord.parent_id == parent.id).all()
+        max_idx = 0
+        for row in siblings:
+            raw = (row[0] or "").strip()
+            if raw.isdigit():
+                max_idx = max(max_idx, int(raw))
+        serial = str(max_idx + 1).zfill(2)
+
+    child_doc_number = f"{parent.doc_number}-{serial}"
+    exists_cipher = (
+        db.query(MDRRecord.id)
+        .filter(MDRRecord.project_code == parent.project_code, MDRRecord.doc_number == child_doc_number)
+        .first()
+    )
+    if exists_cipher:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Вложенный документ {child_doc_number} уже существует")
+
+    # Уникальный document_key (DOC-XXXX).
+    max_key = 0
+    for (key,) in db.query(MDRRecord.document_key).all():
+        m = re.fullmatch(r"DOC-(\d+)", (key or "").upper())
+        if m:
+            max_key = max(max_key, int(m.group(1)))
+    document_key = f"DOC-{str(max_key + 1).zfill(4)}"
+
+    _validate_weight_limit(
+        db,
+        project_code=parent.project_code,
+        category=parent.category.upper(),
+        new_weight=payload.doc_weight or 0,
+    )
+
+    child = MDRRecord(
+        document_key=document_key,
+        project_code=parent.project_code,
+        originator_code=parent.originator_code,
+        category=parent.category,
+        title_object=parent.title_object,
+        discipline_code=parent.discipline_code,
+        doc_type=parent.doc_type,
+        serial_number=serial,
+        doc_number=child_doc_number,
+        parent_id=parent.id,
+        doc_name=payload.doc_name,
+        planned_dev_start=payload.planned_dev_start,
+        progress_percent=0,
+        doc_weight=payload.doc_weight or 0,
+        dates={},
+        status="DRAFT",
+        is_confidential=parent.is_confidential,
+    )
+    db.add(child)
+    db.flush()
+
+    db.add(
+        Document(
+            mdr_id=child.id,
+            document_num=child_doc_number,
+            title=payload.doc_name,
+            discipline=parent.discipline_code,
+            weight=payload.doc_weight or 0,
+            created_by_id=current_user.id,
+        )
+    )
+    db.commit()
+    db.refresh(child)
+    return child
 
 
 @router.put("/{mdr_id}", response_model=MDRRead)
