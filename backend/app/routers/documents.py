@@ -311,7 +311,12 @@ def _is_contractor_developer_for_project(
         )
         .first()
     )
-    return member is not None and member.member_role == ProjectMemberRole.contractor_member
+    # Доп. файлы (редактируемые исходники) грузит подрядчик: разработчик
+    # (contractor_member) и рук. ТДО подрядчика (contractor_tdo_lead).
+    return member is not None and member.member_role in (
+        ProjectMemberRole.contractor_member,
+        ProjectMemberRole.contractor_tdo_lead,
+    )
 
 
 def _comment_read(
@@ -1291,7 +1296,7 @@ def upload_document_attachment(
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     if not _is_contractor_developer_for_project(db, current_user=current_user, project_id=project.id):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only contractor developer can upload extra files")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only contractor (developer or TDO lead) can upload extra files")
     original_name = file.filename or "attachment.bin"
     safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(original_name).name)
     destination_dir = UPLOAD_ROOT / "attachments" / str(document.id)
@@ -1330,7 +1335,7 @@ def upload_revision_attachment(
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     if not _is_contractor_developer_for_project(db, current_user=current_user, project_id=project.id):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only contractor developer can upload extra files")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only contractor (developer or TDO lead) can upload extra files")
     original_name = file.filename or "attachment.bin"
     safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(original_name).name)
     destination_dir = UPLOAD_ROOT / "attachments" / str(document.id) / str(revision.id)
@@ -2472,6 +2477,20 @@ def make_tdo_decision(
 
     note = (payload.note or "").strip()
     if payload.action == "SEND_TO_OWNER":
+        # Идемпотентность отправки. Раньше повторный клик по «В TRM» (двойной
+        # клик, повторный вызов) на уже отправленной ревизии заново плодил
+        # уведомления TDO_SENT_TO_OWNER и записи журнала SENT_TO_OWNER, а также
+        # ПЕРЕВЫДАВАЛ trm_number через _next_trm_number — отсюда «задвоение»
+        # уведомлений и скачки нумерации ТРМ. Отправить можно только ревизию,
+        # реально ждущую отправки (PDF загружен, статус UPLOADED_WAITING_TDO).
+        if revision.status == "UNDER_REVIEW":
+            db.refresh(revision)
+            return revision  # уже отправлена — ничего не делаем
+        if revision.status != "UPLOADED_WAITING_TDO":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Ревизию нельзя отправить на рассмотрение: ожидается загрузка PDF",
+            )
         receiver_code = _project_reference_value(
             db,
             project_id=project.id,
@@ -2639,6 +2658,16 @@ def make_tdo_bulk_decision(
         project = projects_by_code[mdr.project_code]
 
         if payload.action == "SEND_TO_OWNER":
+            # Идемпотентность (см. одиночный tdo-decision): уже отправленную
+            # ревизию пропускаем — не плодим уведомления/журнал и не
+            # перевыдаём общий TRM-номер. Невалидное состояние (нет PDF) — 409.
+            if revision.status == "UNDER_REVIEW":
+                continue
+            if revision.status != "UPLOADED_WAITING_TDO":
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Ревизию нельзя отправить на рассмотрение: ожидается загрузка PDF",
+                )
             if shared_trm_number is None:
                 receiver_code = _project_reference_value(
                     db,

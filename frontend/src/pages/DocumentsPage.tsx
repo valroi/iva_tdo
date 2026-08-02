@@ -115,6 +115,9 @@ export default function DocumentsPage({
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const [attachmentUploadBusy, setAttachmentUploadBusy] = useState(false);
   const [attachmentsModalOpen, setAttachmentsModalOpen] = useState(false);
+  // Ревизия, которую прямо сейчас отправляем в TRM — блокирует повторный клик
+  // (двойная отправка раньше плодила уведомления и перевыдавала TRM-номер).
+  const [tdoSendingId, setTdoSendingId] = useState<number | null>(null);
 
   const [revModalOpen, setRevModalOpen] = useState(false);
   const [pdfAnnotatorOpen, setPdfAnnotatorOpen] = useState(false);
@@ -190,7 +193,10 @@ export default function DocumentsPage({
     () => projectMembers.find((m) => m.user_id === currentUser.id)?.member_role ?? null,
     [projectMembers, currentUser.id],
   );
-  const canUploadDocumentAttachments = currentMemberRole === "contractor_member";
+  // Доп. файлы (редактируемые исходники) грузит подрядчик: разработчик
+  // (contractor_member) и рук. ТДО подрядчика (contractor_tdo_lead).
+  const canUploadDocumentAttachments =
+    currentMemberRole === "contractor_member" || currentMemberRole === "contractor_tdo_lead";
   const canManageCarryOver = currentUser.role === "admin" || currentUser.company_type === "owner";
   const selectedRevision = useMemo(
     () => revisions.find((item) => item.id === selectedRevisionId) ?? null,
@@ -870,17 +876,32 @@ export default function DocumentsPage({
               PDF
             </Button>
           )}
-          {isContractor(currentUser) && currentUser.permissions.can_process_tdo_queue && (
+          {/* Отправить в TRM / отклонить можно только ревизию, реально
+              ждущую решения ТДО (PDF загружен). После отправки статус
+              становится UNDER_REVIEW и кнопки исчезают — это (вместе с
+              бэкенд-гардом) не даёт переотправить и «сжечь» TRM-номер. */}
+          {isContractor(currentUser) &&
+            currentUser.permissions.can_process_tdo_queue &&
+            row.status === "UPLOADED_WAITING_TDO" && (
             <>
               <Button
                 size="small"
                 type="primary"
-                disabled={selectedDocumentCompleted}
+                loading={tdoSendingId === row.id}
+                disabled={selectedDocumentCompleted || tdoSendingId !== null}
                 onClick={async () => {
-                  await processRevisionTdoDecision(row.id, { action: "SEND_TO_OWNER" });
-                  message.success("Ревизия отправлена заказчику");
-                  if (selectedDocumentId) {
-                    setRevisions(await listRevisions(selectedDocumentId));
+                  if (tdoSendingId !== null) return;
+                  setTdoSendingId(row.id);
+                  try {
+                    await processRevisionTdoDecision(row.id, { action: "SEND_TO_OWNER" });
+                    message.success("Ревизия отправлена заказчику");
+                    if (selectedDocumentId) {
+                      setRevisions(await listRevisions(selectedDocumentId));
+                    }
+                  } catch (error) {
+                    message.error(error instanceof Error ? error.message : "Не удалось отправить ревизию");
+                  } finally {
+                    setTdoSendingId(null);
                   }
                 }}
               >
@@ -1247,18 +1268,30 @@ export default function DocumentsPage({
             Выгрузить замечания (Excel)
           </Button>
         </Tooltip>
-        {/* Кнопка «+ Ревизия» появляется только когда подрядчик действительно
-            может создать ревизию: выбран документ, не завершён, и предыдущая
-            ревизия НЕ в работе. В остальных случаях кнопки нет совсем —
-            никакого disabled-«заигрывания», экран чистый. */}
+        {/* Кнопка «+ Ревизия» — для роли, которая создаёт ревизии (подрядчик).
+            Раньше при выбранном документе она молча ИСЧЕЗАЛА, если документ
+            завершён или предыдущая ревизия ещё в работе — и пользователь не
+            понимал, куда делась кнопка. Теперь при выбранном документе кнопка
+            всегда видна, но в этих случаях disabled с тултипом-причиной.
+            Для наблюдателя/заказчика кнопки нет совсем (создание — не их шаг). */}
         {canCreateRevision(currentUser) &&
           selectedDocumentId &&
-          !selectedDocumentCompleted &&
-          !latestRevisionInProgress && (
-          <Tooltip title="Создать новую ревизию для выбранного документа">
-            <Button onClick={() => setRevModalOpen(true)}>+ Ревизия</Button>
-          </Tooltip>
-        )}
+          (() => {
+            const disabledReason = selectedDocumentCompleted
+              ? "Документ завершён (AFD + AP) — новые ревизии закрыты"
+              : latestRevisionInProgress
+              ? "Текущая ревизия ещё в работе (на рассмотрении заказчика или в ответах) — сначала завершите её цикл"
+              : null;
+            return (
+              <Tooltip title={disabledReason ?? "Создать новую ревизию для выбранного документа"}>
+                <span>
+                  <Button disabled={Boolean(disabledReason)} onClick={() => setRevModalOpen(true)}>
+                    + Ревизия
+                  </Button>
+                </span>
+              </Tooltip>
+            );
+          })()}
         {isOwner(currentUser) && currentUser.permissions.can_raise_comments && (
           <Tooltip
             title={
@@ -1508,7 +1541,11 @@ export default function DocumentsPage({
                 onClick: () => setSelectedRevisionId(record.id),
                 style: { cursor: "pointer" },
               })}
-              locale={{ emptyText: "Ревизий пока нет. Создайте ревизию кнопкой '+ Ревизия'." }}
+              locale={{
+                emptyText: canCreateRevision(currentUser)
+                  ? "Ревизий пока нет. Создайте ревизию кнопкой '+ Ревизия'."
+                  : "Ревизий пока нет.",
+              }}
             />
           </Card>
         </Col>
