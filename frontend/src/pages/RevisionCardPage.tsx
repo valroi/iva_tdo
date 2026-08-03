@@ -400,22 +400,31 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
             на рассмотрении заказчика; для contractor/admin — всегда «Открыть»
             для просмотра. В прочих owner-статусах кнопка прячется целиком. */}
         {(() => {
-          const ownerCanShow = isOwner(currentUser)
+          // Наблюдатель (owner + member_role=observer, без матрицы) видит PDF
+          // read-only в ЛЮБОМ статусе — просмотрщик у него всегда активен, но
+          // без права комментировать. Обычный owner — только когда может
+          // добавлять замечания. Contractor/admin — всегда «Открыть».
+          const isObserver = Boolean(card?.is_observer);
+          const ownerCanShow = isObserver
+            ? true
+            : isOwner(currentUser)
             ? Boolean(canOwnerCreateRemarks) && canCommentOnSelectedRevision
             : true;
           if (!ownerCanShow) return null;
+          // Наблюдатель для просмотра не ограничен статусом «завершён» — он
+          // просто смотрит; блокировка documentCompleted нужна только тем, кто
+          // может редактировать.
+          const viewOnly = isObserver || currentUser.company_type === "contractor";
           return (
             <Tooltip
               title={
                 !selectedRevision?.file_path
                   ? "PDF ещё не загружен для этой ревизии"
+                  : viewOnly
+                  ? "Открыть PDF для просмотра"
                   : documentCompleted
                   ? "Документ финально согласован (AFD + AP) — редактирование закрыто"
-                  : currentUser.company_type === "contractor"
-                  ? "Открыть PDF для просмотра"
-                  : isOwner(currentUser)
-                  ? "Открыть PDF и добавить замечания"
-                  : "Открыть PDF для просмотра"
+                  : "Открыть PDF и добавить замечания"
               }
             >
               <Button
@@ -424,9 +433,9 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                   setPdfFocusCommentId(null);
                   setPdfAnnotatorOpen(true);
                 }}
-                disabled={!selectedRevision?.file_path || documentCompleted}
+                disabled={!selectedRevision?.file_path || (!viewOnly && documentCompleted)}
               >
-                {isOwner(currentUser) ? "Комментировать PDF" : "Открыть PDF"}
+                {isOwner(currentUser) && !isObserver ? "Комментировать PDF" : "Открыть PDF"}
               </Button>
             </Tooltip>
           );

@@ -115,12 +115,24 @@ def _observer_project_codes(db: Session, current_user: User) -> set[str]:
     return {row[0] for row in rows}
 
 
-def _owner_can_access_revision(current_user: User, revision: Revision) -> bool:
+def _owner_can_access_revision(db: Session, current_user: User, revision: Revision) -> bool:
     if current_user.role.value == "admin":
         return True
     if current_user.company_type != CompanyType.owner:
         return True
-    return revision.status in OWNER_VISIBLE_REVISION_STATUSES
+    if revision.status in OWNER_VISIBLE_REVISION_STATUSES:
+        return True
+    # Наблюдатель (member_role=observer) видит весь реестр проекта read-only —
+    # ревизии в ЛЮБЫХ статусах (ещё не переданные на рассмотрение, отклонённые
+    # ТДО, завершённые). Действий у него нет: замечания/решения гейтятся
+    # правами и матрицей рассмотрения, где наблюдателя нет.
+    observer_codes = _observer_project_codes(db, current_user)
+    if observer_codes:
+        doc = db.query(Document).filter(Document.id == revision.document_id).first()
+        mdr = db.query(MDRRecord).filter(MDRRecord.id == doc.mdr_id).first() if doc else None
+        if mdr and mdr.project_code in observer_codes:
+            return True
+    return False
 
 
 def _is_completed_document(db: Session, document_id: int) -> bool:
@@ -1256,7 +1268,7 @@ def list_document_attachments(
         .order_by(Revision.id.desc())
         .first()
     )
-    if latest_revision is not None and not _owner_can_access_revision(current_user, latest_revision):
+    if latest_revision is not None and not _owner_can_access_revision(db, current_user, latest_revision):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
     items = (
         db.query(DocumentAttachment)
@@ -1285,7 +1297,7 @@ def list_revision_attachments(
     revision = db.query(Revision).filter(Revision.id == revision_id).first()
     if revision is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
-    if not _owner_can_access_revision(current_user, revision):
+    if not _owner_can_access_revision(db, current_user, revision):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
     items = (
         db.query(DocumentAttachment)
@@ -1388,7 +1400,7 @@ def download_document_attachments_archive(
         .order_by(Revision.id.desc())
         .first()
     )
-    if latest_revision is not None and not _owner_can_access_revision(current_user, latest_revision):
+    if latest_revision is not None and not _owner_can_access_revision(db, current_user, latest_revision):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
     attachments = db.query(DocumentAttachment).filter(DocumentAttachment.document_id == document.id).all()
     if not attachments:
@@ -1417,7 +1429,7 @@ def download_revision_attachments_archive(
     revision = db.query(Revision).filter(Revision.id == revision_id).first()
     if revision is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
-    if not _owner_can_access_revision(current_user, revision):
+    if not _owner_can_access_revision(db, current_user, revision):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
     document = db.query(Document).filter(Document.id == revision.document_id).first()
     if document is None:
@@ -1449,7 +1461,7 @@ def get_revision_file(
     revision = db.query(Revision).filter(Revision.id == revision_id).first()
     if revision is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
-    if not _owner_can_access_revision(current_user, revision):
+    if not _owner_can_access_revision(db, current_user, revision):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
     if not revision.file_path:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PDF file is not attached")
@@ -1523,7 +1535,7 @@ def list_comment_attachments(
     if comment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found")
     revision = db.query(Revision).filter(Revision.id == comment.revision_id).first()
-    if revision is None or not _owner_can_access_revision(current_user, revision):
+    if revision is None or not _owner_can_access_revision(db, current_user, revision):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found")
     items = (
         db.query(CommentAttachment)
@@ -1548,7 +1560,7 @@ def get_comment_attachment_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
     comment = db.query(Comment).filter(Comment.id == item.comment_id).first()
     revision = db.query(Revision).filter(Revision.id == comment.revision_id).first() if comment else None
-    if revision is None or not _owner_can_access_revision(current_user, revision):
+    if revision is None or not _owner_can_access_revision(db, current_user, revision):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
     path = Path(item.file_path).resolve()
     allowed_roots = {UPLOAD_ROOT.resolve(), *LEGACY_UPLOAD_ROOTS}
@@ -1721,7 +1733,7 @@ def get_revision_annotated_pdf(
     revision = db.query(Revision).filter(Revision.id == revision_id).first()
     if revision is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
-    if not _owner_can_access_revision(current_user, revision):
+    if not _owner_can_access_revision(db, current_user, revision):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
     if not revision.file_path:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PDF file is not attached")
@@ -1814,7 +1826,7 @@ def get_revision(revision_id: int, db: Session = Depends(get_db), current_user: 
     rev = db.query(Revision).filter(Revision.id == revision_id).first()
     if not rev:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
-    if not _owner_can_access_revision(current_user, rev):
+    if not _owner_can_access_revision(db, current_user, rev):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
     return rev
 
@@ -1829,7 +1841,7 @@ def set_revision_review_code(
     revision = db.query(Revision).filter(Revision.id == revision_id).first()
     if revision is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
-    if not _owner_can_access_revision(current_user, revision):
+    if not _owner_can_access_revision(db, current_user, revision):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
     if payload.review_code != ReviewCode.AP:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only AP is supported")
@@ -2106,7 +2118,7 @@ def get_revision_reviewer_states(
     revision = db.query(Revision).filter(Revision.id == revision_id).first()
     if revision is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
-    if not _owner_can_access_revision(current_user, revision):
+    if not _owner_can_access_revision(db, current_user, revision):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
     _document, mdr, project = _revision_context(db, revision)
     return _build_reviewer_summary(db, revision, project, _matrix_discipline(mdr), current_user)
@@ -2121,7 +2133,7 @@ def list_revision_events(
     revision = db.query(Revision).filter(Revision.id == revision_id).first()
     if revision is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
-    if not _owner_can_access_revision(current_user, revision):
+    if not _owner_can_access_revision(db, current_user, revision):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
     events = (
         db.query(ReviewEvent)
@@ -2471,7 +2483,7 @@ def list_carry_decisions(
     revision = db.query(Revision).filter(Revision.id == revision_id).first()
     if revision is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
-    if not _owner_can_access_revision(current_user, revision):
+    if not _owner_can_access_revision(db, current_user, revision):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
     if current_user.role.value != "admin" and current_user.company_type != CompanyType.owner:
         return []
@@ -2497,7 +2509,7 @@ def upsert_carry_decision(
     revision = db.query(Revision).filter(Revision.id == revision_id).first()
     if revision is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
-    if not _owner_can_access_revision(current_user, revision):
+    if not _owner_can_access_revision(db, current_user, revision):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
     if current_user.role.value != "admin" and current_user.company_type != CompanyType.owner:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only owner can confirm carry-over")
@@ -3138,7 +3150,7 @@ def list_comments(
     rev = db.query(Revision).filter(Revision.id == revision_id).first()
     if not rev:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
-    if not _owner_can_access_revision(current_user, rev):
+    if not _owner_can_access_revision(db, current_user, rev):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
 
     query = db.query(Comment, User).outerjoin(User, User.id == Comment.author_id).filter(Comment.revision_id == revision_id)
@@ -3239,7 +3251,7 @@ def add_comment_to_crs(
     revision = db.query(Revision).filter(Revision.id == comment.revision_id).first()
     if revision is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
-    if not _owner_can_access_revision(current_user, revision):
+    if not _owner_can_access_revision(db, current_user, revision):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
     _ensure_revision_not_locked_by_ap(revision)
     document, mdr, project = _ensure_lr_can_publish_for_revision(db, current_user=current_user, revision=revision)
@@ -3471,7 +3483,7 @@ def create_comment(
     rev = db.query(Revision).filter(Revision.id == payload.revision_id).first()
     if not rev:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
-    if not _owner_can_access_revision(current_user, rev):
+    if not _owner_can_access_revision(db, current_user, rev):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
     if _is_completed_document(db, rev.document_id):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Document is completed (AFD+AP); commenting is locked")
@@ -3616,7 +3628,7 @@ def respond_comment(
     if _is_completed_document(db, revision.document_id):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Document is completed (AFD+AP); commenting is locked")
     _ensure_revision_not_locked_by_ap(revision)
-    if not _owner_can_access_revision(current_user, revision):
+    if not _owner_can_access_revision(db, current_user, revision):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
 
     response = Comment(
@@ -3753,9 +3765,9 @@ def publish_comment_to_contractor(
     revision = db.query(Revision).filter(Revision.id == comment.revision_id).first()
     if revision is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
-    if not _owner_can_access_revision(current_user, revision):
+    if not _owner_can_access_revision(db, current_user, revision):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
-    if not _owner_can_access_revision(current_user, revision):
+    if not _owner_can_access_revision(db, current_user, revision):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
     document = db.query(Document).filter(Document.id == revision.document_id).first()
     if document is None:
@@ -4142,7 +4154,7 @@ def get_revision_card(
     revision = db.query(Revision).filter(Revision.id == revision_id).first()
     if revision is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
-    if not _owner_can_access_revision(current_user, revision):
+    if not _owner_can_access_revision(db, current_user, revision):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
     document = db.query(Document).filter(Document.id == revision.document_id).first()
     if document is None:
@@ -4306,6 +4318,7 @@ def get_revision_card(
         actual_progress_percent=actual_progress,
         can_current_user_raise_comments=can_owner_raise_comments,
         current_user_matrix_role=matrix_role,
+        is_observer=(mdr.project_code in _observer_project_codes(db, current_user)),
         lr_reviewer_name=lr_reviewer_name,
         developer_name=developer_name,
         revisions=[RevisionRead.model_validate(item, from_attributes=True) for item in revisions],
