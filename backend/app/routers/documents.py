@@ -1559,6 +1559,222 @@ def get_comment_attachment_file(
     return FileResponse(path=path, filename=item.file_name)
 
 
+def _clean_remark_text(text: str | None) -> str:
+    raw = (text or "").strip()
+    return re.sub(r"^\[(REMARK|QUESTION)\]\s*", "", raw, flags=re.IGNORECASE)
+
+
+# Ширина, при которой PDF рендерится в аннотаторе (RevisionPdfAnnotator: <Page
+# width={780}>). Координаты области замечания хранятся в пикселях этого рендера
+# от левого-верхнего угла; пересчёт в точки страницы: k = W_pt / 780.
+_ANNOTATOR_RENDER_WIDTH = 780.0
+
+
+def _register_unicode_font() -> str:
+    """Зарегистрировать TTF с кириллицей для сводки. Возвращает имя шрифта
+    (или 'Helvetica', если ни один TTF не найден — тогда кириллица не отрисуется,
+    но рамки/номера на страницах работают в любом случае)."""
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    name = "TdoUni"
+    if name in pdfmetrics.getRegisteredFontNames():
+        return name
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",  # Docker (fonts-dejavu-core)
+        "/Library/Fonts/Arial Unicode.ttf",                  # macOS
+        "/System/Library/Fonts/Supplemental/Arial.ttf",       # macOS
+    ]
+    for p in candidates:
+        if Path(p).exists():
+            try:
+                pdfmetrics.registerFont(TTFont(name, p))
+                return name
+            except Exception:  # noqa: BLE001
+                continue
+    return "Helvetica"
+
+
+def _build_annotated_pdf(original_bytes: bytes, remarks: list[dict]) -> bytes:
+    """Наложить замечания на PDF: рамка+номер для замечаний с областью,
+    маркер-«звёздочка» с номером в углу листа для текстовых, и страница-сводка
+    в конце. Возвращает готовый PDF-байты."""
+    from io import BytesIO
+    from pypdf import PdfReader, PdfWriter
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.pagesizes import A4
+
+    uni = _register_unicode_font()
+
+    reader = PdfReader(BytesIO(original_bytes))
+    num_pages = len(reader.pages)
+
+    # Раскладываем замечания по листам (1-based). Точечные (без области)
+    # копим отдельно, чтобы расставить звёздочками в углу.
+    by_page_area: dict[int, list[dict]] = {}
+    by_page_point: dict[int, list[dict]] = {}
+    for r in remarks:
+        page = r.get("page") or 1
+        if r.get("area_x") is not None and r.get("area_w"):
+            by_page_area.setdefault(page, []).append(r)
+        else:
+            by_page_point.setdefault(page, []).append(r)
+
+    writer = PdfWriter()
+    for idx in range(num_pages):
+        base_page = reader.pages[idx]
+        page_no = idx + 1
+        mb = base_page.mediabox
+        w = float(mb.width)
+        h = float(mb.height)
+        k = w / _ANNOTATOR_RENDER_WIDTH  # пиксели рендера → точки страницы
+
+        overlay_buf = BytesIO()
+        c = canvas.Canvas(overlay_buf, pagesize=(w, h))
+        c.setStrokeColorRGB(0.85, 0.15, 0.15)
+        c.setLineWidth(1.5)
+
+        for r in by_page_area.get(page_no, []):
+            x = float(r["area_x"]) * k
+            y_top = float(r["area_y"]) * k
+            rw = float(r["area_w"]) * k
+            rh = float(r["area_h"]) * k
+            y_bottom = h - (y_top + rh)
+            c.setStrokeColorRGB(0.85, 0.15, 0.15)
+            c.rect(x, y_bottom, rw, rh, stroke=1, fill=0)
+            # Номер в кружке у левого-верхнего угла рамки.
+            label = str(r["number"])
+            c.setFillColorRGB(0.85, 0.15, 0.15)
+            c.circle(x, h - y_top, 8, stroke=0, fill=1)
+            c.setFillColorRGB(1, 1, 1)
+            c.setFont("Helvetica-Bold", 9)
+            c.drawCentredString(x, h - y_top - 3, label)
+
+        # Точечные замечания — звёздочки в правом верхнем углу, столбиком.
+        points = by_page_point.get(page_no, [])
+        for i, r in enumerate(points):
+            cx = w - 24
+            cy = h - 24 - i * 22
+            c.setFillColorRGB(0.85, 0.15, 0.15)
+            c.setFont("Helvetica-Bold", 14)
+            c.drawCentredString(cx, cy, "*")
+            c.setFont("Helvetica-Bold", 9)
+            c.drawCentredString(cx, cy - 12, str(r["number"]))
+
+        c.showPage()
+        c.save()
+        overlay_buf.seek(0)
+
+        overlay_page = PdfReader(overlay_buf).pages[0]
+        base_page.merge_page(overlay_page)
+        writer.add_page(base_page)
+
+    # Страница-сводка со всеми замечаниями (номер, лист, автор, код, файл, текст).
+    summary_buf = BytesIO()
+    sc = canvas.Canvas(summary_buf, pagesize=A4)
+    sw, sh = A4
+    y = sh - 50
+    sc.setFont(uni, 14)
+    sc.drawString(40, y, "Сводка замечаний")
+    y -= 24
+    for r in remarks:
+        if y < 50:
+            sc.showPage()
+            y = sh - 50
+        head = f"#{r['number']}  лист {r.get('page') or '-'}  {r.get('author') or ''}  {r.get('review_code') or ''}"
+        if r.get("has_file"):
+            head += "  [файл]"
+        sc.setFont(uni, 10)
+        sc.drawString(40, y, head[:120])
+        y -= 13
+        sc.setFont(uni, 9)
+        # Текст переносим по ~110 символов на строку (латиница/кириллица грубо).
+        text = _clean_remark_text(r.get("text"))
+        for line_start in range(0, len(text), 110):
+            if y < 50:
+                sc.showPage()
+                y = sh - 50
+                sc.setFont(uni, 9)
+            sc.drawString(52, y, text[line_start:line_start + 110])
+            y -= 12
+        y -= 6
+    sc.showPage()
+    sc.save()
+    summary_buf.seek(0)
+    for p in PdfReader(summary_buf).pages:
+        writer.add_page(p)
+
+    out = BytesIO()
+    writer.write(out)
+    out.seek(0)
+    return out.read()
+
+
+@router.get("/revisions/{revision_id}/annotated.pdf")
+def get_revision_annotated_pdf(
+    revision_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """PDF ревизии с нанесёнными замечаниями (рамки/номера/звёздочки) и
+    страницей-сводкой. Доступно обеим сторонам, у кого есть доступ к ревизии."""
+    revision = db.query(Revision).filter(Revision.id == revision_id).first()
+    if revision is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
+    if not _owner_can_access_revision(current_user, revision):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
+    if not revision.file_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PDF file is not attached")
+    path = Path(revision.file_path).resolve()
+    allowed_roots = {UPLOAD_ROOT.resolve(), *LEGACY_UPLOAD_ROOTS}
+    if not any(root in path.parents for root in allowed_roots) or not path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+
+    rows = (
+        db.query(Comment, User)
+        .outerjoin(User, User.id == Comment.author_id)
+        .filter(
+            Comment.revision_id == revision.id,
+            Comment.parent_id.is_(None),
+            Comment.status != CommentStatus.REJECTED,
+        )
+        .order_by(Comment.page.is_(None), Comment.page.asc(), Comment.id.asc())
+        .all()
+    )
+    att_counts = _comment_attachment_counts(db, [c for c, _ in rows])
+    remarks: list[dict] = []
+    for i, (comment, author) in enumerate(rows, start=1):
+        remarks.append({
+            "number": i,
+            "page": comment.page,
+            "area_x": comment.area_x,
+            "area_y": comment.area_y,
+            "area_w": comment.area_w,
+            "area_h": comment.area_h,
+            "text": comment.text,
+            "review_code": comment.review_code.value if comment.review_code else "",
+            "author": (author.full_name or author.email) if author else "",
+            "has_file": bool(att_counts.get(comment.id)),
+        })
+
+    original_bytes = path.read_bytes()
+    try:
+        annotated = _build_annotated_pdf(original_bytes, remarks)
+    except Exception as exc:  # noqa: BLE001 — не роняем весь запрос из-за кривого PDF
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Не удалось собрать PDF с замечаниями: {exc}")
+
+    from io import BytesIO
+    from fastapi.responses import StreamingResponse
+
+    doc = db.query(Document).filter(Document.id == revision.document_id).first()
+    fname = f"{doc.document_num if doc else 'revision'}_{revision.revision_code}_annotated.pdf"
+    return StreamingResponse(
+        BytesIO(annotated),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={re.sub(r'[^A-Za-z0-9._-]+', '_', fname)}"},
+    )
+
+
 @router.get("/documents/{document_id}/revisions", response_model=list[RevisionRead])
 def list_revisions(
     document_id: int,

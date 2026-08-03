@@ -2,7 +2,7 @@ import { Alert, App, Button, Card, Descriptions, Modal, Space, Steps, Switch, Ta
 import { DownloadOutlined, PaperClipOutlined, UploadOutlined } from "@ant-design/icons";
 import { useEffect, useMemo, useState } from "react";
 
-import { addCommentToCrs, createComment, deleteOwnerComment, downloadCommentAttachment, downloadCommentsExport, downloadRevisionAttachmentsArchive, getRevisionCard, getRevisionReviewerStates, listCarryDecisions, listCommentAttachments, listRevisionEvents, markRevisionNoComments, ownerCommentDecision, setCarryDecision, setRevisionReviewCode, uploadRevisionPdf } from "../api";
+import { addCommentToCrs, createComment, deleteOwnerComment, downloadCommentAttachment, downloadCommentsExport, downloadRevisionAnnotatedPdf, downloadRevisionAttachmentsArchive, getRevisionCard, getRevisionReviewerStates, listCarryDecisions, listCommentAttachments, listRevisionEvents, markRevisionNoComments, ownerCommentDecision, setCarryDecision, setRevisionReviewCode, uploadRevisionPdf } from "../api";
 import type { ReviewEventItem, RevisionReviewerSummary } from "../api";
 import ProcessHint from "../components/ProcessHint";
 import RevisionPdfAnnotator from "../components/RevisionPdfAnnotator";
@@ -375,6 +375,27 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
             Выгрузить замечания (Excel)
           </Button>
         </Tooltip>
+        {/* PDF выбранной ревизии с врисованными замечаниями (рамки/номера +
+            страница-сводка). Доступно, когда к ревизии прикреплён PDF. */}
+        {selectedRevision?.file_path && (
+          <Tooltip title="Скачать PDF ревизии с нанесёнными замечаниями и страницей-сводкой">
+            <Button
+              icon={<DownloadOutlined />}
+              onClick={async () => {
+                try {
+                  await downloadRevisionAnnotatedPdf(
+                    selectedRevision.id,
+                    `${card?.document_num ?? "revision"}_${selectedRevision.revision_code}_замечания.pdf`,
+                  );
+                } catch (error) {
+                  message.error(error instanceof Error ? error.message : "Не удалось собрать PDF с замечаниями");
+                }
+              }}
+            >
+              PDF с замечаниями
+            </Button>
+          </Tooltip>
+        )}
         {/* Кнопка PDF: для owner — «Комментировать» только когда ревизия
             на рассмотрении заказчика; для contractor/admin — всегда «Открыть»
             для просмотра. В прочих owner-статусах кнопка прячется целиком. */}

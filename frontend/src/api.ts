@@ -817,6 +817,11 @@ export function getRevisionPdfUrl(revisionId: number): string {
   return `${PREFIX}/revisions/${revisionId}/file`;
 }
 
+export async function downloadRevisionAnnotatedPdf(revisionId: number, fileName: string): Promise<void> {
+  const blob = await requestBlob(`/revisions/${revisionId}/annotated.pdf`);
+  downloadBlob(blob, fileName);
+}
+
 export function getRevisionCard(revisionId: number): Promise<RevisionCard> {
   return request<RevisionCard>(`/revisions/${revisionId}/card`);
 }
