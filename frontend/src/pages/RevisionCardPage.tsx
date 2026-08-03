@@ -1,8 +1,8 @@
 import { Alert, App, Button, Card, Descriptions, Modal, Space, Steps, Switch, Table, Tabs, Tag, Tooltip, Typography, Upload } from "antd";
-import { UploadOutlined } from "@ant-design/icons";
+import { DownloadOutlined, PaperClipOutlined, UploadOutlined } from "@ant-design/icons";
 import { useEffect, useMemo, useState } from "react";
 
-import { addCommentToCrs, createComment, deleteOwnerComment, downloadRevisionAttachmentsArchive, getRevisionCard, getRevisionReviewerStates, listCarryDecisions, listRevisionEvents, markRevisionNoComments, ownerCommentDecision, setCarryDecision, setRevisionReviewCode, uploadRevisionPdf } from "../api";
+import { addCommentToCrs, createComment, deleteOwnerComment, downloadCommentAttachment, downloadCommentsExport, downloadRevisionAttachmentsArchive, getRevisionCard, getRevisionReviewerStates, listCarryDecisions, listCommentAttachments, listRevisionEvents, markRevisionNoComments, ownerCommentDecision, setCarryDecision, setRevisionReviewCode, uploadRevisionPdf } from "../api";
 import type { ReviewEventItem, RevisionReviewerSummary } from "../api";
 import ProcessHint from "../components/ProcessHint";
 import RevisionPdfAnnotator from "../components/RevisionPdfAnnotator";
@@ -25,9 +25,43 @@ const REVIEW_EVENT_LABELS: Record<string, string> = {
   R_COMMENTED: "Замечание R",
   LR_COMMENTED: "Замечание LR",
   LR_SENT_TO_CONTRACTOR: "Замечания переданы подрядчику",
+  COMMENT_REJECTED: "Замечание отклонено",
   AP_SET: "Согласовано (AP)",
   DEADLINE_REMINDER: "Напоминание о дедлайне",
 };
+
+/** Скрепка «есть файл» у замечания: по клику скачивает вложение(я). */
+function CommentAttachmentsLink({ comment }: { comment: CommentItem }): JSX.Element | null {
+  const { message } = App.useApp();
+  if (!comment.attachment_count) return null;
+  return (
+    <Tooltip title="Скачать файл(ы), приложенные к замечанию">
+      <Button
+        type="link"
+        size="small"
+        style={{ padding: 0 }}
+        icon={<PaperClipOutlined />}
+        onClick={async (e) => {
+          e.stopPropagation();
+          try {
+            const items = await listCommentAttachments(comment.id);
+            if (!items.length) {
+              message.info("Файлов нет");
+              return;
+            }
+            for (const item of items) {
+              await downloadCommentAttachment(item.id, item.file_name);
+            }
+          } catch (error) {
+            message.error(error instanceof Error ? error.message : "Не удалось скачать файл");
+          }
+        }}
+      >
+        {comment.attachment_count}
+      </Button>
+    </Tooltip>
+  );
+}
 
 export default function RevisionCardPage({ revisionId, currentUser, onBack }: Props): JSX.Element {
   const { message, modal } = App.useApp();
@@ -314,13 +348,33 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
 
   return (
     <div>
-      <Space style={{ marginBottom: 12 }}>
+      <Space style={{ marginBottom: 12 }} wrap>
         <Tooltip title="Вернуться к общему списку ревизий">
           <Button onClick={onBack}>Назад</Button>
         </Tooltip>
         <Typography.Title level={4} style={{ margin: 0 }}>
           Карточка документа
         </Typography.Title>
+        {/* Выгрузка замечаний по этому документу (все ревизии) — Excel для
+            рассылки внутри команды. Доступна и подрядчику, и заказчику. */}
+        <Tooltip title="Скачать Excel со всеми замечаниями и действиями по этому документу">
+          <Button
+            icon={<DownloadOutlined />}
+            onClick={async () => {
+              try {
+                await downloadCommentsExport({
+                  project_code: card?.project_code ?? null,
+                  document_num: card?.document_num ?? null,
+                });
+                message.success("Выгрузка по документу сформирована");
+              } catch (error) {
+                message.error(error instanceof Error ? error.message : "Не удалось выгрузить замечания");
+              }
+            }}
+          >
+            Выгрузить замечания (Excel)
+          </Button>
+        </Tooltip>
         {/* Кнопка PDF: для owner — «Комментировать» только когда ревизия
             на рассмотрении заказчика; для contractor/admin — всегда «Открыть»
             для просмотра. В прочих owner-статусах кнопка прячется целиком. */}
@@ -473,21 +527,33 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
       </Space>
       {reviewerSummary && reviewerSummary.reviewers.length > 0 && (
         <Card size="small" style={{ marginBottom: 12 }} title="Рассмотрение ревьюверами">
-          {reviewerSummary.all_reviewers_no_comments && canSetApByRole && (
+          {reviewerSummary.approved ? (
             <Alert
               type="success"
               showIcon
               style={{ marginBottom: 8 }}
-              message="Все ревьюверы (R) — без замечаний"
-              description="Можно согласовать документ: нажмите «Поставить AP» выше."
+              message="Ревизия согласована (AP)"
+              description="Замечания отработаны, LR согласовал ревизию. Отметки ниже отражают исходную позицию ревьюверов."
             />
+          ) : (
+            reviewerSummary.all_reviewers_no_comments && canSetApByRole && (
+              <Alert
+                type="success"
+                showIcon
+                style={{ marginBottom: 8 }}
+                message="Все ревьюверы (R) — без замечаний"
+                description="Можно согласовать документ: нажмите «Поставить AP» выше."
+              />
+            )
           )}
           <Space direction="vertical" size={4} style={{ width: "100%" }}>
             {reviewerSummary.reviewers.map((r) => (
               <Space key={r.user_id} size={8}>
                 <Tag color={r.role === "LR" ? "blue" : "default"}>{r.role}</Tag>
                 <Typography.Text>{r.full_name}</Typography.Text>
-                {r.no_comments ? (
+                {reviewerSummary.approved ? (
+                  <Tag color="success">согласовано (AP)</Tag>
+                ) : r.no_comments ? (
                   <Tag color="success">без замечаний{r.decided_at ? ` · ${formatDateTimeRu(r.decided_at)}` : ""}</Tag>
                 ) : r.has_comments ? (
                   <Tag color="orange">есть замечания</Tag>
@@ -834,19 +900,22 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                     width: 360,
                     fixed: "left",
                     render: (value: string, comment: CommentItem) => (
-                      <Button
-                        type="link"
-                        style={{ padding: 0 }}
-                        onClick={() => {
-                          setSelectedRevisionId(row.revision_id);
-                          setPdfFocusCommentId(comment.id);
-                          setPdfAnnotatorOpen(true);
-                        }}
-                      >
-                        <Typography.Text ellipsis={{ tooltip: value }} style={{ maxWidth: 340 }}>
-                          {getCleanRemarkText(value)}
-                        </Typography.Text>
-                      </Button>
+                      <Space size={4}>
+                        <Button
+                          type="link"
+                          style={{ padding: 0 }}
+                          onClick={() => {
+                            setSelectedRevisionId(row.revision_id);
+                            setPdfFocusCommentId(comment.id);
+                            setPdfAnnotatorOpen(true);
+                          }}
+                        >
+                          <Typography.Text ellipsis={{ tooltip: value }} style={{ maxWidth: 320 }}>
+                            {getCleanRemarkText(value)}
+                          </Typography.Text>
+                        </Button>
+                        <CommentAttachmentsLink comment={comment} />
+                      </Space>
                     ),
                   },
                   {

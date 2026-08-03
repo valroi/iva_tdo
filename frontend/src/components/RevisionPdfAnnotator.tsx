@@ -1,9 +1,9 @@
-import { Alert, Button, Form, Input, Modal, Select, Space, Tabs, Tag, Tooltip, Typography, App } from "antd";
-import { DownloadOutlined } from "@ant-design/icons";
+import { Alert, Button, Form, Input, Modal, Select, Space, Tabs, Tag, Tooltip, Typography, Upload, App } from "antd";
+import { DownloadOutlined, PaperClipOutlined } from "@ant-design/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 
-import { addCommentToCrs, createComment, getAuthHeaders, getRevisionPdfUrl, ownerCommentDecision, respondToComment } from "../api";
+import { addCommentToCrs, createComment, getAuthHeaders, getRevisionPdfUrl, ownerCommentDecision, respondToComment, uploadCommentAttachment } from "../api";
 import type { CommentItem } from "../types";
 
 const workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
@@ -45,6 +45,7 @@ interface PendingRemark {
   selection: Rect | null;
   review_code: string;
   text: string;
+  file?: File | null;
 }
 interface CarryRemark {
   id: number;
@@ -89,6 +90,8 @@ export default function RevisionPdfAnnotator({
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
   const [form] = Form.useForm();
   const [pendingRemarks, setPendingRemarks] = useState<PendingRemark[]>([]);
+  // Опциональный файл, прикладываемый к формируемому замечанию.
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [activeCommentId, setActiveCommentId] = useState<number | null>(null);
   const [hoveredCommentId, setHoveredCommentId] = useState<number | null>(null);
   const [contractorResponseOpen, setContractorResponseOpen] = useState(false);
@@ -218,6 +221,7 @@ export default function RevisionPdfAnnotator({
       selection: selection ? { ...selection } : null,
       review_code: values.review_code as string,
       text: (values.text as string).trim(),
+      file: pendingFile,
     };
   };
 
@@ -233,6 +237,7 @@ export default function RevisionPdfAnnotator({
       setPendingRemarks((prev) => [...prev, next]);
       form.setFieldsValue({ text: "" });
       setSelection(null);
+      setPendingFile(null);
       message.success("Добавлено в список");
     } catch {
       // validation failed
@@ -245,7 +250,7 @@ export default function RevisionPdfAnnotator({
 
   const postOneRemark = async (item: PendingRemark): Promise<void> => {
     if (!revisionId) return;
-    await createComment({
+    const created = await createComment({
       revision_id: revisionId,
       text: `[REMARK] ${item.text}`.trim(),
       status: "OPEN",
@@ -256,6 +261,10 @@ export default function RevisionPdfAnnotator({
       area_w: item.selection?.w ?? null,
       area_h: item.selection?.h ?? null,
     });
+    if (item.file && created?.id) {
+      // Файл к замечанию грузим отдельным запросом после создания.
+      await uploadCommentAttachment(created.id, item.file);
+    }
   };
 
   const submitAll = async () => {
@@ -716,9 +725,14 @@ export default function RevisionPdfAnnotator({
                     <Space direction="vertical" size={6} style={{ width: "100%" }}>
                       {pendingRemarks.map((item) => (
                         <Space key={item.id} wrap style={{ width: "100%", justifyContent: "space-between" }}>
-                          <Typography.Text ellipsis style={{ maxWidth: 640 }}>
-                            стр. {item.page} · {item.review_code} · Замечание · {item.text}
-                          </Typography.Text>
+                          <Space size={6} wrap style={{ maxWidth: 640 }}>
+                            <Typography.Text ellipsis style={{ maxWidth: 560 }}>
+                              стр. {item.page} · {item.review_code} · Замечание · {item.text}
+                            </Typography.Text>
+                            {item.file ? (
+                              <Tag icon={<PaperClipOutlined />} color="blue">{item.file.name}</Tag>
+                            ) : null}
+                          </Space>
                           <Button size="small" danger type="link" onClick={() => removePending(item.id)}>
                             Убрать
                           </Button>
@@ -741,6 +755,21 @@ export default function RevisionPdfAnnotator({
                   </Form.Item>
                   <Form.Item name="text" label="Текст" rules={[{ required: true }]}>
                     <Input.TextArea rows={3} placeholder="Опиши замечание..." />
+                  </Form.Item>
+                  {/* Опциональный файл к замечанию (item 3): любой формат.
+                      Грузится после создания замечания при «Добавить в список». */}
+                  <Form.Item label="Файл к замечанию (необязательно)">
+                    <Upload
+                      maxCount={1}
+                      beforeUpload={(file) => {
+                        setPendingFile(file as File);
+                        return false;
+                      }}
+                      fileList={pendingFile ? [{ uid: "pending", name: pendingFile.name } as never] : []}
+                      onRemove={() => setPendingFile(null)}
+                    >
+                      <Button icon={<PaperClipOutlined />}>Прикрепить файл</Button>
+                    </Upload>
                   </Form.Item>
                 </Form>
               )}

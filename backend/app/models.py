@@ -360,6 +360,20 @@ class Comment(Base):
     revision: Mapped["Revision"] = relationship("Revision", back_populates="comments")
 
 
+class CommentAttachment(Base):
+    """Файл, приложенный к замечанию (опционально). Любой формат — исходники,
+    сканы, фото. Признак наличия отражается во всех выгрузках."""
+
+    __tablename__ = "comment_attachments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    comment_id: Mapped[int] = mapped_column(ForeignKey("comments.id"), nullable=False, index=True)
+    uploaded_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class CarryOverDecision(Base):
     __tablename__ = "carry_over_decisions"
 

@@ -43,7 +43,7 @@ import {
   updateProjectReference,
   updateReviewMatrixItem,
 } from "../api";
-import DocumentsPage from "./DocumentsPage";
+import DocumentsPage, { type DocumentsTreeFilter } from "./DocumentsPage";
 import MdrPage from "./MdrPage";
 import type {
   CipherTemplateField,
@@ -157,6 +157,8 @@ export default function ProjectsPage({
     window.localStorage.setItem("tdo_projects_tab", activeTabKey);
   }, [activeTabKey]);
   const [localNotificationTarget, setLocalNotificationTarget] = useState<{ project_code?: string | null; document_num?: string | null; revision_id?: number | null } | null>(null);
+  // Фильтр таблицы документов по клику в дереве проекта (item 5).
+  const [treeFilter, setTreeFilter] = useState<DocumentsTreeFilter>(null);
   const isAdmin = currentUser.role === "admin";
   const canManageMatrix = isAdmin || currentUser.permissions.can_manage_review_matrix;
   const canEditReferences = isAdmin || currentUser.permissions.can_edit_project_references;
@@ -552,14 +554,26 @@ export default function ProjectsPage({
           treeData={hierarchyTree}
           style={{ marginBottom: 16 }}
           onSelect={(selectedKeys) => {
-            // Клик по документу в дереве открывает его карточку во вкладке
-            // «Ревизии и комментарии» (тот же механизм, что и клик по шифру
-            // в таблице реестра). Клики по проекту/категории игнорируются.
+            // Клик в дереве фильтрует таблицу документов во вкладке «Ревизии и
+            // комментарии» (item 5): по дисциплине/категории — её документы;
+            // по документу — он сам + вложенные, и сразу открываем его карточку.
             const key = String(selectedKeys[0] ?? "");
+            if (key.startsWith("category-")) {
+              setTreeFilter({ kind: "category", value: key.slice("category-".length) });
+              setActiveTabKey("documents");
+              return;
+            }
+            if (key === "mdr-root" || key.startsWith("project-")) {
+              setTreeFilter(null); // корень/проект — снять фильтр
+              return;
+            }
             if (!key.startsWith("mdr-")) return;
             const mdrId = Number(key.slice(4));
             const item = projectMdr.find((row) => row.id === mdrId);
             if (!item) return;
+            // Вложенный документ фильтруем по его родителю (чтобы показать
+            // всю группу), верхнеуровневый — по нему самому.
+            setTreeFilter({ kind: "document", mdrId: item.parent_id ?? item.id });
             setLocalNotificationTarget({
               project_code: selectedProject?.code ?? null,
               document_num: item.doc_number,
@@ -620,6 +634,7 @@ export default function ProjectsPage({
                   projectReferences={references}
                   onCreated={onReload}
                   onOpenDocument={(documentNum) => {
+                    setTreeFilter(null); // из реестра открываем конкретный документ без фильтра
                     setLocalNotificationTarget({
                       project_code: selectedProject?.code ?? null,
                       document_num: documentNum,
@@ -639,6 +654,7 @@ export default function ProjectsPage({
                   mdr={projectMdr}
                   currentUser={currentUser}
                   projectMembers={members}
+                  treeFilter={treeFilter}
                   notificationTarget={localNotificationTarget ?? notificationTarget}
                   onNotificationTargetHandled={() => {
                     setLocalNotificationTarget(null);

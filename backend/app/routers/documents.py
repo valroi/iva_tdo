@@ -10,13 +10,14 @@ import zipfile
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import get_current_user, get_effective_permissions, require_permissions, users_by_company_types
 from app.models import (
     Comment,
+    CommentAttachment,
     CarryOverDecision,
     CommentStatus,
     ContractorCommentStatus,
@@ -42,6 +43,7 @@ from app.schemas import (
     CommentCreate,
     CarryDecisionRead,
     CarryDecisionUpdate,
+    CommentAttachmentRead,
     CommentOwnerDecision,
     CommentRead,
     CsrQueueItem,
@@ -325,6 +327,7 @@ def _comment_read(
     *,
     contractor_response_text: str | None = None,
     contractor_response_at: datetime | None = None,
+    attachment_count: int = 0,
 ) -> CommentRead:
     return CommentRead(
         id=comment.id,
@@ -352,7 +355,22 @@ def _comment_read(
         area_h=comment.area_h,
         created_at=comment.created_at,
         resolved_at=comment.resolved_at,
+        attachment_count=attachment_count,
     )
+
+
+def _comment_attachment_counts(db: Session, comments: list[Comment]) -> dict[int, int]:
+    """Число вложений по каждому замечанию (bulk, чтобы не делать N запросов)."""
+    ids = [c.id for c in comments if c.id is not None]
+    if not ids:
+        return {}
+    rows = (
+        db.query(CommentAttachment.comment_id, func.count(CommentAttachment.id))
+        .filter(CommentAttachment.comment_id.in_(ids))
+        .group_by(CommentAttachment.comment_id)
+        .all()
+    )
+    return {comment_id: int(count) for comment_id, count in rows}
 
 
 def _attachment_read(item: DocumentAttachment, uploader: User | None) -> DocumentAttachmentRead:
@@ -1448,6 +1466,99 @@ def get_revision_file(
     return FileResponse(path=path, media_type="application/pdf", filename=path.name)
 
 
+def _comment_attachment_read(item: CommentAttachment, uploader: User | None) -> CommentAttachmentRead:
+    return CommentAttachmentRead(
+        id=item.id,
+        comment_id=item.comment_id,
+        uploaded_by_id=item.uploaded_by_id,
+        uploaded_by_name=uploader.full_name if uploader else None,
+        uploaded_by_email=uploader.email if uploader else None,
+        file_name=item.file_name,
+        created_at=item.created_at,
+    )
+
+
+@router.post("/comments/{comment_id}/attachments", response_model=CommentAttachmentRead, status_code=status.HTTP_201_CREATED)
+def upload_comment_attachment(
+    comment_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permissions("can_raise_comments")),
+):
+    """Прикрепить файл к замечанию. Только автор замечания (или админ);
+    любой формат. Признак наличия отражается в карточке и выгрузках."""
+    comment = db.query(Comment).filter(Comment.id == comment_id).first()
+    if comment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found")
+    if current_user.role.value != "admin" and comment.author_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the comment author can attach files")
+    revision = db.query(Revision).filter(Revision.id == comment.revision_id).first()
+    if revision is not None and _is_completed_document(db, revision.document_id):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Document is completed (AFD+AP); uploads are locked")
+    original_name = file.filename or "attachment.bin"
+    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(original_name).name)
+    destination_dir = UPLOAD_ROOT / "comment_attachments" / str(comment.id)
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    destination = destination_dir / f"{uuid4().hex}_{safe_name}"
+    destination.write_bytes(file.file.read())
+    item = CommentAttachment(
+        comment_id=comment.id,
+        uploaded_by_id=current_user.id,
+        file_name=safe_name,
+        file_path=str(destination),
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return _comment_attachment_read(item, current_user)
+
+
+@router.get("/comments/{comment_id}/attachments", response_model=list[CommentAttachmentRead])
+def list_comment_attachments(
+    comment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    comment = db.query(Comment).filter(Comment.id == comment_id).first()
+    if comment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found")
+    revision = db.query(Revision).filter(Revision.id == comment.revision_id).first()
+    if revision is None or not _owner_can_access_revision(current_user, revision):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found")
+    items = (
+        db.query(CommentAttachment)
+        .filter(CommentAttachment.comment_id == comment.id)
+        .order_by(CommentAttachment.created_at.desc(), CommentAttachment.id.desc())
+        .all()
+    )
+    user_ids = {item.uploaded_by_id for item in items}
+    users = db.query(User).filter(User.id.in_(user_ids)).all() if user_ids else []
+    user_map = {user.id: user for user in users}
+    return [_comment_attachment_read(item, user_map.get(item.uploaded_by_id)) for item in items]
+
+
+@router.get("/comments/attachments/{attachment_id}/file")
+def get_comment_attachment_file(
+    attachment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    item = db.query(CommentAttachment).filter(CommentAttachment.id == attachment_id).first()
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    comment = db.query(Comment).filter(Comment.id == item.comment_id).first()
+    revision = db.query(Revision).filter(Revision.id == comment.revision_id).first() if comment else None
+    if revision is None or not _owner_can_access_revision(current_user, revision):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+    path = Path(item.file_path).resolve()
+    allowed_roots = {UPLOAD_ROOT.resolve(), *LEGACY_UPLOAD_ROOTS}
+    if not any(root in path.parents for root in allowed_roots):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid file path")
+    if not path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    return FileResponse(path=path, filename=item.file_name)
+
+
 @router.get("/documents/{document_id}/revisions", response_model=list[RevisionRead])
 def list_revisions(
     document_id: int,
@@ -1726,9 +1837,15 @@ def _build_reviewer_summary(db, revision, project, discipline, current_user) -> 
         s.user_id: s
         for s in db.query(RevisionReviewerState).filter(RevisionReviewerState.revision_id == revision.id).all()
     }
+    # Только ЖИВЫЕ замечания: отклонённые (REJECTED) не должны держать
+    # ревьювера в статусе «есть замечания». Иначе LR, который сам отклонил
+    # своё замечание и согласовал ревизию, продолжал висеть красным.
     commented_ids = {
         row[0]
-        for row in db.query(Comment.author_id).filter(Comment.revision_id == revision.id).distinct().all()
+        for row in db.query(Comment.author_id)
+        .filter(Comment.revision_id == revision.id, Comment.status != CommentStatus.REJECTED)
+        .distinct()
+        .all()
     }
     user_ids = {m.user_id for m in members}
     users = {u.id: u for u in db.query(User).filter(User.id.in_(user_ids)).all()} if user_ids else {}
@@ -1758,6 +1875,7 @@ def _build_reviewer_summary(db, revision, project, discipline, current_user) -> 
         revision_id=revision.id,
         reviewers=sorted(reviewers, key=lambda r: (r.role != "LR", r.full_name)),
         all_reviewers_no_comments=all_r_no_comments,
+        approved=(revision.review_code.value if revision.review_code else None) == "AP",
         nc_locks_commenting=review_events_service.nc_locks_commenting(db),
         my_locked=review_events_service.reviewer_commenting_locked(db, revision_id=revision.id, user_id=current_user.id),
     )
@@ -2043,17 +2161,44 @@ def export_comments_xlsx(
     contractor_label = {"A": "Согласен (A)", "I": "Не согласен (I)"}
     side_label = {"owner": "Заказчик", "contractor": "Подрядчик", "admin": "Администратор"}
 
+    # Признак наличия файла у замечания (item 3) — по всем замечаниям выборки.
+    att_counts = _comment_attachment_counts(db, [c for c, *_ in records])
+
     wb = Workbook()
     ws = wb.active
     ws.title = "Замечания"
+
+    # Шапка-«форма» для выгрузки по конкретному документу: шифр, название,
+    # текущая ревизия — чтобы экселькой можно было делиться как самостоятельным
+    # документом. Для общей (проектной) выгрузки шапка не нужна.
+    if document_num and records:
+        _c, _rev, head_doc, head_mdr, _a = records[0]
+        last_rev = (
+            db.query(Revision)
+            .filter(Revision.document_id == head_doc.id)
+            .order_by(Revision.id.desc())
+            .first()
+        )
+        header_pairs = [
+            ("Проект", head_mdr.project_code),
+            ("Шифр документа", head_doc.document_num),
+            ("Название", head_doc.title or ""),
+            ("Текущая ревизия", last_rev.revision_code if last_rev else ""),
+        ]
+        for label, value in header_pairs:
+            ws.append([label, value])
+            ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
+        ws.append([])  # пустая строка-разделитель
+
+    header_row_idx = ws.max_row + 1
     headers = [
         "Проект", "Документ", "Ревизия", "Тип", "ID", "Родит. ID",
         "Автор (ФИО)", "Сторона", "Текст", "Код замечания", "Статус",
-        "Ответ подрядчика", "В CRS", "№ CRS", "Опубл. подрядчику",
+        "Ответ подрядчика", "Файл", "В CRS", "№ CRS", "Опубл. подрядчику",
         "Дата создания", "Дата решения",
     ]
     ws.append(headers)
-    for cell in ws[1]:
+    for cell in ws[header_row_idx]:
         cell.font = Font(bold=True)
 
     def fmt(dt) -> str:
@@ -2076,6 +2221,7 @@ def export_comments_xlsx(
             (comment.review_code.value if comment.review_code else ""),
             status_label.get(comment.status.value if comment.status else "", ""),
             contractor_label.get(comment.contractor_status.value if comment.contractor_status else "", ""),
+            "Да" if att_counts.get(comment.id) else "",
             "Да" if comment.in_crs else "",
             comment.crs_number or "",
             "Да" if comment.is_published_to_contractor else "",
@@ -2083,9 +2229,12 @@ def export_comments_xlsx(
             fmt(comment.resolved_at),
         ])
 
-    widths = [10, 26, 8, 12, 8, 10, 26, 14, 60, 14, 12, 18, 8, 14, 16, 18, 18]
+    widths = [10, 26, 8, 12, 8, 10, 26, 14, 60, 14, 12, 18, 7, 8, 14, 16, 18, 18]
     for i, w in enumerate(widths, start=1):
-        ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
+        ws.column_dimensions[ws.cell(row=header_row_idx, column=i).column_letter].width = w
+
+    safe_doc = re.sub(r"[^A-Za-z0-9._-]+", "_", document_num) if document_num else None
+    filename = f"comments-{safe_doc}.xlsx" if safe_doc else "comments-export.xlsx"
 
     buffer = BytesIO()
     wb.save(buffer)
@@ -2093,7 +2242,7 @@ def export_comments_xlsx(
     return StreamingResponse(
         buffer,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=comments-export.xlsx"},
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
 
@@ -2790,12 +2939,14 @@ def list_comments(
     rows = query.order_by(Comment.id.asc()).all()
     parent_comments = [comment for comment, _author in rows]
     latest_contractor_responses = _latest_contractor_responses(db, parent_comments)
+    att_counts = _comment_attachment_counts(db, parent_comments)
     return [
         _comment_read(
             comment,
             author,
             contractor_response_text=latest_contractor_responses.get(comment.id, (None, None))[0],
             contractor_response_at=latest_contractor_responses.get(comment.id, (None, None))[1],
+            attachment_count=att_counts.get(comment.id, 0),
         )
         for comment, author in rows
     ]
@@ -3512,6 +3663,19 @@ def owner_comment_decision(
         comment.status = CommentStatus.REJECTED
         comment.backlog_status = "REJECTED"
         comment.resolved_at = datetime.utcnow()
+        # Журнал: кто и какое замечание отклонил (чтобы история не выглядела
+        # так, будто замечание всё ещё висит нерешённым).
+        review_events_service.record_event(
+            db,
+            revision=revision,
+            document=document,
+            mdr=mdr,
+            actor=current_user,
+            actor_role="LR",
+            event_type="COMMENT_REJECTED",
+            target_user_id=comment.author_id,
+            note=(comment.text or "")[:200],
+        )
         if payload.note:
             db.add(
                 Comment(
@@ -3531,6 +3695,17 @@ def owner_comment_decision(
         comment.status = CommentStatus.REJECTED
         comment.backlog_status = "REJECTED"
         comment.resolved_at = datetime.utcnow()
+        review_events_service.record_event(
+            db,
+            revision=revision,
+            document=document,
+            mdr=mdr,
+            actor=current_user,
+            actor_role="LR",
+            event_type="COMMENT_REJECTED",
+            target_user_id=comment.author_id,
+            note=(comment.text or "")[:200],
+        )
         if payload.note:
             db.add(
                 Comment(
@@ -3827,6 +4002,7 @@ def get_revision_card(
         comments_rows = comments_query.order_by(Comment.created_at.asc(), Comment.id.asc()).all()
         parent_comments = [comment for comment, _author in comments_rows]
         latest_contractor_responses = _latest_contractor_responses(db, parent_comments)
+        att_counts = _comment_attachment_counts(db, parent_comments)
         history.append(
             RevisionCommentThreadRead(
                 revision_id=item.id,
@@ -3839,6 +4015,7 @@ def get_revision_card(
                         author,
                         contractor_response_text=latest_contractor_responses.get(comment.id, (None, None))[0],
                         contractor_response_at=latest_contractor_responses.get(comment.id, (None, None))[1],
+                        attachment_count=att_counts.get(comment.id, 0),
                     )
                     for comment, author in comments_rows
                 ],

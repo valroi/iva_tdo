@@ -157,6 +157,7 @@ export interface CommentItem {
   area_h: number | null;
   created_at: string;
   resolved_at: string | null;
+  attachment_count?: number;
 }
 
 export interface NotificationItem {

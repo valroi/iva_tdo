@@ -84,6 +84,11 @@ import { canCreateRevision, canUploadRevisionFiles, isContractor, isOwner } from
 const workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
 pdfjs.GlobalWorkerOptions.workerSrc = `${workerSrc}?v=${pdfjs.version}`;
 
+export type DocumentsTreeFilter =
+  | { kind: "category"; value: string }
+  | { kind: "document"; mdrId: number }
+  | null;
+
 interface Props {
   documents: DocumentItem[];
   mdr: MDRRecord[];
@@ -91,16 +96,33 @@ interface Props {
   projectMembers?: ProjectMember[];
   notificationTarget?: { project_code?: string | null; document_num?: string | null; revision_id?: number | null } | null;
   onNotificationTargetHandled?: () => void;
+  treeFilter?: DocumentsTreeFilter;
 }
 
 export default function DocumentsPage({
-  documents,
+  documents: allDocuments,
   mdr,
   currentUser,
   projectMembers = [],
   notificationTarget,
   onNotificationTargetHandled,
+  treeFilter = null,
 }: Props): JSX.Element {
+  // Фильтр по клику в дереве проекта (item 5): дисциплина/категория —
+  // показываем только её документы; верхнеуровневый документ — его самого
+  // и вложенные (parent_id). Без фильтра — все документы проекта.
+  const documents = useMemo(() => {
+    if (!treeFilter) return allDocuments;
+    const mdrById = new Map(mdr.map((m) => [m.id, m]));
+    if (treeFilter.kind === "category") {
+      return allDocuments.filter((doc) => mdrById.get(doc.mdr_id)?.category === treeFilter.value);
+    }
+    const targetId = treeFilter.mdrId;
+    return allDocuments.filter((doc) => {
+      const m = mdrById.get(doc.mdr_id);
+      return doc.mdr_id === targetId || m?.parent_id === targetId;
+    });
+  }, [allDocuments, mdr, treeFilter]);
   const normalizeDocNum = (value: string): string => value.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
   const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(documents[0]?.id ?? null);
   const [selectedRevisionId, setSelectedRevisionId] = useState<number | null>(null);

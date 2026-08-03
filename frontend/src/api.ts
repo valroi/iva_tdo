@@ -388,6 +388,7 @@ export interface RevisionReviewerSummary {
   revision_id: number;
   reviewers: ReviewerStateItem[];
   all_reviewers_no_comments: boolean;
+  approved: boolean;
   nc_locks_commenting: boolean;
   my_locked: boolean;
 }
@@ -448,7 +449,8 @@ export async function downloadCommentsExport(params: { project_code?: string | n
   if (params.project_code) qs.set("project_code", params.project_code);
   if (params.document_num) qs.set("document_num", params.document_num);
   const blob = await requestBlob(`/reports/comments-export.xlsx?${qs.toString()}`);
-  downloadBlob(blob, `comments-export.xlsx`);
+  const safeDoc = params.document_num ? params.document_num.replace(/[^A-Za-z0-9._-]+/g, "_") : null;
+  downloadBlob(blob, safeDoc ? `comments-${safeDoc}.xlsx` : `comments-export.xlsx`);
 }
 
 export interface ReviewFlags {
@@ -478,6 +480,34 @@ export function createComment(payload: Record<string, unknown>): Promise<Comment
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export interface CommentAttachmentItem {
+  id: number;
+  comment_id: number;
+  uploaded_by_id: number;
+  uploaded_by_name?: string | null;
+  uploaded_by_email?: string | null;
+  file_name: string;
+  created_at: string;
+}
+
+export function listCommentAttachments(commentId: number): Promise<CommentAttachmentItem[]> {
+  return request<CommentAttachmentItem[]>(`/comments/${commentId}/attachments`);
+}
+
+export function uploadCommentAttachment(commentId: number, file: File): Promise<CommentAttachmentItem> {
+  const body = new FormData();
+  body.append("file", file);
+  return request<CommentAttachmentItem>(`/comments/${commentId}/attachments`, {
+    method: "POST",
+    body,
+  });
+}
+
+export async function downloadCommentAttachment(attachmentId: number, fileName: string): Promise<void> {
+  const blob = await requestBlob(`/comments/attachments/${attachmentId}/file`);
+  downloadBlob(blob, fileName);
 }
 
 export function respondToComment(

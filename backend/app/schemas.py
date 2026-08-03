@@ -421,6 +421,19 @@ class CommentRead(BaseModel):
     area_h: float | None
     created_at: datetime
     resolved_at: datetime | None
+    attachment_count: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CommentAttachmentRead(BaseModel):
+    id: int
+    comment_id: int
+    uploaded_by_id: int
+    uploaded_by_name: str | None = None
+    uploaded_by_email: str | None = None
+    file_name: str
+    created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -757,6 +770,7 @@ class RevisionReviewerSummary(BaseModel):
     revision_id: int
     reviewers: list[ReviewerStateRead]
     all_reviewers_no_comments: bool
+    approved: bool = False
     nc_locks_commenting: bool
     my_locked: bool
 
