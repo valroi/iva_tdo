@@ -12,7 +12,7 @@ import {
   UnorderedListOutlined,
 } from "@ant-design/icons";
 import { Avatar, Breadcrumb, Button, Layout, Menu, Segmented, Space, Spin, Typography, message } from "antd";
-import { Component, useCallback, useEffect, useMemo, useState } from "react";
+import { Component, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   clearTokens,
@@ -188,6 +188,38 @@ function MainApp(): JSX.Element {
   const [openedRevisionId, setOpenedRevisionId] = useState<number | null>(initialHash.revisionId);
   const [documentsRegistryPreset, setDocumentsRegistryPreset] = useState<{ overdue_only?: boolean } | null>(null);
 
+  // История секций для кнопок «Назад» — возвращаемся туда, откуда пришли,
+  // а не на фиксированную страницу. Пуш прошлой секции при каждой смене;
+  // при переходе через goBack пуш пропускаем (флаг), чтобы не зациклиться.
+  const navStackRef = useRef<Section[]>([]);
+  const prevSectionRef = useRef<Section>(activeSection);
+  const isBackNavRef = useRef(false);
+  useEffect(() => {
+    if (prevSectionRef.current !== activeSection) {
+      if (!isBackNavRef.current) {
+        navStackRef.current.push(prevSectionRef.current);
+        if (navStackRef.current.length > 50) navStackRef.current.shift();
+      }
+      isBackNavRef.current = false;
+      prevSectionRef.current = activeSection;
+    }
+  }, [activeSection]);
+  const goBack = useCallback(() => {
+    const prev = navStackRef.current.pop();
+    isBackNavRef.current = true;
+    setActiveSection(prev ?? "dashboard");
+  }, []);
+
+  // Немедленный рефетч уведомлений при заходе на «Обзор»/«Уведомления» —
+  // чтобы после действия на другой странице список/бейдж были свежими сразу,
+  // не дожидаясь фонового поллинга (item 11).
+  useEffect(() => {
+    if (!user) return;
+    if (activeSection === "dashboard" || activeSection === "notifications") {
+      void listNotifications().then(setNotifications).catch(() => {});
+    }
+  }, [activeSection, user]);
+
   // Синхронизация состояния в URL hash: при изменении секции/ревизии — push в URL.
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -265,7 +297,7 @@ function MainApp(): JSX.Element {
       void listDocuments().then(setDocuments).catch(() => {});
       void listProjects().then(setProjects).catch(() => {});
     };
-    const id = window.setInterval(tick, 20_000);
+    const id = window.setInterval(tick, 8_000);
     // Дополнительный «толчок» при возврате на вкладку — данные обновятся
     // сразу, не дожидаясь следующего тика.
     const onVisible = () => {
@@ -277,6 +309,18 @@ function MainApp(): JSX.Element {
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [authenticated]);
+
+  // Протухшая сессия (401 от API): понятное сообщение + возврат на вход,
+  // вместо непонятных ошибок на каждой кнопке (item 10).
+  useEffect(() => {
+    const onExpired = () => {
+      message.warning("Сессия истекла. Войдите заново.");
+      clearTokens();
+      setUser(null);
+    };
+    window.addEventListener("tdo:session-expired", onExpired);
+    return () => window.removeEventListener("tdo:session-expired", onExpired);
+  }, []);
 
   const unreadNotificationsCount = useMemo(
     () => notifications.filter((item) => !item.is_read).length,
@@ -497,7 +541,7 @@ function MainApp(): JSX.Element {
                 <RevisionCardPage
                   revisionId={openedRevisionId}
                   currentUser={user}
-                  onBack={() => setActiveSection("projects")}
+                  onBack={goBack}
                 />
               )}
               {activeSection === "notifications" && (

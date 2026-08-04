@@ -1068,27 +1068,38 @@ def list_documents_registry(
                 revisions=revision_rows,
             )
         )
-        if current_user.permissions.get("can_process_tdo_queue") and is_overdue:
-            exists_overdue_notification = (
-                db.query(Notification.id)
-                .filter(
+        if current_user.permissions.get("can_process_tdo_queue"):
+            if is_overdue:
+                exists_overdue_notification = (
+                    db.query(Notification.id)
+                    .filter(
+                        Notification.user_id == current_user.id,
+                        Notification.project_code == mdr.project_code,
+                        Notification.document_num == doc.document_num,
+                        Notification.event_type == "DOC_OVERDUE_PLAN_START",
+                    )
+                    .first()
+                )
+                if exists_overdue_notification is None:
+                    overdue_notifications_to_create.append(
+                        Notification(
+                            user_id=current_user.id,
+                            event_type="DOC_OVERDUE_PLAN_START",
+                            message=f"Просрочка старта разработки: {doc.document_num}",
+                            project_code=mdr.project_code,
+                            document_num=doc.document_num,
+                        )
+                    )
+            else:
+                # Документ больше не просрочен (PDF загружен / старт был) —
+                # гасим ранее выданное напоминание, чтобы не висело вечно (item 14).
+                db.query(Notification).filter(
                     Notification.user_id == current_user.id,
                     Notification.project_code == mdr.project_code,
                     Notification.document_num == doc.document_num,
                     Notification.event_type == "DOC_OVERDUE_PLAN_START",
-                )
-                .first()
-            )
-            if exists_overdue_notification is None:
-                overdue_notifications_to_create.append(
-                    Notification(
-                        user_id=current_user.id,
-                        event_type="DOC_OVERDUE_PLAN_START",
-                        message=f"Просрочка старта разработки: {doc.document_num}",
-                        project_code=mdr.project_code,
-                        document_num=doc.document_num,
-                    )
-                )
+                    Notification.is_read.is_(False),
+                ).update({Notification.is_read: True}, synchronize_session=False)
     if overdue_notifications_to_create:
         for item in overdue_notifications_to_create:
             db.add(item)
@@ -2053,7 +2064,7 @@ def mark_revision_no_comments(
         db,
         user_id=current_user.id,
         revision_id=revision.id,
-        event_types=["TDO_SENT_TO_OWNER", "OWNER_COMMENT_CREATED", "NEW_COMMENT", "CARRY_OVER_DECISION"],
+        event_types=["TDO_SENT_TO_OWNER", "OWNER_COMMENT_CREATED", "NEW_COMMENT", "CARRY_OVER_DECISION", "REVIEW_DEADLINE_SOON"],
     )
     db.commit()
     return _build_reviewer_summary(db, revision, project, discipline, current_user)
@@ -3600,7 +3611,7 @@ def create_comment(
         db,
         user_id=current_user.id,
         revision_id=rev.id,
-        event_types=["TDO_SENT_TO_OWNER", "OWNER_COMMENT_CREATED", "CARRY_OVER_DECISION", "NEW_COMMENT"],
+        event_types=["TDO_SENT_TO_OWNER", "OWNER_COMMENT_CREATED", "CARRY_OVER_DECISION", "NEW_COMMENT", "REVIEW_DEADLINE_SOON"],
     )
 
     db.commit()

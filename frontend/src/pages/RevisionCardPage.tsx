@@ -216,6 +216,12 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
     return out;
   }, [carryDecisionsByRevision, selectedRevisionId]);
   const canCommentOnSelectedRevision = isOwnerCommentingAllowedStatus(selectedRevision?.status);
+  // R, отметивший «Рассмотрено без замечаний», больше не создаёт замечания
+  // по этой ревизии — иначе конфликт «нет замечаний» + новое замечание (item 13).
+  const currentUserMarkedNoComments = Boolean(
+    reviewerSummary?.reviewers.find((r) => r.user_id === currentUser.id)?.no_comments,
+  );
+  const rBlockedByNoComments = isRMatrixReviewer && currentUserMarkedNoComments;
   const isSelectedRevisionClosedForPdfUpdate =
     selectedRevision?.status === "CONTRACTOR_REPLY_A" || selectedRevision?.status === "SUBMITTED";
   // AP ставит ТОЛЬКО LR заказчика. R может комментировать, но финальное
@@ -1603,12 +1609,14 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
         canCreateRemarks={
           (card?.can_current_user_raise_comments ?? true) &&
           !documentCompleted &&
+          !rBlockedByNoComments &&
           selectedRevision?.review_code !== "AP"
         }
         canCreateOwnerRemarks={
           canOwnerCreateRemarks &&
           canCommentOnSelectedRevision &&
           !documentCompleted &&
+          !rBlockedByNoComments &&
           selectedRevision?.review_code !== "AP"
         }
         canManageOwnerRemarks={
@@ -1624,6 +1632,8 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
         noAccessHint={
           documentCompleted
             ? "Документ финально согласован (AFD + AP). Добавление замечаний закрыто."
+            : rBlockedByNoComments
+            ? "Вы отметили «Рассмотрено без замечаний» — добавление замечаний по этой ревизии закрыто. Доступен только просмотр."
             : selectedRevision?.review_code === "AP"
             ? "По ревизии стоит AP — цикл закрыт, изменение замечаний недоступно."
             : !canOwnerCreateRemarks

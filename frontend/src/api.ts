@@ -86,6 +86,20 @@ export function hasAccessToken(): boolean {
   return Boolean(getAccessToken());
 }
 
+// Единая обработка протухшей сессии (401). Логин-запрос сюда не попадает
+// (там 401 = неверный пароль). Диспатчим событие один раз — App покажет
+// сообщение «сессия истекла» и вернёт на экран входа.
+let sessionExpiredDispatched = false;
+function handleUnauthorized(path: string): void {
+  if (path.includes("/auth/login") || path.includes("/auth/refresh")) return;
+  if (sessionExpiredDispatched) return;
+  sessionExpiredDispatched = true;
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("tdo:session-expired"));
+  }
+}
+const SESSION_EXPIRED_MESSAGE = "Сессия истекла. Войдите заново.";
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getAccessToken();
   const headers = new Headers(init.headers ?? {});
@@ -104,6 +118,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   });
 
   if (!response.ok) {
+    if (response.status === 401) {
+      handleUnauthorized(path);
+      throw new Error(SESSION_EXPIRED_MESSAGE);
+    }
     const rawText = await response.text();
     let errorMessage = rawText || "API request failed";
     try {
@@ -132,6 +150,10 @@ async function requestBlob(path: string, init: RequestInit = {}): Promise<Blob> 
   }
   const response = await fetch(`${PREFIX}${path}`, { ...init, headers });
   if (!response.ok) {
+    if (response.status === 401) {
+      handleUnauthorized(path);
+      throw new Error(SESSION_EXPIRED_MESSAGE);
+    }
     const rawText = await response.text();
     let errorMessage = rawText || "API request failed";
     try {
