@@ -187,7 +187,7 @@ export default function DocumentsRegistryPage({ currentUser, onOpenRevision, pre
             size="small"
             onClick={async () => {
               try {
-                await downloadRevisionAttachmentsArchive(row.id, row.document_num);
+                await downloadRevisionAttachmentsArchive(row.id, row.document_num, row.latest_revision_code);
               } catch (error: unknown) {
                 const text = error instanceof Error ? error.message : "Нет дополнительных файлов";
                 message.error(text);

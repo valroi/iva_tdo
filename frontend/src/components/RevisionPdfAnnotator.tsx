@@ -14,6 +14,8 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onCreated: () => Promise<void>;
+  /** Имя файла при скачивании PDF (шифр_ревизия.pdf). */
+  downloadFileName?: string;
   mode?: "owner_create" | "contractor_review";
   comments?: CommentItem[];
   canCreateOwnerRemarks?: boolean;
@@ -63,6 +65,7 @@ export default function RevisionPdfAnnotator({
   open,
   onClose,
   onCreated,
+  downloadFileName,
   mode = "owner_create",
   comments = [],
   canCreateOwnerRemarks = true,
@@ -413,7 +416,7 @@ export default function RevisionPdfAnnotator({
               if (!pdfBlobUrl) return;
               const link = document.createElement("a");
               link.href = pdfBlobUrl;
-              link.download = `revision_${revisionId ?? "document"}.pdf`;
+              link.download = downloadFileName || `revision_${revisionId ?? "document"}.pdf`;
               document.body.appendChild(link);
               link.click();
               document.body.removeChild(link);

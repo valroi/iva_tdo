@@ -229,7 +229,7 @@ export default function TrmPage({ currentUser, onOpenRevision }: Props): JSX.Ele
                                 onClick={async (event) => {
                                   event.stopPropagation();
                                   try {
-                                    await downloadRevisionAttachmentsArchive(rev.revision_id, rev.document_num);
+                                    await downloadRevisionAttachmentsArchive(rev.revision_id, rev.document_num, rev.revision_code);
                                   } catch (error: unknown) {
                                     const text = error instanceof Error ? error.message : "Нет дополнительных файлов";
                                     message.error(text);

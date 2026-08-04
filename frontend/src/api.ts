@@ -133,7 +133,14 @@ async function requestBlob(path: string, init: RequestInit = {}): Promise<Blob> 
   const response = await fetch(`${PREFIX}${path}`, { ...init, headers });
   if (!response.ok) {
     const rawText = await response.text();
-    throw new Error(rawText || "API request failed");
+    let errorMessage = rawText || "API request failed";
+    try {
+      const parsed = JSON.parse(rawText) as { detail?: string };
+      if (parsed?.detail) errorMessage = parsed.detail;
+    } catch {
+      // не-JSON — оставляем как есть
+    }
+    throw new Error(errorMessage);
   }
   return response.blob();
 }
@@ -803,14 +810,21 @@ export function getDocumentAttachmentsArchiveUrl(documentId: number): string {
   return `${PREFIX}/documents/${documentId}/attachments/archive`;
 }
 
-export async function downloadDocumentAttachmentsArchive(documentId: number, documentNum: string): Promise<void> {
-  const blob = await requestBlob(`/documents/${documentId}/attachments/archive`);
-  downloadBlob(blob, `${documentNum}_files.zip`);
+// Имя скачиваемого файла из шифра документа (+ревизия) через «_».
+export function docDownloadName(documentNum: string | null | undefined, revisionCode?: string | null, suffix = ""): string {
+  const doc = (documentNum || "document").replace(/[^A-Za-z0-9._-]+/g, "_");
+  const rev = revisionCode ? `_${String(revisionCode).replace(/[^A-Za-z0-9._-]+/g, "_")}` : "";
+  return `${doc}${rev}${suffix}`;
 }
 
-export async function downloadRevisionAttachmentsArchive(revisionId: number, documentNum: string): Promise<void> {
+export async function downloadDocumentAttachmentsArchive(documentId: number, documentNum: string, revisionCode?: string | null): Promise<void> {
+  const blob = await requestBlob(`/documents/${documentId}/attachments/archive`);
+  downloadBlob(blob, docDownloadName(documentNum, revisionCode, "_files.zip"));
+}
+
+export async function downloadRevisionAttachmentsArchive(revisionId: number, documentNum: string, revisionCode?: string | null): Promise<void> {
   const blob = await requestBlob(`/revisions/${revisionId}/attachments/archive`);
-  downloadBlob(blob, `${documentNum}_files.zip`);
+  downloadBlob(blob, docDownloadName(documentNum, revisionCode, "_files.zip"));
 }
 
 export function getRevisionPdfUrl(revisionId: number): string {

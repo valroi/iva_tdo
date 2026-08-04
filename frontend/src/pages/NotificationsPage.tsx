@@ -46,6 +46,7 @@ export default function NotificationsPage({ notifications, onReload, onOpenTarge
       key: "created_at",
       width: 150,
       render: (v: string) => formatDateTimeRu(v),
+      sorter: (a, b) => new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime(),
     },
     {
       title: "Срок",
@@ -53,12 +54,14 @@ export default function NotificationsPage({ notifications, onReload, onOpenTarge
       key: "task_deadline",
       width: 130,
       render: (v: string | null | undefined) => formatDeadlineRu(v),
+      sorter: (a, b) => String(a.task_deadline ?? "").localeCompare(String(b.task_deadline ?? "")),
     },
     {
-      title: "Прочитано",
+      title: "Выполнено действие",
       dataIndex: "is_read",
       key: "is_read",
-      render: (value: boolean) => (value ? <Tag color="green">YES</Tag> : <Tag color="red">NO</Tag>),
+      width: 150,
+      render: (value: boolean) => (value ? <Tag color="green">Да</Tag> : <Tag color="red">Нет</Tag>),
     },
     {
       title: "Действие",
@@ -103,7 +106,7 @@ export default function NotificationsPage({ notifications, onReload, onOpenTarge
           },
           {
             key: "archive",
-            label: `Архив (${archivedNotifications.length})`,
+            label: `Отработано (${archivedNotifications.length})`,
             children: <Table rowKey="id" columns={columns} dataSource={archivedNotifications} size="small" />,
           },
         ]}

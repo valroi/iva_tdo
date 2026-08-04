@@ -69,7 +69,7 @@ export default function RevisionsPage({ currentUser, onOpenRevision }: Props): J
               type="link"
               onClick={async () => {
                 try {
-                  await downloadRevisionAttachmentsArchive(row.revision_id, row.document_num);
+                  await downloadRevisionAttachmentsArchive(row.revision_id, row.document_num, row.revision_code);
                 } catch (error: unknown) {
                   const text = error instanceof Error ? error.message : "Нет дополнительных файлов";
                   message.error(text);

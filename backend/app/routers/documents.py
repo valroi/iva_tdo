@@ -1404,7 +1404,7 @@ def download_document_attachments_archive(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
     attachments = db.query(DocumentAttachment).filter(DocumentAttachment.document_id == document.id).all()
     if not attachments:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No attachments")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="К этой ревизии не приложены файлы")
     temp_file = tempfile.NamedTemporaryFile(prefix=f"doc_{document.id}_", suffix=".zip", delete=False)
     temp_path = Path(temp_file.name)
     temp_file.close()
@@ -1436,7 +1436,7 @@ def download_revision_attachments_archive(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
     attachments = db.query(DocumentAttachment).filter(DocumentAttachment.revision_id == revision.id).all()
     if not attachments:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No attachments")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="К этой ревизии не приложены файлы")
     temp_file = tempfile.NamedTemporaryFile(prefix=f"rev_{revision.id}_", suffix=".zip", delete=False)
     temp_path = Path(temp_file.name)
     temp_file.close()

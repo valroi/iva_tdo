@@ -2,6 +2,7 @@ import {
   AuditOutlined,
   BellOutlined,
   BarChartOutlined,
+  FileTextOutlined,
   HomeOutlined,
   LogoutOutlined,
   ProjectOutlined,
@@ -289,6 +290,7 @@ function MainApp(): JSX.Element {
     const items = [
       { key: "dashboard", icon: <HomeOutlined />, label: "Обзор" },
       { key: "projects", icon: <ProjectOutlined />, label: "Проекты" },
+      { key: "documents_registry", icon: <FileTextOutlined />, label: "Документы" },
       { key: "notifications", icon: <BellOutlined />, label: `Уведомления${unreadNotificationsCount ? ` (${unreadNotificationsCount})` : ""}` },
       { key: "sessions", icon: <SafetyOutlined />, label: "Сессии" },
       { key: "help", icon: <QuestionCircleOutlined />, label: "Инструкция" },

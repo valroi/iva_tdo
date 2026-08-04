@@ -40,6 +40,7 @@ import {
   ownerCommentDecision,
   processRevisionTdoDecision,
   setCarryDecision,
+  docDownloadName,
   downloadRevisionAttachmentsArchive,
   deleteOwnerComment,
   uploadRevisionAttachment,
@@ -875,7 +876,7 @@ export default function DocumentsPage({
             onClick={async (event) => {
               event.stopPropagation();
               try {
-                await downloadRevisionAttachmentsArchive(row.id, selectedDocument?.document_num ?? "document");
+                await downloadRevisionAttachmentsArchive(row.id, selectedDocument?.document_num ?? "document", row.revision_code);
               } catch (error: unknown) {
                 const text = error instanceof Error ? error.message : "Нет дополнительных файлов";
                 message.error(text);
@@ -1896,6 +1897,7 @@ export default function DocumentsPage({
       <RevisionPdfAnnotator
         revisionId={selectedRevisionId}
         open={pdfAnnotatorOpen}
+        downloadFileName={docDownloadName(selectedDocument?.document_num, selectedRevision?.revision_code, ".pdf")}
         onClose={() => {
           setPdfAnnotatorOpen(false);
           setPdfFocusCommentId(null);
@@ -2053,7 +2055,8 @@ export default function DocumentsPage({
                 if (!selectedRevisionId || !selectedDocument || !selectedRevision) return;
                 void downloadRevisionAttachmentsArchive(
                   selectedRevisionId,
-                  `${selectedDocument.document_num}-${selectedRevision.revision_code}`,
+                  selectedDocument.document_num,
+                  selectedRevision.revision_code,
                 );
               }}
             >

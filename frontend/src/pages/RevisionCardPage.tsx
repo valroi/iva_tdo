@@ -2,7 +2,7 @@ import { Alert, App, Button, Card, Descriptions, Modal, Space, Steps, Switch, Ta
 import { DownloadOutlined, PaperClipOutlined, UploadOutlined } from "@ant-design/icons";
 import { useEffect, useMemo, useState } from "react";
 
-import { addCommentToCrs, createComment, deleteOwnerComment, downloadCommentAttachment, downloadCommentsExport, downloadRevisionAnnotatedPdf, downloadRevisionAttachmentsArchive, getRevisionCard, getRevisionReviewerStates, listCarryDecisions, listCommentAttachments, listRevisionEvents, markRevisionNoComments, ownerCommentDecision, setCarryDecision, setRevisionReviewCode, uploadRevisionPdf } from "../api";
+import { addCommentToCrs, createComment, deleteOwnerComment, docDownloadName, downloadCommentAttachment, downloadCommentsExport, downloadRevisionAnnotatedPdf, downloadRevisionAttachmentsArchive, getRevisionCard, getRevisionReviewerStates, listCarryDecisions, listCommentAttachments, listRevisionEvents, markRevisionNoComments, ownerCommentDecision, setCarryDecision, setRevisionReviewCode, uploadRevisionPdf } from "../api";
 import type { ReviewEventItem, RevisionReviewerSummary } from "../api";
 import ProcessHint from "../components/ProcessHint";
 import RevisionPdfAnnotator from "../components/RevisionPdfAnnotator";
@@ -79,6 +79,9 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
   const [reviewerSummary, setReviewerSummary] = useState<RevisionReviewerSummary | null>(null);
   const [reviewEvents, setReviewEvents] = useState<ReviewEventItem[]>([]);
   const [markingNoComments, setMarkingNoComments] = useState(false);
+  // Индикаторы загрузки для кнопок скачивания (item 5).
+  const [exportBusy, setExportBusy] = useState(false);
+  const [annotatedBusy, setAnnotatedBusy] = useState(false);
 
   const loadReviewMeta = async (revId: number): Promise<void> => {
     try {
@@ -360,7 +363,9 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
         <Tooltip title="Скачать Excel со всеми замечаниями и действиями по этому документу">
           <Button
             icon={<DownloadOutlined />}
+            loading={exportBusy}
             onClick={async () => {
+              setExportBusy(true);
               try {
                 await downloadCommentsExport({
                   project_code: card?.project_code ?? null,
@@ -369,6 +374,8 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                 message.success("Выгрузка по документу сформирована");
               } catch (error) {
                 message.error(error instanceof Error ? error.message : "Не удалось выгрузить замечания");
+              } finally {
+                setExportBusy(false);
               }
             }}
           >
@@ -381,14 +388,20 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
           <Tooltip title="Скачать PDF ревизии с нанесёнными замечаниями и страницей-сводкой">
             <Button
               icon={<DownloadOutlined />}
+              loading={annotatedBusy}
               onClick={async () => {
+                setAnnotatedBusy(true);
+                message.loading({ content: "Собираем PDF с замечаниями…", key: "annpdf" });
                 try {
                   await downloadRevisionAnnotatedPdf(
                     selectedRevision.id,
-                    `${card?.document_num ?? "revision"}_${selectedRevision.revision_code}_замечания.pdf`,
+                    docDownloadName(card?.document_num, selectedRevision.revision_code, "_замечания.pdf"),
                   );
+                  message.success({ content: "PDF готов", key: "annpdf" });
                 } catch (error) {
-                  message.error(error instanceof Error ? error.message : "Не удалось собрать PDF с замечаниями");
+                  message.error({ content: error instanceof Error ? error.message : "Не удалось собрать PDF с замечаниями", key: "annpdf" });
+                } finally {
+                  setAnnotatedBusy(false);
                 }
               }}
             >
@@ -802,7 +815,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                     size="small"
                     onClick={async () => {
                       try {
-                        await downloadRevisionAttachmentsArchive(row.id, card?.document_num ?? "document");
+                        await downloadRevisionAttachmentsArchive(row.id, card?.document_num ?? "document", row.revision_code);
                       } catch (error: unknown) {
                         const text = error instanceof Error ? error.message : "Нет дополнительных файлов";
                         message.error(text);
@@ -1508,6 +1521,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
       <RevisionPdfAnnotator
         revisionId={selectedRevisionId}
         open={pdfAnnotatorOpen}
+        downloadFileName={docDownloadName(card?.document_num, selectedRevision?.revision_code, ".pdf")}
         onClose={() => {
           setPdfAnnotatorOpen(false);
           setPdfFocusCommentId(null);

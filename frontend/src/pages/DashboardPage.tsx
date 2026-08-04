@@ -270,7 +270,14 @@ export default function DashboardPage({
         </Space>
       ),
     },
-    { title: "Дата создания", dataIndex: "created_at", key: "created_at", width: 170, render: (v) => formatDateTimeRu(v) },
+    {
+      title: "Дата создания",
+      dataIndex: "created_at",
+      key: "created_at",
+      width: 170,
+      render: (v) => formatDateTimeRu(v),
+      sorter: (a, b) => new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime(),
+    },
     { title: "Проект", dataIndex: "project_code", key: "project_code", width: 120, render: (v) => v ?? "—" },
     {
       title: "Роль",
@@ -278,7 +285,15 @@ export default function DashboardPage({
       width: 220,
       render: (_, row) => (row.project_code ? (roleLabelByProjectCode[row.project_code] ?? "—") : "—"),
     },
-    { title: "Дедлайн", dataIndex: "task_deadline", key: "task_deadline", width: 130, render: (v) => formatDeadlineRu(v) },
+    {
+      title: "Дедлайн",
+      dataIndex: "task_deadline",
+      key: "task_deadline",
+      width: 130,
+      render: (v) => formatDeadlineRu(v),
+      sorter: (a, b) => String(a.task_deadline ?? "").localeCompare(String(b.task_deadline ?? "")),
+      defaultSortOrder: "ascend" as const,
+    },
     {
       title: "От кого",
       key: "author_status",
@@ -350,12 +365,7 @@ export default function DashboardPage({
         </Col>
         <Col span={6}>
           <Card className="hrp-card dashboard-stat-card" hoverable onClick={() => onNavigate("notifications")}>
-            <Statistic title="Уведомления" value={activeNotifications.length} />
-          </Card>
-        </Col>
-        <Col span={6}>
-          <Card className="hrp-card dashboard-stat-card" hoverable onClick={() => onNavigate("notifications")}>
-            <Statistic title="Непрочитанные" value={unread} valueStyle={{ color: unread > 0 ? "#cf1322" : "#3f8600" }} />
+            <Statistic title="Уведомления" value={unread} valueStyle={{ color: unread > 0 ? "#cf1322" : "#3f8600" }} />
           </Card>
         </Col>
         <Col span={6}>
