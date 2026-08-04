@@ -440,9 +440,11 @@ class CommentAttachmentRead(BaseModel):
 
 class RevisionRegistryCommentRead(BaseModel):
     id: int
+    parent_id: int | None = None
     text: str
     status: CommentStatus
     review_code: ReviewCode | None = None
+    in_crs: bool = False
     contractor_status: ContractorCommentStatus | None = None
     is_published_to_contractor: bool = False
     author_id: int

@@ -563,9 +563,15 @@ function MainApp(): JSX.Element {
                       } else {
                         setActiveSection("trm");
                       }
+                    } else if (item.revision_id) {
+                      setOpenedRevisionId(item.revision_id);
+                      setActiveSection("revision_card");
                     } else {
-                      setOpenedRevisionId(item.revision_id ?? null);
-                      setActiveSection(item.revision_id ? "revision_card" : "projects");
+                      // Уведомление уровня документа (напр. просрочка старта) —
+                      // ведём в реестр «Документы», а не в Проекты: реестр
+                      // корректно показывает документ даже без ревизий.
+                      setOpenedRevisionId(null);
+                      setActiveSection("documents_registry");
                     }
                   }}
                 />

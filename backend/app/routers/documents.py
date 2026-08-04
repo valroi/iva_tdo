@@ -996,9 +996,11 @@ def list_documents_registry(
             comment_rows = [
                 RevisionRegistryCommentRead(
                     id=item.id,
+                    parent_id=item.parent_id,
                     text=item.text,
                     status=item.status,
                     review_code=item.review_code,
+                    in_crs=item.in_crs,
                     contractor_status=item.contractor_status,
                     is_published_to_contractor=item.is_published_to_contractor,
                     author_id=item.author_id,
@@ -1068,7 +1070,9 @@ def list_documents_registry(
                 revisions=revision_rows,
             )
         )
-        if current_user.permissions.get("can_process_tdo_queue"):
+        # Просрочки — задача рук. ТДО подрядчика, не админа-наблюдателя
+        # (иначе админ засыпан уведомлениями по всем документам).
+        if current_user.permissions.get("can_process_tdo_queue") and current_user.role.value != "admin":
             if is_overdue:
                 exists_overdue_notification = (
                     db.query(Notification.id)

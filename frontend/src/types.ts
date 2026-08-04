@@ -256,9 +256,11 @@ export interface RevisionCard {
 
 export interface RegistryRevisionCommentItem {
   id: number;
+  parent_id: number | null;
   text: string;
   status: "OPEN" | "IN_PROGRESS" | "RESOLVED" | "REJECTED";
   review_code: "AP" | "AN" | "CO" | "RJ" | null;
+  in_crs?: boolean;
   contractor_status: "I" | "A" | null;
   is_published_to_contractor: boolean;
   author_id: number;
