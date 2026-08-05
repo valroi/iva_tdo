@@ -3441,7 +3441,7 @@ def send_crs_comments(
                 db,
                 user_id=member_id,
                 revision_id=revision.id,
-                event_types=["TDO_SENT_TO_OWNER", "OWNER_COMMENT_CREATED", "CARRY_OVER_DECISION", "NEW_COMMENT", "COMMENT_RESPONSE"],
+                event_types=["TDO_SENT_TO_OWNER", "OWNER_COMMENT_CREATED", "CARRY_OVER_DECISION", "NEW_COMMENT", "COMMENT_RESPONSE", "REVIEW_DEADLINE_SOON", "R_NO_COMMENTS"],
             )
             (
                 db.query(Notification)
@@ -3461,6 +3461,8 @@ def send_crs_comments(
                             "OWNER_COMMENTS_PUBLISHED",
                             "REVISION_UPLOADED_FOR_TDO",
                             "NEW_REVISION_FOR_TDO",
+                            "REVIEW_DEADLINE_SOON",
+                            "R_NO_COMMENTS",
                         ]
                     ),
                 )
@@ -3481,6 +3483,8 @@ def send_crs_comments(
                 "OWNER_COMMENTS_PUBLISHED",
                 "REVISION_UPLOADED_FOR_TDO",
                 "NEW_REVISION_FOR_TDO",
+                "REVIEW_DEADLINE_SOON",
+                "R_NO_COMMENTS",
             ],
         )
 

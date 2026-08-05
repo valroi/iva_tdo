@@ -1,5 +1,5 @@
 import { Alert, App, Button, Card, Descriptions, Modal, Space, Steps, Switch, Table, Tabs, Tag, Tooltip, Typography, Upload } from "antd";
-import { DownloadOutlined, PaperClipOutlined, UploadOutlined } from "@ant-design/icons";
+import { DownloadOutlined, FileTextOutlined, PaperClipOutlined, UploadOutlined } from "@ant-design/icons";
 import { useEffect, useMemo, useState } from "react";
 
 import { addCommentToCrs, createComment, deleteOwnerComment, docDownloadName, downloadCommentAttachment, downloadCommentsExport, downloadRevisionAnnotatedPdf, downloadRevisionAttachmentsArchive, getRevisionCard, getRevisionReviewerStates, listCarryDecisions, listCommentAttachments, listRevisionEvents, markRevisionNoComments, ownerCommentDecision, setCarryDecision, setRevisionReviewCode, uploadRevisionPdf } from "../api";
@@ -222,6 +222,12 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
     reviewerSummary?.reviewers.find((r) => r.user_id === currentUser.id)?.no_comments,
   );
   const rBlockedByNoComments = isRMatrixReviewer && currentUserMarkedNoComments;
+  // CRS уже сформирована и отправлена подрядчику по выбранной ревизии —
+  // мяч у подрядчика, «рассмотрение заказчиком» закрыто.
+  const crsSentForSelectedRevision =
+    selectedRevision?.status === "OWNER_COMMENTS_SENT" ||
+    selectedRevision?.status === "CONTRACTOR_REPLY_I" ||
+    selectedRevision?.status === "CONTRACTOR_REPLY_A";
   const isSelectedRevisionClosedForPdfUpdate =
     selectedRevision?.status === "CONTRACTOR_REPLY_A" || selectedRevision?.status === "SUBMITTED";
   // AP ставит ТОЛЬКО LR заказчика. R может комментировать, но финальное
@@ -415,6 +421,22 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
             </Button>
           </Tooltip>
         )}
+        {/* Просмотр PDF — доступен ВСЕМ ролям всегда, пока к ревизии прикреплён
+            PDF (даже после отправки замечаний). Создавать новые замечания при
+            этом нельзя — только смотреть; ограничения внутри просмотрщика. */}
+        {selectedRevision?.file_path && (
+          <Tooltip title="Открыть PDF для просмотра (без создания замечаний)">
+            <Button
+              icon={<FileTextOutlined />}
+              onClick={() => {
+                setPdfFocusCommentId(null);
+                setPdfAnnotatorOpen(true);
+              }}
+            >
+              Просмотр PDF
+            </Button>
+          </Tooltip>
+        )}
         {/* Кнопка PDF: для owner — «Комментировать» только когда ревизия
             на рассмотрении заказчика; для contractor/admin — всегда «Открыть»
             для просмотра. В прочих owner-статусах кнопка прячется целиком. */}
@@ -602,6 +624,8 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
                 <Typography.Text>{r.full_name}</Typography.Text>
                 {reviewerSummary.approved ? (
                   <Tag color="success">согласовано (AP)</Tag>
+                ) : crsSentForSelectedRevision && r.role === "LR" ? (
+                  <Tag color="processing">замечания отправлены (CRS)</Tag>
                 ) : r.no_comments ? (
                   <Tag color="success">без замечаний{r.decided_at ? ` · ${formatDateTimeRu(r.decided_at)}` : ""}</Tag>
                 ) : r.has_comments ? (

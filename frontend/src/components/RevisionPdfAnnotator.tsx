@@ -3,7 +3,7 @@ import { DownloadOutlined, PaperClipOutlined } from "@ant-design/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 
-import { addCommentToCrs, createComment, getAuthHeaders, getRevisionPdfUrl, ownerCommentDecision, respondToComment, uploadCommentAttachment } from "../api";
+import { addCommentToCrs, createComment, downloadCommentAttachment, getAuthHeaders, getRevisionPdfUrl, listCommentAttachments, ownerCommentDecision, respondToComment, uploadCommentAttachment } from "../api";
 import type { CommentItem } from "../types";
 
 const workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
@@ -474,8 +474,8 @@ export default function RevisionPdfAnnotator({
                 const activeOnes = allParents.filter((item) => item.status !== "REJECTED");
                 const rejectedOnes = allParents.filter((item) => item.status === "REJECTED");
                 const renderItem = (item: CommentItem): JSX.Element => (
+                    <Space key={item.id} size={4} style={{ width: "100%" }} align="center">
                     <Tooltip
-                      key={item.id}
                       title={(item.text ?? "").replace(/^\[(REMARK|QUESTION)\]\s*/i, "")}
                       placement="topLeft"
                       mouseEnterDelay={0.3}
@@ -483,7 +483,7 @@ export default function RevisionPdfAnnotator({
                       <Button
                         size="small"
                         type={activeCommentId === item.id ? "primary" : "default"}
-                        style={{ width: "100%", textAlign: "left", justifyContent: "flex-start", padding: "2px 8px" }}
+                        style={{ flex: 1, minWidth: 0, textAlign: "left", justifyContent: "flex-start", padding: "2px 8px" }}
                         onMouseEnter={() => setHoveredCommentId(item.id)}
                         onMouseLeave={() => setHoveredCommentId((prev) => (prev === item.id ? null : prev))}
                         onClick={() => jumpToComment(item)}
@@ -515,6 +515,32 @@ export default function RevisionPdfAnnotator({
                         </Space>
                       </Button>
                     </Tooltip>
+                    {item.attachment_count ? (
+                      <Tooltip title="Скачать файл(ы), приложенные к замечанию">
+                        <Button
+                          size="small"
+                          icon={<PaperClipOutlined />}
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            try {
+                              const files = await listCommentAttachments(item.id);
+                              if (!files.length) {
+                                message.info("Файлов нет");
+                                return;
+                              }
+                              for (const f of files) {
+                                await downloadCommentAttachment(f.id, f.file_name);
+                              }
+                            } catch (error) {
+                              message.error(error instanceof Error ? error.message : "Не удалось скачать файл");
+                            }
+                          }}
+                        >
+                          {item.attachment_count}
+                        </Button>
+                      </Tooltip>
+                    ) : null}
+                    </Space>
                 );
                 return (
                   <Tabs
