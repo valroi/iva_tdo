@@ -17,6 +17,7 @@ from app.deps import get_current_user, has_permission, require_permissions
 from app.models import (
     CarryOverDecision,
     Comment,
+    CommentStatus,
     CipherTemplate,
     CipherTemplateField,
     Document,
@@ -249,6 +250,41 @@ def _validate_weight_limit(
         )
 
 
+def _latest_effective_review_code(db: Session, mdr_id: int) -> str | None:
+    """Код замечаний по последней ревизии документа этого MDR: явный
+    review_code ревизии, иначе «худший» из опубликованных родительских
+    замечаний (RJ>CO>AN>AP). None — если ревизий/кодов нет."""
+    doc = db.query(Document).filter(Document.mdr_id == mdr_id).first()
+    if doc is None:
+        return None
+    latest = (
+        db.query(Revision)
+        .filter(Revision.document_id == doc.id)
+        .order_by(Revision.id.desc())
+        .first()
+    )
+    if latest is None:
+        return None
+    if latest.review_code is not None:
+        return latest.review_code.value if hasattr(latest.review_code, "value") else str(latest.review_code)
+    rows = (
+        db.query(Comment.review_code)
+        .filter(
+            Comment.revision_id == latest.id,
+            Comment.parent_id.is_(None),
+            Comment.is_published_to_contractor.is_(True),
+            Comment.status != CommentStatus.REJECTED,
+            Comment.review_code.isnot(None),
+        )
+        .all()
+    )
+    vals = {(c[0].value if hasattr(c[0], "value") else str(c[0])) for c in rows if c[0] is not None}
+    for code in ("RJ", "CO", "AN", "AP"):
+        if code in vals:
+            return code
+    return None
+
+
 @router.get("", response_model=list[MDRRead])
 def list_mdr(
     db: Session = Depends(get_db),
@@ -258,7 +294,13 @@ def list_mdr(
     query = db.query(MDRRecord)
     if project_code:
         query = query.filter(MDRRecord.project_code == project_code)
-    return query.order_by(MDRRecord.id.desc()).all()
+    rows = query.order_by(MDRRecord.id.desc()).all()
+    result: list[MDRRead] = []
+    for item in rows:
+        data = MDRRead.model_validate(item, from_attributes=True)
+        data.latest_effective_review_code = _latest_effective_review_code(db, item.id)
+        result.append(data)
+    return result
 
 
 @router.get("/{mdr_id}", response_model=MDRRead)

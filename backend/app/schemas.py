@@ -266,6 +266,9 @@ class MDRRead(MDRBase):
     id: int
     created_at: datetime
     updated_at: datetime
+    # Эффективный код замечаний по последней ревизии документа (AN/CO/RJ/AP)
+    # для отображения в реестре; None — если ревизий/замечаний ещё нет.
+    latest_effective_review_code: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

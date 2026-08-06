@@ -62,6 +62,7 @@ export interface MDRRecord {
   progress_percent: number;
   doc_weight: number;
   review_code: "AP" | "AN" | "CO" | "RJ" | null;
+  latest_effective_review_code?: "AP" | "AN" | "CO" | "RJ" | null;
   status: string;
   dates?: Record<string, unknown>;
   parent_id?: number | null;

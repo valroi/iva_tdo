@@ -162,21 +162,23 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
       key: "doc_number",
       width: 280,
       render: (value: string, row: MDRRecord) => (
-        <Space size={4} style={{ paddingLeft: row.parent_id ? 16 : 0 }}>
-          {row.parent_id ? <Typography.Text type="secondary">↳</Typography.Text> : null}
-          <Button
-            type="link"
-            style={{ padding: 0 }}
-            onClick={() => onOpenDocument?.(normalizePdCipher(value))}
-          >
-            <Typography.Text
-              ellipsis={{ tooltip: normalizePdCipher(value) }}
-              style={{ whiteSpace: "nowrap", display: "inline-block", maxWidth: row.parent_id ? 240 : 260 }}
+        <Space direction="vertical" size={2} style={{ paddingLeft: row.parent_id ? 16 : 0, maxWidth: 260 }}>
+          <Space size={4} style={{ width: "100%" }}>
+            {row.parent_id ? <Typography.Text type="secondary">↳</Typography.Text> : null}
+            <Button
+              type="link"
+              style={{ padding: 0 }}
+              onClick={() => onOpenDocument?.(normalizePdCipher(value))}
             >
-              {normalizePdCipher(value)}
-            </Typography.Text>
-          </Button>
-          {row.parent_id ? <Tag color="geekblue" style={{ marginInlineStart: 0 }}>вложенный</Tag> : null}
+              <Typography.Text
+                ellipsis={{ tooltip: normalizePdCipher(value) }}
+                style={{ whiteSpace: "nowrap", display: "inline-block", maxWidth: 230 }}
+              >
+                {normalizePdCipher(value)}
+              </Typography.Text>
+            </Button>
+          </Space>
+          {row.parent_id ? <Tag color="geekblue" style={{ margin: 0 }}>вложенный</Tag> : null}
         </Space>
       ),
     },
@@ -202,9 +204,13 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
     },
     {
       title: "Код замечаний",
-      dataIndex: "review_code",
       key: "review_code",
-      render: (value: MDRRecord["review_code"]) => (value ? <Tag>{value}</Tag> : "—"),
+      render: (_: unknown, row: MDRRecord) => {
+        const code = row.latest_effective_review_code ?? row.review_code;
+        if (!code) return "—";
+        const color = code === "AP" ? "green" : code === "AN" ? "blue" : code === "CO" ? "orange" : code === "RJ" ? "red" : "default";
+        return <Tag color={color}>{code}</Tag>;
+      },
     },
     { title: "Вес", dataIndex: "doc_weight", key: "doc_weight" },
     ...(canManageMdr

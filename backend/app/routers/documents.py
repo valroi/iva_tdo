@@ -632,8 +632,17 @@ def list_owner_review_queue(
         scan_and_notify(db)
     except Exception:  # noqa: BLE001 — фоновая мелочь не должна ронять очередь
         pass
+    # Очередь рассмотрения — задачи ревьюверов/подрядчика, НЕ наблюдателя.
+    # Наблюдатель (member_role=observer) видит ТРМ через отдельную страницу «ТРМ»,
+    # а «задач» у него быть не должно (иначе на дашборде висел чужой список).
     membership_project_ids = {
-        item.project_id for item in db.query(ProjectMember).filter(ProjectMember.user_id == current_user.id).all()
+        item.project_id
+        for item in db.query(ProjectMember)
+        .filter(
+            ProjectMember.user_id == current_user.id,
+            ProjectMember.member_role != ProjectMemberRole.observer,
+        )
+        .all()
     }
     matrix_project_ids = {
         item.project_id
@@ -1450,20 +1459,41 @@ def download_revision_attachments_archive(
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
     attachments = db.query(DocumentAttachment).filter(DocumentAttachment.revision_id == revision.id).all()
-    if not attachments:
+    # В архив кладём и основной PDF ревизии (если загружен), и редактируемые
+    # доп.файлы — одним zip. Санитайзим имена для arcname.
+    safe_doc = re.sub(r"[^A-Za-z0-9._-]+", "_", document.document_num or "document")
+    safe_rev = re.sub(r"[^A-Za-z0-9._-]+", "_", revision.revision_code or "")
+    files_to_zip: list[tuple[Path, str]] = []
+    if revision.file_path:
+        pdf_path = Path(revision.file_path)
+        if pdf_path.exists():
+            files_to_zip.append((pdf_path, f"{safe_doc}_{safe_rev}.pdf"))
+    for item in attachments:
+        p = Path(item.file_path)
+        if p.exists():
+            files_to_zip.append((p, item.file_name))
+    if not files_to_zip:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="К этой ревизии не приложены файлы")
     temp_file = tempfile.NamedTemporaryFile(prefix=f"rev_{revision.id}_", suffix=".zip", delete=False)
     temp_path = Path(temp_file.name)
     temp_file.close()
     with zipfile.ZipFile(temp_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for item in attachments:
-            file_path = Path(item.file_path)
-            if file_path.exists():
-                archive.write(file_path, arcname=item.file_name)
+        seen_names: set[str] = set()
+        for src, arcname in files_to_zip:
+            # избегаем коллизий имён в архиве
+            name = arcname
+            i = 1
+            while name in seen_names:
+                stem = Path(arcname).stem
+                suffix = Path(arcname).suffix
+                name = f"{stem}_{i}{suffix}"
+                i += 1
+            seen_names.add(name)
+            archive.write(src, arcname=name)
     return FileResponse(
         path=str(temp_path),
         media_type="application/zip",
-        filename=f"{document.document_num}_files.zip",
+        filename=f"{safe_doc}_{safe_rev}_files.zip",
     )
 
 
