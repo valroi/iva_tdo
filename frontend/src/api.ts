@@ -511,6 +511,36 @@ export function createComment(payload: Record<string, unknown>): Promise<Comment
   });
 }
 
+export interface TrmRevisionItem {
+  revision_id: number;
+  document_num: string;
+  document_title: string;
+  revision_code: string;
+  issue_purpose: string;
+  status: string;
+  review_code: "AP" | "AN" | "CO" | "RJ" | null;
+  created_at: string;
+}
+
+export interface TrmListItem {
+  trm_number: string;
+  project_code: string;
+  document_count: number;
+  last_status: string | null;
+  review_deadline: string | null;
+  revisions: TrmRevisionItem[];
+}
+
+export function listTrm(): Promise<TrmListItem[]> {
+  return request<TrmListItem[]>("/trm");
+}
+
+export async function downloadTrmTransmittal(trmNumber: string): Promise<void> {
+  const blob = await requestBlob(`/trm/${encodeURIComponent(trmNumber)}/transmittal.xlsx`);
+  const safe = trmNumber.replace(/[^A-Za-z0-9._-]+/g, "_");
+  downloadBlob(blob, `${safe}_transmittal.xlsx`);
+}
+
 export interface CommentAttachmentItem {
   id: number;
   comment_id: number;

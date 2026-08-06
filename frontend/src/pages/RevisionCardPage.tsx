@@ -17,6 +17,7 @@ interface Props {
   revisionId: number;
   currentUser: User;
   onBack: () => void;
+  onOpenTrm?: (trmNumber: string) => void;
 }
 
 const REVIEW_EVENT_LABELS: Record<string, string> = {
@@ -63,7 +64,7 @@ function CommentAttachmentsLink({ comment }: { comment: CommentItem }): JSX.Elem
   );
 }
 
-export default function RevisionCardPage({ revisionId, currentUser, onBack }: Props): JSX.Element {
+export default function RevisionCardPage({ revisionId, currentUser, onBack, onOpenTrm }: Props): JSX.Element {
   const { message, modal } = App.useApp();
   const [card, setCard] = useState<RevisionCard | null>(null);
   const [selectedRevisionId, setSelectedRevisionId] = useState<number>(revisionId);
@@ -806,7 +807,20 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack }: Pr
               width: 260,
               render: (v: string) => <RevisionStatusCell currentUser={currentUser} status={v} />,
             },
-            { title: "TRM", dataIndex: "trm_number", render: (v: string | null) => v ?? "—" },
+            {
+              title: "TRM",
+              dataIndex: "trm_number",
+              render: (v: string | null) =>
+                v ? (
+                  onOpenTrm ? (
+                    <Button type="link" style={{ padding: 0 }} onClick={() => onOpenTrm(v)}>{v}</Button>
+                  ) : (
+                    v
+                  )
+                ) : (
+                  "—"
+                ),
+            },
             { title: "Создана", dataIndex: "created_at", width: 180, render: (v) => formatDateTimeRu(v) },
             {
               title: "Действие",

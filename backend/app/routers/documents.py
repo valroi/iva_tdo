@@ -70,6 +70,8 @@ from app.schemas import (
     ReviewReportRow,
     RevisionReviewerSummary,
     TdoQueueItem,
+    TrmListItem,
+    TrmRevisionItem,
 )
 
 router = APIRouter()
@@ -756,6 +758,158 @@ def list_owner_review_queue(
         )
     db.commit()
     return result
+
+
+def _trm_allowed_project_codes(db: Session, current_user: User) -> set[str] | None:
+    """Коды проектов, где пользователь — участник (любая роль, вкл. наблюдателя).
+    None = админ (все проекты)."""
+    if current_user.role.value == "admin":
+        return None
+    rows = (
+        db.query(Project.code)
+        .join(ProjectMember, ProjectMember.project_id == Project.id)
+        .filter(ProjectMember.user_id == current_user.id)
+        .all()
+    )
+    return {r[0] for r in rows if r[0]}
+
+
+@router.get("/trm", response_model=list[TrmListItem])
+def list_trm(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Реестр ТРМ по проектам пользователя (read-only, доступен всем участникам,
+    включая наблюдателя). Группировка по trm_number."""
+    allowed = _trm_allowed_project_codes(db, current_user)
+    q = (
+        db.query(Revision, Document, MDRRecord)
+        .join(Document, Document.id == Revision.document_id)
+        .join(MDRRecord, MDRRecord.id == Document.mdr_id)
+        .filter(Revision.trm_number.isnot(None))
+    )
+    if allowed is not None:
+        q = q.filter(MDRRecord.project_code.in_(list(allowed) or ["__none__"]))
+    rows = q.order_by(Revision.id.asc()).all()
+    groups: dict[str, dict] = {}
+    for rev, doc, mdr in rows:
+        g = groups.setdefault(
+            rev.trm_number,
+            {"project_code": mdr.project_code, "docs": set(), "revisions": [], "last_status": None, "deadline": None, "last_id": -1},
+        )
+        g["docs"].add(doc.id)
+        g["revisions"].append(
+            TrmRevisionItem(
+                revision_id=rev.id,
+                document_num=doc.document_num,
+                document_title=doc.title,
+                revision_code=rev.revision_code,
+                issue_purpose=rev.issue_purpose,
+                status=rev.status,
+                review_code=rev.review_code,
+                created_at=rev.created_at,
+            )
+        )
+        if rev.id > g["last_id"]:
+            g["last_id"] = rev.id
+            g["last_status"] = rev.status
+            g["deadline"] = rev.review_deadline
+    result = [
+        TrmListItem(
+            trm_number=trm,
+            project_code=g["project_code"],
+            document_count=len(g["docs"]),
+            last_status=g["last_status"],
+            review_deadline=g["deadline"],
+            revisions=g["revisions"],
+        )
+        for trm, g in groups.items()
+    ]
+    # Новые ТРМ (больший серийник) сверху.
+    result.sort(key=lambda x: x.trm_number, reverse=True)
+    return result
+
+
+@router.get("/trm/{trm_number}/transmittal.xlsx")
+def export_trm_transmittal_xlsx(
+    trm_number: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Сопроводительный лист ТРМ (Excel): шапка + список документов/ревизий."""
+    from io import BytesIO
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    from fastapi.responses import StreamingResponse
+
+    allowed = _trm_allowed_project_codes(db, current_user)
+    q = (
+        db.query(Revision, Document, MDRRecord)
+        .join(Document, Document.id == Revision.document_id)
+        .join(MDRRecord, MDRRecord.id == Document.mdr_id)
+        .filter(Revision.trm_number == trm_number)
+    )
+    if allowed is not None:
+        q = q.filter(MDRRecord.project_code.in_(list(allowed) or ["__none__"]))
+    rows = q.order_by(Document.document_num, Revision.id).all()
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ТРМ не найден или нет доступа")
+
+    project_code = rows[0][2].project_code
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Transmittal"
+    header_pairs = [
+        ("Сопроводительный лист (ТРМ)", ""),
+        ("Номер ТРМ", trm_number),
+        ("Проект", project_code),
+        ("Дата формирования", datetime.utcnow().strftime("%Y-%m-%d")),
+        ("Документов в ТРМ", str(len({d.id for _r, d, _m in rows}))),
+    ]
+    for label, value in header_pairs:
+        ws.append([label, value])
+        ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
+    ws.append([])
+
+    header_row = ws.max_row + 1
+    headers = ["№", "Шифр документа", "Название", "Ревизия", "Цель выпуска", "Статус", "Код замечаний"]
+    ws.append(headers)
+    for cell in ws[header_row]:
+        cell.font = Font(bold=True)
+
+    status_label = {
+        "REVISION_CREATED": "Ревизия создана",
+        "UPLOADED_WAITING_TDO": "Загружен PDF (ожидает ТДО)",
+        "UNDER_REVIEW": "На рассмотрении заказчиком",
+        "OWNER_COMMENTS_SENT": "Замечания отправлены подрядчику",
+        "CONTRACTOR_REPLY_I": "Ответ подрядчика (обсуждение)",
+        "CONTRACTOR_REPLY_A": "Ответ подрядчика (принято)",
+        "CANCELLED_BY_TDO": "Отклонено ТДО",
+        "SUBMITTED": "Выпущено",
+    }
+    for idx, (rev, doc, _mdr) in enumerate(rows, start=1):
+        ws.append([
+            idx,
+            doc.document_num,
+            doc.title or "",
+            rev.revision_code,
+            rev.issue_purpose,
+            status_label.get(rev.status, rev.status),
+            (rev.review_code.value if rev.review_code else ""),
+        ])
+    widths = [5, 30, 46, 10, 14, 30, 14]
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[ws.cell(row=header_row, column=i).column_letter].width = w
+
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", trm_number)
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={safe}_transmittal.xlsx"},
+    )
 
 
 def _project_reference_value(db: Session, *, project_id: int, code: str) -> str | None:

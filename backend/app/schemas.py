@@ -677,6 +677,26 @@ class RevisionOverviewRead(BaseModel):
     created_at: datetime
 
 
+class TrmRevisionItem(BaseModel):
+    revision_id: int
+    document_num: str
+    document_title: str
+    revision_code: str
+    issue_purpose: str
+    status: str
+    review_code: ReviewCode | None = None
+    created_at: datetime
+
+
+class TrmListItem(BaseModel):
+    trm_number: str
+    project_code: str
+    document_count: int
+    last_status: str | None = None
+    review_deadline: date | None = None
+    revisions: list[TrmRevisionItem] = Field(default_factory=list)
+
+
 class PublishCommentsResult(BaseModel):
     revision_id: int
     published_count: int

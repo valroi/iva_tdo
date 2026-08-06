@@ -17,6 +17,7 @@ import { getDisplayRevisionCode, getRemarksSummaryLabel } from "../utils/revisio
 interface Props {
   currentUser: User;
   onOpenRevision: (target: { revision_id: number }) => void;
+  onOpenTrm?: (trmNumber: string) => void;
   presetFilters?: { overdue_only?: boolean } | null;
   onPresetConsumed?: () => void;
 }
@@ -32,7 +33,7 @@ interface Filters {
   overdue_only?: boolean;
 }
 
-export default function DocumentsRegistryPage({ currentUser, onOpenRevision, presetFilters, onPresetConsumed }: Props): JSX.Element {
+export default function DocumentsRegistryPage({ currentUser, onOpenRevision, onOpenTrm, presetFilters, onPresetConsumed }: Props): JSX.Element {
   const { message } = App.useApp();
   const [rows, setRows] = useState<DocumentRegistryItem[]>([]);
   const [filters, setFilters] = useState<Filters>({ comments_scope: "ANY" });
@@ -163,8 +164,21 @@ export default function DocumentsRegistryPage({ currentUser, onOpenRevision, pre
     },
     {
       title: "TRM",
-      width: 120,
-      render: (_, row) => (row.trm_flag ? <Tag color="blue">{row.trm_number ?? "Да"}</Tag> : "—"),
+      width: 140,
+      render: (_, row) =>
+        row.trm_flag && row.trm_number ? (
+          onOpenTrm ? (
+            <Button type="link" size="small" style={{ padding: 0 }} onClick={() => onOpenTrm(row.trm_number!)}>
+              {row.trm_number}
+            </Button>
+          ) : (
+            <Tag color="blue">{row.trm_number}</Tag>
+          )
+        ) : row.trm_flag ? (
+          <Tag color="blue">Да</Tag>
+        ) : (
+          "—"
+        ),
     },
     { title: "Автор", dataIndex: "author_name", width: 160, render: (v) => v ?? "—", ellipsis: true },
     {

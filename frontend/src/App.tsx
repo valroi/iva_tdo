@@ -2,6 +2,7 @@ import {
   AuditOutlined,
   BellOutlined,
   BarChartOutlined,
+  ContainerOutlined,
   FileTextOutlined,
   HomeOutlined,
   LogoutOutlined,
@@ -34,6 +35,7 @@ import SessionsPage from "./pages/SessionsPage";
 import TdoQueuePage from "./pages/TdoQueuePage";
 import RevisionsPage from "./pages/RevisionsPage";
 import TrmPage from "./pages/TrmPage";
+import TrmRegistryPage from "./pages/TrmRegistryPage";
 import RevisionCardPage from "./pages/RevisionCardPage";
 import DocumentsRegistryPage from "./pages/DocumentsRegistryPage";
 import CrsPage from "./pages/CrsPage";
@@ -51,6 +53,7 @@ type Section =
   | "dashboard"
   | "projects"
   | "documents_registry"
+  | "trm_registry"
   | "revisions"
   | "trm"
   | "reporting"
@@ -152,6 +155,7 @@ function MainApp(): JSX.Element {
       "projects",
       "vendors",
       "documents_registry",
+      "trm_registry",
       "revisions",
       "trm",
       "reporting",
@@ -187,6 +191,12 @@ function MainApp(): JSX.Element {
   } | null>(null);
   const [openedRevisionId, setOpenedRevisionId] = useState<number | null>(initialHash.revisionId);
   const [documentsRegistryPreset, setDocumentsRegistryPreset] = useState<{ overdue_only?: boolean } | null>(null);
+  // ТРМ, на который надо перейти по клику-ссылке (раскрыть на странице «ТРМ»).
+  const [focusTrm, setFocusTrm] = useState<string | null>(null);
+  const openTrm = useCallback((trmNumber: string) => {
+    setFocusTrm(trmNumber);
+    setActiveSection("trm_registry");
+  }, []);
 
   // История секций для кнопок «Назад» — возвращаемся туда, откуда пришли,
   // а не на фиксированную страницу. Пуш прошлой секции при каждой смене;
@@ -335,6 +345,7 @@ function MainApp(): JSX.Element {
       { key: "dashboard", icon: <HomeOutlined />, label: "Обзор" },
       { key: "projects", icon: <ProjectOutlined />, label: "Проекты" },
       { key: "documents_registry", icon: <FileTextOutlined />, label: "Документы" },
+      { key: "trm_registry", icon: <ContainerOutlined />, label: "ТРМ" },
       { key: "notifications", icon: <BellOutlined />, label: `Уведомления${unreadNotificationsCount ? ` (${unreadNotificationsCount})` : ""}` },
       { key: "sessions", icon: <SafetyOutlined />, label: "Сессии" },
       { key: "help", icon: <QuestionCircleOutlined />, label: "Инструкция" },
@@ -367,6 +378,7 @@ function MainApp(): JSX.Element {
     projects: "Проекты",
     vendors: "Закупки",
     documents_registry: "Документы",
+    trm_registry: "ТРМ",
     revisions: "Ревизии",
     trm: "TRM",
     reporting: "Отчетность",
@@ -518,6 +530,18 @@ function MainApp(): JSX.Element {
                   currentUser={user}
                   presetFilters={documentsRegistryPreset}
                   onPresetConsumed={() => setDocumentsRegistryPreset(null)}
+                  onOpenTrm={openTrm}
+                  onOpenRevision={(target) => {
+                    setOpenedRevisionId(target.revision_id);
+                    setActiveSection("revision_card");
+                  }}
+                />
+              )}
+              {activeSection === "trm_registry" && user && (
+                <TrmRegistryPage
+                  currentUser={user}
+                  focusTrm={focusTrm}
+                  onFocusHandled={() => setFocusTrm(null)}
                   onOpenRevision={(target) => {
                     setOpenedRevisionId(target.revision_id);
                     setActiveSection("revision_card");
@@ -542,6 +566,7 @@ function MainApp(): JSX.Element {
                   revisionId={openedRevisionId}
                   currentUser={user}
                   onBack={goBack}
+                  onOpenTrm={openTrm}
                 />
               )}
               {activeSection === "notifications" && (
