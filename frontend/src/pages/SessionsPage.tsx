@@ -1,3 +1,4 @@
+import { paginationProps } from "../utils/pagination";
 import { Button, Card, Space, Table, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useState } from "react";
@@ -79,7 +80,7 @@ export default function SessionsPage(): JSX.Element {
         </Typography.Title>
       </Space>
       <Card className="hrp-card">
-        <Table rowKey="id" loading={loading} size="small" columns={columns} dataSource={sessions} pagination={false} locale={{ emptyText: "Активных сессий нет." }} />
+        <Table rowKey="id" loading={loading} size="small" columns={columns} dataSource={sessions} pagination={paginationProps("sessions")} locale={{ emptyText: "Активных сессий нет." }} />
       </Card>
     </div>
   );

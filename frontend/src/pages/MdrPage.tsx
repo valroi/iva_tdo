@@ -1,3 +1,4 @@
+import { paginationProps } from "../utils/pagination";
 import { Button, Dropdown, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
 import { DownOutlined, FileExcelOutlined } from "@ant-design/icons";
 import type { MenuProps } from "antd";
@@ -690,7 +691,7 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
           </Button>
         )}
       </Space>
-      <Table rowKey="id" columns={columns} dataSource={mdr} size="small" scroll={{ x: 1280 }} locale={{ emptyText: "МДР пуст. Добавьте документы через кнопку выше." }} />
+      <Table rowKey="id" columns={columns} dataSource={mdr} size="small" scroll={{ x: 1280 }} pagination={paginationProps("mdr")} locale={{ emptyText: "МДР пуст. Добавьте документы через кнопку выше." }} />
 
       <Modal
         open={open}

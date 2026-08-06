@@ -1,3 +1,4 @@
+import { paginationProps } from "../utils/pagination";
 import { Button, Card, Modal, Space, Table, Tabs, Tooltip, Typography, App } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useState } from "react";
@@ -112,7 +113,7 @@ export default function CrsPage(): JSX.Element {
                       onChange: (keys) => setSelectedIds(keys.map((key) => Number(key))),
                       getCheckboxProps: (record) => ({ disabled: Boolean(record.crs_sent_at) || record.comment_status === "REJECTED" }),
                     }}
-                    pagination={{ pageSize: 20 }}
+                    pagination={paginationProps("crs")}
                     scroll={{ x: 1300 }}
                     locale={{ emptyText: "Нет замечаний, готовых к отправке в CRS." }}
                   />
@@ -130,7 +131,7 @@ export default function CrsPage(): JSX.Element {
                   rowKey="comment_id"
                   columns={columns}
                   dataSource={archiveRows}
-                  pagination={{ pageSize: 20 }}
+                  pagination={paginationProps("crs_archive")}
                   scroll={{ x: 1300 }}
                   locale={{ emptyText: "Архив CRS пока пуст." }}
                 />

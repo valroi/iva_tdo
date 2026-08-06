@@ -1,3 +1,4 @@
+import { paginationProps } from "../utils/pagination";
 import { Button, Space, Table, Tabs, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useMemo } from "react";
@@ -102,12 +103,12 @@ export default function NotificationsPage({ notifications, onReload, onOpenTarge
           {
             key: "active",
             label: `Активные (${activeNotifications.length})`,
-            children: <Table rowKey="id" columns={columns} dataSource={activeNotifications} size="small" />,
+            children: <Table rowKey="id" columns={columns} dataSource={activeNotifications} size="small" pagination={paginationProps("notifications_active")} />,
           },
           {
             key: "archive",
             label: `Отработано (${archivedNotifications.length})`,
-            children: <Table rowKey="id" columns={columns} dataSource={archivedNotifications} size="small" />,
+            children: <Table rowKey="id" columns={columns} dataSource={archivedNotifications} size="small" pagination={paginationProps("notifications_archive")} />,
           },
         ]}
       />

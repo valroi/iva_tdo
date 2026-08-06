@@ -1,3 +1,4 @@
+import { paginationProps } from "../utils/pagination";
 import { Button, Card, Space, Table, Tooltip, Typography, App } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
@@ -157,7 +158,7 @@ export default function TrmPage({ currentUser, onOpenRevision }: Props): JSX.Ele
             rowKey="trm_number"
             columns={ownerColumns}
             dataSource={ownerRows}
-            pagination={{ pageSize: 10 }}
+            pagination={paginationProps("trm_queue")}
             scroll={{ x: "max-content" }}
             locale={{ emptyText: "TRM пока нет. Появятся после отправки ревизий на проверку." }}
             expandable={{
@@ -255,7 +256,7 @@ export default function TrmPage({ currentUser, onOpenRevision }: Props): JSX.Ele
             rowKey="trm_number"
             columns={columns}
             dataSource={rows}
-            pagination={{ pageSize: 10 }}
+            pagination={paginationProps("trm_queue")}
             expandable={{
               expandedRowRender: (row) => (
                 <Table

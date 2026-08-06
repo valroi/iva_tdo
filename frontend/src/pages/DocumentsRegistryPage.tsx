@@ -1,3 +1,4 @@
+import { paginationProps } from "../utils/pagination";
 import { Button, Card, Input, Select, Space, Table, Tag, Tooltip, Typography, App } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
@@ -340,7 +341,7 @@ export default function DocumentsRegistryPage({ currentUser, onOpenRevision, onO
                   </div>
                 ),
               }}
-              pagination={{ pageSize: 20 }}
+              pagination={paginationProps("documents_registry")}
               tableLayout="fixed"
               scroll={{ x: 1500 }}
               locale={{ emptyText: "Реестр пуст. Уточните фильтры или проверьте выбранный проект." }}
