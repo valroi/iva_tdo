@@ -3768,7 +3768,13 @@ def create_comment(
             note=f"Замечание ({payload.review_code.value})",
         )
 
-    recipients = {document.created_by_id}
+    # Замечание заказчика (R/LR) на этапе рассмотрения — ВНУТРЕННЕЕ. Подрядчик
+    # (создатель документа: рук. ТДО / разработчик) НЕ должен получать его до
+    # отправки CRS. Уведомляем только LR (консолидирует и отправит CRS); при
+    # отправке CRS подрядчик получит OWNER_COMMENTS_PUBLISHED. Раньше сюда
+    # ошибочно попадал document.created_by_id → замечания «падали» подрядчику
+    # сразу.
+    recipients: set[int] = set()
     lr_rows = (
         db.query(ReviewMatrixMember)
         .filter(
@@ -3787,7 +3793,7 @@ def create_comment(
         db.add(
             Notification(
                 user_id=receiver_id,
-                event_type="OWNER_COMMENT_CREATED" if current_user.company_type == CompanyType.owner else "NEW_COMMENT",
+                event_type="OWNER_COMMENT_CREATED",
                 message=(
                     f"Новое замечание по ревизии {rev.revision_code}. "
                     f"Автор: {current_user.full_name or current_user.email}. "
