@@ -1842,9 +1842,29 @@ def _build_annotated_pdf(original_bytes: bytes, remarks: list[dict]) -> bytes:
     # как все страницы попали в writer (индексы страниц совпадают).
     annots: list[tuple[int, tuple[float, float, float, float], str]] = []
 
-    def _short_remark(text: str | None, limit: int = 60) -> str:
-        clean = " ".join(_clean_remark_text(text).split())
-        return clean if len(clean) <= limit else clean[: limit - 1].rstrip() + "…"
+    def _wrap(c_obj, text: str, font: str, size: float, max_w: float) -> list[str]:
+        """Перенос текста по ширине панели (по словам, длинные слова режем)."""
+        words = " ".join((text or "").split()).split(" ")
+        lines: list[str] = []
+        cur = ""
+        for word in words:
+            probe = f"{cur} {word}".strip()
+            if c_obj.stringWidth(probe, font, size) <= max_w:
+                cur = probe
+                continue
+            if cur:
+                lines.append(cur)
+            # слово длиннее строки — режем посимвольно
+            while c_obj.stringWidth(word, font, size) > max_w and len(word) > 1:
+                cut = len(word)
+                while cut > 1 and c_obj.stringWidth(word[:cut], font, size) > max_w:
+                    cut -= 1
+                lines.append(word[:cut])
+                word = word[cut:]
+            cur = word
+        if cur:
+            lines.append(cur)
+        return lines
 
     writer = PdfWriter()
     for idx in range(num_pages):
@@ -1855,41 +1875,19 @@ def _build_annotated_pdf(original_bytes: bytes, remarks: list[dict]) -> bytes:
         h = float(mb.height)
         k = w / _ANNOTATOR_RENDER_WIDTH  # пиксели рендера → точки страницы
 
+        page_area = by_page_area.get(page_no, [])
+        page_point = by_page_point.get(page_no, [])
+        # Поле справа со списком замечаний листа: сам чертёж ничем не
+        # перекрывается (подписи поверх листа накладывались друг на друга).
+        panel_w = max(210.0, w * 0.32) if (page_area or page_point) else 0.0
+        total_w = w + panel_w
+
         overlay_buf = BytesIO()
-        c = canvas.Canvas(overlay_buf, pagesize=(w, h))
+        c = canvas.Canvas(overlay_buf, pagesize=(total_w, h))
         c.setStrokeColorRGB(0.85, 0.15, 0.15)
         c.setLineWidth(1.5)
 
-        def draw_label(r: dict, lx: float, ly: float) -> None:
-            """Компактная подпись замечания у метки: рисуем СВОИМ юникод-шрифтом,
-            поэтому кириллица видна в любом просмотрщике (Chrome не умеет
-            показывать кириллицу во всплывающих заметках — там Helvetica)."""
-            txt = f"#{r['number']} {r.get('review_code') or ''}: {_short_remark(r.get('text'))}".replace("  ", " ")
-            size = 7
-            tw = c.stringWidth(txt, uni, size)
-            # не вылезаем за правый край листа
-            lx = min(lx, max(4.0, w - 4.0 - tw))
-            lx = max(4.0, lx)
-            ly = min(max(6.0, ly), h - 12.0)
-            c.saveState()
-            c.setFillColorRGB(1, 0.97, 0.72)
-            c.setStrokeColorRGB(0.85, 0.6, 0.1)
-            c.setLineWidth(0.5)
-            try:
-                c.setFillAlpha(0.9)
-            except Exception:  # noqa: BLE001 — старый reportlab без альфы
-                pass
-            c.rect(lx - 2, ly - 2.5, tw + 4, size + 4, stroke=1, fill=1)
-            try:
-                c.setFillAlpha(1)
-            except Exception:  # noqa: BLE001
-                pass
-            c.setFillColorRGB(0.1, 0.1, 0.1)
-            c.setFont(uni, size)
-            c.drawString(lx, ly, txt)
-            c.restoreState()
-
-        for r in by_page_area.get(page_no, []):
+        for r in page_area:
             x = float(r["area_x"]) * k
             y_top = float(r["area_y"]) * k
             rw = float(r["area_w"]) * k
@@ -1898,25 +1896,17 @@ def _build_annotated_pdf(original_bytes: bytes, remarks: list[dict]) -> bytes:
             c.setStrokeColorRGB(0.85, 0.15, 0.15)
             c.rect(x, y_bottom, rw, rh, stroke=1, fill=0)
             # Номер в кружке у левого-верхнего угла рамки.
-            label = str(r["number"])
             c.setFillColorRGB(0.85, 0.15, 0.15)
             c.circle(x, h - y_top, 8, stroke=0, fill=1)
             c.setFillColorRGB(1, 1, 1)
             c.setFont("Helvetica-Bold", 9)
-            c.drawCentredString(x, h - y_top - 3, label)
-            # Заметка-«комментарий» рядом с рамкой (левее кружка с номером,
-            # чтобы иконка не перекрывала сам номер).
+            c.drawCentredString(x, h - y_top - 3, str(r["number"]))
+            # Заметка-«комментарий» левее кружка (иконка не перекрывает номер).
             ax = max(2.0, x - 22.0)
             annots.append((idx, (ax, h - y_top - 8.0, ax + 16.0, h - y_top + 8.0), _annotation_contents(r)))
-            # Подпись у рамки: над рамкой, а если сверху нет места — под ней.
-            label_y = h - y_top + 6
-            if label_y > h - 12:
-                label_y = max(6.0, h - y_top - rh - 12)
-            draw_label(r, x + 10, label_y)
 
-        # Точечные замечания — звёздочки в правом верхнем углу, столбиком.
-        points = by_page_point.get(page_no, [])
-        for i, r in enumerate(points):
+        # Точечные замечания — звёздочки в правом верхнем углу чертежа.
+        for i, r in enumerate(page_point):
             cx = w - 24
             cy = h - 24 - i * 22
             c.setFillColorRGB(0.85, 0.15, 0.15)
@@ -1925,19 +1915,68 @@ def _build_annotated_pdf(original_bytes: bytes, remarks: list[dict]) -> bytes:
             c.setFont("Helvetica-Bold", 9)
             c.drawCentredString(cx, cy - 12, str(r["number"]))
             annots.append((idx, (cx - 8.0, cy - 8.0, cx + 8.0, cy + 8.0), _annotation_contents(r)))
-            # Подпись точечного замечания — слева от «звёздочки».
-            txt_w = c.stringWidth(
-                f"#{r['number']} {r.get('review_code') or ''}: {_short_remark(r.get('text'))}", uni, 7
-            )
-            draw_label(r, cx - 14 - txt_w, cy - 4)
+
+        # Панель со списком замечаний этого листа.
+        if panel_w:
+            pad = 10.0
+            col_x = w + pad
+            col_w = panel_w - pad * 2
+            c.setFillColorRGB(0.99, 0.99, 0.99)
+            c.rect(w, 0, panel_w, h, stroke=0, fill=1)
+            c.setStrokeColorRGB(0.75, 0.75, 0.75)
+            c.setLineWidth(0.8)
+            c.line(w, 0, w, h)
+            c.setFillColorRGB(0.1, 0.1, 0.1)
+            c.setFont(uni, 11)
+            c.drawString(col_x, h - 26, f"Замечания — лист {page_no}")
+            c.setStrokeColorRGB(0.85, 0.85, 0.85)
+            c.line(col_x, h - 32, col_x + col_w, h - 32)
+
+            y = h - 48
+            for r in [*page_area, *page_point]:
+                head = f"#{r['number']}  {r.get('review_code') or '—'}  {r.get('author') or ''}".rstrip()
+                if r.get("has_file"):
+                    head += "  [файл]"
+                body_lines = _wrap(c, _clean_remark_text(r.get("text")), uni, 7.5, col_w)
+                need = 11 + len(body_lines) * 9.5 + 8
+                if y - need < 20:
+                    c.setFont(uni, 7.5)
+                    c.setFillColorRGB(0.4, 0.4, 0.4)
+                    c.drawString(col_x, 12, "…остальные замечания — на странице-сводке в конце")
+                    break
+                c.setFillColorRGB(0.85, 0.15, 0.15)
+                c.setFont(uni, 8)
+                c.drawString(col_x, y, head[:60])
+                y -= 11
+                c.setFillColorRGB(0.15, 0.15, 0.15)
+                c.setFont(uni, 7.5)
+                for line in body_lines:
+                    c.drawString(col_x, y, line)
+                    y -= 9.5
+                y -= 8
 
         c.showPage()
         c.save()
         overlay_buf.seek(0)
 
         overlay_page = PdfReader(overlay_buf).pages[0]
-        base_page.merge_page(overlay_page)
-        writer.add_page(base_page)
+        if panel_w:
+            # Лист шире исходного: кладём оригинал слева, панель — справа.
+            from pypdf import PageObject
+            from pypdf import Transformation
+
+            wide = PageObject.create_blank_page(width=total_w, height=h)
+            left = float(mb.left)
+            bottom = float(mb.bottom)
+            if left or bottom:
+                wide.merge_transformed_page(base_page, Transformation().translate(-left, -bottom))
+            else:
+                wide.merge_page(base_page)
+            wide.merge_page(overlay_page)
+            writer.add_page(wide)
+        else:
+            base_page.merge_page(overlay_page)
+            writer.add_page(base_page)
 
     # Вставляем заметки (не роняем экспорт, если версия pypdf не поддержит).
     try:
