@@ -1842,6 +1842,10 @@ def _build_annotated_pdf(original_bytes: bytes, remarks: list[dict]) -> bytes:
     # как все страницы попали в writer (индексы страниц совпадают).
     annots: list[tuple[int, tuple[float, float, float, float], str]] = []
 
+    def _short_remark(text: str | None, limit: int = 60) -> str:
+        clean = " ".join(_clean_remark_text(text).split())
+        return clean if len(clean) <= limit else clean[: limit - 1].rstrip() + "…"
+
     writer = PdfWriter()
     for idx in range(num_pages):
         base_page = reader.pages[idx]
@@ -1855,6 +1859,35 @@ def _build_annotated_pdf(original_bytes: bytes, remarks: list[dict]) -> bytes:
         c = canvas.Canvas(overlay_buf, pagesize=(w, h))
         c.setStrokeColorRGB(0.85, 0.15, 0.15)
         c.setLineWidth(1.5)
+
+        def draw_label(r: dict, lx: float, ly: float) -> None:
+            """Компактная подпись замечания у метки: рисуем СВОИМ юникод-шрифтом,
+            поэтому кириллица видна в любом просмотрщике (Chrome не умеет
+            показывать кириллицу во всплывающих заметках — там Helvetica)."""
+            txt = f"#{r['number']} {r.get('review_code') or ''}: {_short_remark(r.get('text'))}".replace("  ", " ")
+            size = 7
+            tw = c.stringWidth(txt, uni, size)
+            # не вылезаем за правый край листа
+            lx = min(lx, max(4.0, w - 4.0 - tw))
+            lx = max(4.0, lx)
+            ly = min(max(6.0, ly), h - 12.0)
+            c.saveState()
+            c.setFillColorRGB(1, 0.97, 0.72)
+            c.setStrokeColorRGB(0.85, 0.6, 0.1)
+            c.setLineWidth(0.5)
+            try:
+                c.setFillAlpha(0.9)
+            except Exception:  # noqa: BLE001 — старый reportlab без альфы
+                pass
+            c.rect(lx - 2, ly - 2.5, tw + 4, size + 4, stroke=1, fill=1)
+            try:
+                c.setFillAlpha(1)
+            except Exception:  # noqa: BLE001
+                pass
+            c.setFillColorRGB(0.1, 0.1, 0.1)
+            c.setFont(uni, size)
+            c.drawString(lx, ly, txt)
+            c.restoreState()
 
         for r in by_page_area.get(page_no, []):
             x = float(r["area_x"]) * k
@@ -1871,8 +1904,15 @@ def _build_annotated_pdf(original_bytes: bytes, remarks: list[dict]) -> bytes:
             c.setFillColorRGB(1, 1, 1)
             c.setFont("Helvetica-Bold", 9)
             c.drawCentredString(x, h - y_top - 3, label)
-            # Заметка-«комментарий» у рамки: наведение показывает текст.
-            annots.append((idx, (x, h - y_top - 16.0, x + 16.0, h - y_top), _annotation_contents(r)))
+            # Заметка-«комментарий» рядом с рамкой (левее кружка с номером,
+            # чтобы иконка не перекрывала сам номер).
+            ax = max(2.0, x - 22.0)
+            annots.append((idx, (ax, h - y_top - 8.0, ax + 16.0, h - y_top + 8.0), _annotation_contents(r)))
+            # Подпись у рамки: над рамкой, а если сверху нет места — под ней.
+            label_y = h - y_top + 6
+            if label_y > h - 12:
+                label_y = max(6.0, h - y_top - rh - 12)
+            draw_label(r, x + 10, label_y)
 
         # Точечные замечания — звёздочки в правом верхнем углу, столбиком.
         points = by_page_point.get(page_no, [])
@@ -1885,6 +1925,11 @@ def _build_annotated_pdf(original_bytes: bytes, remarks: list[dict]) -> bytes:
             c.setFont("Helvetica-Bold", 9)
             c.drawCentredString(cx, cy - 12, str(r["number"]))
             annots.append((idx, (cx - 8.0, cy - 8.0, cx + 8.0, cy + 8.0), _annotation_contents(r)))
+            # Подпись точечного замечания — слева от «звёздочки».
+            txt_w = c.stringWidth(
+                f"#{r['number']} {r.get('review_code') or ''}: {_short_remark(r.get('text'))}", uni, 7
+            )
+            draw_label(r, cx - 14 - txt_w, cy - 4)
 
         c.showPage()
         c.save()
