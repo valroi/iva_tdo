@@ -1831,6 +1831,17 @@ def _build_annotated_pdf(original_bytes: bytes, remarks: list[dict]) -> bytes:
         else:
             by_page_point.setdefault(page, []).append(r)
 
+    def _annotation_contents(r: dict) -> str:
+        head = f"#{r['number']} · {r.get('review_code') or '—'} · {r.get('author') or ''}".strip()
+        if r.get("has_file"):
+            head += " · [есть файл]"
+        return f"{head}\n{_clean_remark_text(r.get('text'))}"
+
+    # Настоящие PDF-аннотации (всплывающая заметка): при наведении в любом
+    # просмотрщике видно текст замечания. Собираем и добавляем после того,
+    # как все страницы попали в writer (индексы страниц совпадают).
+    annots: list[tuple[int, tuple[float, float, float, float], str]] = []
+
     writer = PdfWriter()
     for idx in range(num_pages):
         base_page = reader.pages[idx]
@@ -1860,6 +1871,8 @@ def _build_annotated_pdf(original_bytes: bytes, remarks: list[dict]) -> bytes:
             c.setFillColorRGB(1, 1, 1)
             c.setFont("Helvetica-Bold", 9)
             c.drawCentredString(x, h - y_top - 3, label)
+            # Заметка-«комментарий» у рамки: наведение показывает текст.
+            annots.append((idx, (x, h - y_top - 16.0, x + 16.0, h - y_top), _annotation_contents(r)))
 
         # Точечные замечания — звёздочки в правом верхнем углу, столбиком.
         points = by_page_point.get(page_no, [])
@@ -1871,6 +1884,7 @@ def _build_annotated_pdf(original_bytes: bytes, remarks: list[dict]) -> bytes:
             c.drawCentredString(cx, cy, "*")
             c.setFont("Helvetica-Bold", 9)
             c.drawCentredString(cx, cy - 12, str(r["number"]))
+            annots.append((idx, (cx - 8.0, cy - 8.0, cx + 8.0, cy + 8.0), _annotation_contents(r)))
 
         c.showPage()
         c.save()
@@ -1879,6 +1893,18 @@ def _build_annotated_pdf(original_bytes: bytes, remarks: list[dict]) -> bytes:
         overlay_page = PdfReader(overlay_buf).pages[0]
         base_page.merge_page(overlay_page)
         writer.add_page(base_page)
+
+    # Вставляем заметки (не роняем экспорт, если версия pypdf не поддержит).
+    try:
+        from pypdf.annotations import Text as PdfTextAnnotation
+
+        for page_idx, rect, contents in annots:
+            writer.add_annotation(
+                page_number=page_idx,
+                annotation=PdfTextAnnotation(rect=rect, text=contents, open=False),
+            )
+    except Exception:  # noqa: BLE001 — аннотации-бонус поверх рамок
+        pass
 
     # Страница-сводка со всеми замечаниями (номер, лист, автор, код, файл, текст).
     summary_buf = BytesIO()

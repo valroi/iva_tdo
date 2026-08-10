@@ -1,5 +1,5 @@
 import { Alert, Button, Form, Input, Modal, Select, Space, Tabs, Tag, Tooltip, Typography, Upload, App } from "antd";
-import { DownloadOutlined, PaperClipOutlined } from "@ant-design/icons";
+import { DownloadOutlined, PaperClipOutlined, ZoomInOutlined, ZoomOutOutlined } from "@ant-design/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 
@@ -33,6 +33,13 @@ interface Props {
   /** Latest R recommendation per source remark id (from carry-over decisions). */
   carryRHints?: Partial<Record<number, "R_OPEN" | "R_CLOSED">>;
 }
+
+// Базовая ширина рендера страницы. Координаты замечаний хранятся в пикселях
+// ЭТОГО рендера — та же константа зашита на бэкенде (_ANNOTATOR_RENDER_WIDTH),
+// чтобы рамки в annotated.pdf попадали в те же места. Зум её не меняет.
+const BASE_PAGE_WIDTH = 780;
+const MIN_SCALE = 0.5;
+const MAX_SCALE = 4;
 
 interface Rect {
   x: number;
@@ -91,6 +98,11 @@ export default function RevisionPdfAnnotator({
   const [submitting, setSubmitting] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
+  // Масштаб просмотра. ВАЖНО: координаты замечаний (area_x/y/w/h) хранятся и
+  // отдаются бэкенду ВСЕГДА в пикселях базового рендера BASE_PAGE_WIDTH —
+  // масштаб влияет только на отрисовку. Иначе сместились бы старые замечания
+  // и рамки в annotated.pdf (там та же база 780).
+  const [scale, setScale] = useState(1);
   const [form] = Form.useForm();
   const [pendingRemarks, setPendingRemarks] = useState<PendingRemark[]>([]);
   // Опциональный файл, прикладываемый к формируемому замечанию.
@@ -168,8 +180,9 @@ export default function RevisionPdfAnnotator({
   const onMouseDown: React.MouseEventHandler<HTMLDivElement> = (event) => {
     const box = overlayRef.current?.getBoundingClientRect();
     if (!box) return;
-    const x = event.clientX - box.left;
-    const y = event.clientY - box.top;
+    // Экранные пиксели → базовые координаты (деление на масштаб).
+    const x = (event.clientX - box.left) / scale;
+    const y = (event.clientY - box.top) / scale;
     setDragStart({ x, y });
     setSelection({ x, y, w: 0, h: 0 });
   };
@@ -178,8 +191,8 @@ export default function RevisionPdfAnnotator({
     if (!dragStart) return;
     const box = overlayRef.current?.getBoundingClientRect();
     if (!box) return;
-    const x = event.clientX - box.left;
-    const y = event.clientY - box.top;
+    const x = (event.clientX - box.left) / scale;
+    const y = (event.clientY - box.top) / scale;
     setSelection({
       x: Math.min(dragStart.x, x),
       y: Math.min(dragStart.y, y),
@@ -319,7 +332,7 @@ export default function RevisionPdfAnnotator({
     // ниже в JSX). Задержка нужна, чтобы Page успел отрендериться
     // после смены номера страницы.
     if (hasArea) {
-      const ay = item.area_y ?? 0;
+      const ay = (item.area_y ?? 0) * scale;
       const tryScroll = () => {
         const scroller = pdfScrollRef.current;
         if (!scroller) return false;
@@ -593,8 +606,40 @@ export default function RevisionPdfAnnotator({
                 заказчиком (он рисует прямоугольники на PDF). Подрядчику
                 на этапе просмотра/ответа — нет, у него нет выделений. */}
             {mode === "owner_create" && <Button onClick={() => setSelection(null)}>Сбросить выделение</Button>}
+            {/* Масштаб просмотра чертежа. Ctrl + колесо мыши — тоже зум. */}
+            <Space.Compact>
+              <Tooltip title="Уменьшить (Ctrl + колесо мыши)">
+                <Button
+                  icon={<ZoomOutOutlined />}
+                  disabled={scale <= MIN_SCALE}
+                  onClick={() => setScale((s) => Math.max(MIN_SCALE, Math.round((s - 0.25) * 100) / 100))}
+                />
+              </Tooltip>
+              <Tooltip title="Сбросить масштаб (100%)">
+                <Button onClick={() => setScale(1)} style={{ minWidth: 64 }}>
+                  {Math.round(scale * 100)}%
+                </Button>
+              </Tooltip>
+              <Tooltip title="Увеличить (Ctrl + колесо мыши)">
+                <Button
+                  icon={<ZoomInOutlined />}
+                  disabled={scale >= MAX_SCALE}
+                  onClick={() => setScale((s) => Math.min(MAX_SCALE, Math.round((s + 0.25) * 100) / 100))}
+                />
+              </Tooltip>
+            </Space.Compact>
           </Space>
-          <div ref={pdfScrollRef} style={{ border: "1px solid #d9e2f1", borderRadius: 8, padding: 8, maxHeight: 520, overflow: "auto" }}>
+          <div
+            ref={pdfScrollRef}
+            onWheel={(event) => {
+              // Зум только с Ctrl/⌘ — обычный скролл продолжает листать документ.
+              if (!event.ctrlKey && !event.metaKey) return;
+              event.preventDefault();
+              const delta = event.deltaY > 0 ? -0.15 : 0.15;
+              setScale((s) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, Math.round((s + delta) * 100) / 100)));
+            }}
+            style={{ border: "1px solid #d9e2f1", borderRadius: 8, padding: 8, maxHeight: 520, overflow: "auto" }}
+          >
             <div
               ref={overlayRef}
               style={{ position: "relative", width: "fit-content", margin: "0 auto", cursor: "crosshair" }}
@@ -613,16 +658,16 @@ export default function RevisionPdfAnnotator({
                   setLoadError(error instanceof Error ? error.message : "Failed to load PDF");
                 }}
               >
-                <Page pageNumber={pageNumber} width={780} />
+                <Page pageNumber={pageNumber} width={Math.round(BASE_PAGE_WIDTH * scale)} />
               </Document>
               {selection && (
                 <div
                   style={{
                     position: "absolute",
-                    left: selection.x,
-                    top: selection.y,
-                    width: selection.w,
-                    height: selection.h,
+                    left: selection.x * scale,
+                    top: selection.y * scale,
+                    width: selection.w * scale,
+                    height: selection.h * scale,
                     border: "2px solid #2563eb",
                     background: "rgba(37,99,235,0.12)",
                     pointerEvents: "none",
@@ -632,16 +677,19 @@ export default function RevisionPdfAnnotator({
               {commentMarkersOnPage.map((item) => {
                 const isActive = activeCommentId === item.id;
                 const isHovered = hoveredCommentId === item.id;
+                const remarkText = (item.text ?? "").replace(/^\[(REMARK|QUESTION)\]\s*/i, "");
                 return (
                   <div
                     key={`marker_${item.id}`}
-                    title={`${item.review_code ?? "—"} · ${item.author_name ?? item.author_email ?? "—"}`}
+                    // Наведение показывает полный текст замечания (нативная
+                    // подсказка работает и при зуме, и на слабых браузерах).
+                    title={`${item.review_code ?? "—"} · ${item.author_name ?? item.author_email ?? "—"}\n${remarkText}`}
                     style={{
                       position: "absolute",
-                      left: item.area_x ?? 0,
-                      top: item.area_y ?? 0,
-                      width: item.area_w ?? 0,
-                      height: item.area_h ?? 0,
+                      left: (item.area_x ?? 0) * scale,
+                      top: (item.area_y ?? 0) * scale,
+                      width: (item.area_w ?? 0) * scale,
+                      height: (item.area_h ?? 0) * scale,
                       border: isActive ? "2px solid #2563eb" : "2px solid #f59e0b",
                       background: isActive
                         ? "rgba(37,99,235,0.14)"
