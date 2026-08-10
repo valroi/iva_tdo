@@ -357,6 +357,22 @@ export default function RevisionPdfAnnotator({
     }
   }, [open, focusCommentId, comments]);
 
+  // Ctrl/⌘ + колесо = зум чертежа. Слушатель вешаем НАТИВНО с passive:false:
+  // React регистрирует onWheel как пассивный, из-за чего preventDefault не
+  // работал и браузер зумил всю страницу вместо PDF.
+  useEffect(() => {
+    const el = pdfScrollRef.current;
+    if (!open || !el) return;
+    const onWheelNative = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      const delta = event.deltaY > 0 ? -0.15 : 0.15;
+      setScale((s) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, Math.round((s + delta) * 100) / 100)));
+    };
+    el.addEventListener("wheel", onWheelNative, { passive: false });
+    return () => el.removeEventListener("wheel", onWheelNative);
+  }, [open, pdfBlobUrl]);
+
   const commentMarkersOnPage = useMemo(
     () =>
       comments.filter(
@@ -631,13 +647,6 @@ export default function RevisionPdfAnnotator({
           </Space>
           <div
             ref={pdfScrollRef}
-            onWheel={(event) => {
-              // Зум только с Ctrl/⌘ — обычный скролл продолжает листать документ.
-              if (!event.ctrlKey && !event.metaKey) return;
-              event.preventDefault();
-              const delta = event.deltaY > 0 ? -0.15 : 0.15;
-              setScale((s) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, Math.round((s + delta) * 100) / 100)));
-            }}
             style={{ border: "1px solid #d9e2f1", borderRadius: 8, padding: 8, maxHeight: 520, overflow: "auto" }}
           >
             <div
