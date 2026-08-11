@@ -14,19 +14,21 @@
   --border-hover: #C7CBCB;
   --text:         #383E42;  /* графит RAL 7016 */
   --text-2:       #47515D;
-  --text-3:       #626C78;
-  --text-muted:   #97A0AB;
-  --text-subtle:  #A8B0B3;
-  --primary:      #0F8B87;  /* бирюза RAL 5018 */
-  --primary-hover:#0C716E;
+  --text-3:       #525C68;  /* шапки таблиц: контраст 6.3 на #F5F6F6 */
+  --text-muted:   #616D76;  /* вторичный на белом: 5.3 (было 2.65 — не читалось) */
+  --text-subtle:  #7C8792;
+  --primary:      #0D807C;  /* бирюза RAL 5018, затемнена до контраста 4.8 */
+  --primary-strong:#0B7370; /* ссылки и текст на белом: 5.7 */
+  --primary-hover:#0A6360;
   --primary-bg:   #E6F2F2;
   --neutral-pill: #EFF1F1;
   --danger:       #C0392B;  /* RAL 3000 */
   --success:      #2E8B57;
   --warning:      #C98A16;  /* RAL 1023 */
   --sidebar-bg:   #383E42;  /* графит */
-  --sidebar-text: #E7EAEA;
-  --sidebar-muted:#9BA4A8;
+  --sidebar-text: #F0F3F3;
+  --sidebar-muted:#C3CBCE;  /* пункты меню: контраст 6.6 (было 4.27 — тускло) */
+  --sidebar-dim:  #9BA4A8;  /* только для мелких подписей (email) */
   --sidebar-hover:rgba(255,255,255,0.08);
   --sidebar-active:#0F8B87;
   --radius-sm:    7px;
@@ -40,6 +42,16 @@
 }
 
 /* ─── Base ─────────────────────────────────────────────────────────────── */
+/* antd v5 красит текст с прозрачностью .88 — на светлом фоне это выглядит
+   выцветшим. Возвращаем полный графит основному тексту и заголовкам. */
+.ant-typography,
+.ant-table-wrapper .ant-table-tbody > tr > td,
+.ant-card .ant-card-head-title,
+.ant-form-item-label > label,
+.ant-descriptions-item-content {
+  color: var(--text);
+}
+
 *, *::before, *::after { box-sizing: border-box; }
 
 body {
@@ -134,8 +146,8 @@ h1, h2, h3, h4, .ant-typography h1, .ant-typography h2, .ant-typography h3, .ant
 }
 
 .app-sider .ant-menu-title-content {
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 13.5px;
+  font-weight: 600;
 }
 
 .app-sider .ant-menu-light .ant-menu-item:hover {
@@ -180,7 +192,7 @@ h1, h2, h3, h4, .ant-typography h1, .ant-typography h2, .ant-typography h3, .ant
 
 .sider-user-info .email {
   font-size: 11px;
-  color: var(--sidebar-muted);
+  color: var(--sidebar-dim);
   line-height: 1.3;
 }
 
@@ -197,14 +209,16 @@ h1, h2, h3, h4, .ant-typography h1, .ant-typography h2, .ant-typography h3, .ant
 }
 
 .app-header .ant-breadcrumb {
-  font-size: 11px;
-  color: var(--text-subtle);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-muted);
   margin-bottom: 2px;
 }
 
+.app-header h4.ant-typography,
 .app-header .ant-typography h4 {
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 19px;
+  font-weight: 800;
   color: var(--text);
 }
 
@@ -236,8 +250,8 @@ h1, h2, h3, h4, .ant-typography h1, .ant-typography h2, .ant-typography h3, .ant
 }
 
 .ant-card .ant-card-head-title {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 700;
   color: var(--text);
 }
 
@@ -338,9 +352,11 @@ h1, h2, h3, h4, .ant-typography h1, .ant-typography h2, .ant-typography h3, .ant
 }
 
 .ant-table-wrapper .ant-table-tbody > tr > td {
-  padding: 9px 12px !important;
-  font-size: 13px !important;
-  border-bottom: 1px solid var(--border) !important;
+  /* Строки таблиц по хендоффу: 13.5px/500–600 — при 400 текст «плыл». */
+  font-size: 13.5px !important;
+  font-weight: 500 !important;
+  padding: 11px 12px !important;
+  border-bottom: 1px solid var(--border-soft) !important;
   color: var(--text) !important;
   transition: background 0.1s !important;
   /* Табличные цифры: шифры, ревизии, количества и даты выравниваются по
@@ -394,7 +410,7 @@ h1, h2, h3, h4, .ant-typography h1, .ant-typography h2, .ant-typography h3, .ant
 
 /* Ссылка-шифр в таблицах: бирюзовая, без подчёркивания до наведения. */
 .ant-table-wrapper .ant-btn-link {
-  color: var(--primary) !important;
+  color: var(--primary-strong) !important;
   font-weight: 600 !important;
 }
 .ant-table-wrapper .ant-btn-link:hover {

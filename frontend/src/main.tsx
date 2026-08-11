@@ -15,8 +15,8 @@ createRoot(document.getElementById("root")!).render(
       theme={{
         token: {
           // Брендбук «ИваМарис» 5.2: бирюза RAL 5018 + графит RAL 7016.
-          colorPrimary: "#0F8B87",
-          colorLink: "#0F8B87",
+          colorPrimary: "#0D807C",
+          colorLink: "#0B7370",
           colorSuccess: "#2E8B57",
           colorWarning: "#C98A16",
           colorError: "#C0392B",
@@ -26,9 +26,12 @@ createRoot(document.getElementById("root")!).render(
           colorBorder: "#E1E3E3",
           colorBorderSecondary: "#F3F4F4",
           colorTextBase: "#383E42",
+          colorText: "#383E42",
+          colorTextHeading: "#2F353A",
           colorTextSecondary: "#47515D",
-          colorTextTertiary: "#626C78",
-          colorTextQuaternary: "#97A0AB",
+          colorTextTertiary: "#525C68",
+          colorTextQuaternary: "#616D76",
+          colorTextPlaceholder: "#6E7A82",
           borderRadius: 9,
           borderRadiusLG: 12,
           borderRadiusSM: 7,
@@ -46,7 +49,7 @@ createRoot(document.getElementById("root")!).render(
         components: {
           Menu: {
             darkItemBg: "transparent",
-            darkItemSelectedBg: "rgba(15,139,135,0.22)",
+            darkItemSelectedBg: "rgba(13,128,124,0.26)",
             darkItemSelectedColor: "#7FD6D2",
             darkItemHoverBg: "rgba(255,255,255,0.08)",
             itemBorderRadius: 8,
@@ -54,7 +57,7 @@ createRoot(document.getElementById("root")!).render(
           },
           Table: {
             headerBg: "#F5F6F6",
-            headerColor: "#626C78",
+            headerColor: "#525C68",
             rowHoverBg: "#FAFBFB",
             borderColor: "#F3F4F4",
             cellPaddingBlock: 11,
