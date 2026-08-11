@@ -64,7 +64,7 @@ export default function TrmRegistryPage({ currentUser: _currentUser, onOpenRevis
         dataIndex: "document_num",
         width: 300,
         render: (value: string, row) => (
-          <Button type="link" style={{ padding: 0 }} onClick={() => onOpenRevision({ revision_id: row.revision_id })}>
+          <Button type="link" className="mono" style={{ padding: 0 }} onClick={() => onOpenRevision({ revision_id: row.revision_id })}>
             <Typography.Text ellipsis={{ tooltip: value }} style={{ maxWidth: 280 }}>{value}</Typography.Text>
           </Button>
         ),
@@ -79,7 +79,7 @@ export default function TrmRegistryPage({ currentUser: _currentUser, onOpenRevis
   );
 
   const columns: ColumnsType<TrmListItem> = [
-    { title: "ТРМ", dataIndex: "trm_number", render: (v: string) => <Typography.Text strong>{v}</Typography.Text> },
+    { title: "ТРМ", dataIndex: "trm_number", render: (v: string) => <Typography.Text strong className="mono">{v}</Typography.Text> },
     { title: "Проект", dataIndex: "project_code", width: 100 },
     { title: "Кол-во документов", dataIndex: "document_count", width: 160 },
     { title: "Последний статус", dataIndex: "last_status", width: 260, render: (v: string | null) => (v ? STATUS_LABEL[v] ?? v : "—") },

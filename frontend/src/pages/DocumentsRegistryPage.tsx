@@ -88,6 +88,7 @@ export default function DocumentsRegistryPage({ currentUser, onOpenRevision, onO
       render: (value: string, row) => (
         <Button
           type="link"
+          className="mono"
           style={{ padding: 0 }}
           onClick={() => {
             const latestRevisionId = row.revisions[0]?.id;

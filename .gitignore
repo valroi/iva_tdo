@@ -15,3 +15,6 @@ node_modules/
 frontend/dist/
 frontend/.vite/
 
+
+# Архивы дизайн-хендоффов (спека лежит в docs/design)
+*.zip
