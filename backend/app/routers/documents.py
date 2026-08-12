@@ -45,6 +45,8 @@ from app.schemas import (
     CarryDecisionUpdate,
     CommentAttachmentRead,
     CommentOwnerDecision,
+    RemarkCardRead,
+    RemarkHistoryEvent,
     CommentRead,
     CsrQueueItem,
     CsrSendPayload,
@@ -1818,6 +1820,146 @@ def upload_comment_attachment(
     db.commit()
     db.refresh(item)
     return _comment_attachment_read(item, current_user)
+
+
+@router.get("/remarks/{remark_number}", response_model=RemarkCardRead)
+def get_remark_card(
+    remark_number: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Карточка замечания по уникальному номеру (IMP-RMK-000123): где и когда
+    возникло, в каком CRS ушло, что ответил подрядчик, что решил LR, перенос на
+    следующие ревизии, файлы. Подрядчику видны только опубликованные замечания."""
+    comment = (
+        db.query(Comment)
+        .filter(Comment.remark_number == remark_number.strip().upper())
+        .first()
+    )
+    if comment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Замечание с таким номером не найдено")
+    revision = db.query(Revision).filter(Revision.id == comment.revision_id).first()
+    if revision is None or not _owner_can_access_revision(db, current_user, revision):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Замечание с таким номером не найдено")
+    if current_user.company_type == CompanyType.contractor and not comment.is_published_to_contractor:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Замечание с таким номером не найдено")
+    document = db.query(Document).filter(Document.id == revision.document_id).first()
+    mdr = db.query(MDRRecord).filter(MDRRecord.id == document.mdr_id).first() if document else None
+    if document is None or mdr is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Документ замечания не найден")
+
+    author = db.query(User).filter(User.id == comment.author_id).first()
+    name = lambda u: (u.full_name or u.email) if u else None  # noqa: E731
+
+    events: list[RemarkHistoryEvent] = [
+        RemarkHistoryEvent(
+            at=comment.created_at,
+            kind="CREATED",
+            title=f"Замечание создано (ревизия {revision.revision_code}"
+                  + (f", лист {comment.page}" if comment.page else "") + ")",
+            actor=name(author),
+            detail=_clean_remark_text(comment.text),
+        )
+    ]
+    if comment.crs_sent_at or comment.is_published_to_contractor:
+        events.append(
+            RemarkHistoryEvent(
+                at=comment.crs_sent_at or comment.created_at,
+                kind="CRS_SENT",
+                title=f"Передано подрядчику{f' (CRS {comment.crs_number})' if comment.crs_number else ''}",
+            )
+        )
+    # Ответы подрядчика и решения LR — дочерние комментарии.
+    children = (
+        db.query(Comment, User)
+        .outerjoin(User, User.id == Comment.author_id)
+        .filter(Comment.parent_id == comment.id)
+        .order_by(Comment.id.asc())
+        .all()
+    )
+    for child, child_author in children:
+        raw = child.text or ""
+        if raw.startswith("[LR_REJECT]") or raw.startswith("[LR_WITHDRAW]"):
+            kind, title = "LR_DECISION", "Замечание снято/отклонено LR"
+        elif raw.startswith("[LR_UPDATE]"):
+            kind, title = "LR_DECISION", "Замечание скорректировано LR"
+        else:
+            kind = "CONTRACTOR_REPLY"
+            label = {"A": "принято (A)", "I": "не согласен (I)"}.get(
+                child.contractor_status.value if child.contractor_status else "", ""
+            )
+            title = f"Ответ подрядчика{f': {label}' if label else ''}"
+        events.append(
+            RemarkHistoryEvent(
+                at=child.created_at,
+                kind=kind,
+                title=title,
+                actor=name(child_author),
+                detail=re.sub(r"^\[[A-Z_]+\]\s*", "", raw).strip() or None,
+            )
+        )
+    # Итоговое решение по замечанию.
+    if comment.status == CommentStatus.RESOLVED and comment.resolved_at:
+        events.append(RemarkHistoryEvent(at=comment.resolved_at, kind="LR_DECISION", title="Замечание закрыто (устранено)"))
+    elif comment.status == CommentStatus.REJECTED and comment.resolved_at:
+        events.append(RemarkHistoryEvent(at=comment.resolved_at, kind="LR_DECISION", title="Замечание отклонено"))
+    # Перенос на следующие ревизии (carry-over).
+    carry_rows = (
+        db.query(CarryOverDecision, User, Revision)
+        .outerjoin(User, User.id == CarryOverDecision.decided_by_id)
+        .outerjoin(Revision, Revision.id == CarryOverDecision.target_revision_id)
+        .filter(CarryOverDecision.source_comment_id == comment.id)
+        .order_by(CarryOverDecision.id.asc())
+        .all()
+    )
+    carry_label = {
+        "OPEN": "не устранено",
+        "CLOSED": "устранено",
+        "R_OPEN": "рекомендация R: не устранено",
+        "R_CLOSED": "рекомендация R: устранено",
+    }
+    for decision, decider, target_rev in carry_rows:
+        events.append(
+            RemarkHistoryEvent(
+                at=decision.decided_at,
+                kind="CARRY_OVER",
+                title=f"Проверка на ревизии {target_rev.revision_code if target_rev else '—'}: "
+                      f"{carry_label.get(decision.status, decision.status)}",
+                actor=name(decider),
+            )
+        )
+    events.sort(key=lambda e: e.at)
+
+    att_rows = (
+        db.query(CommentAttachment, User)
+        .outerjoin(User, User.id == CommentAttachment.uploaded_by_id)
+        .filter(CommentAttachment.comment_id == comment.id)
+        .order_by(CommentAttachment.id.asc())
+        .all()
+    )
+    return RemarkCardRead(
+        id=comment.id,
+        remark_number=comment.remark_number,
+        project_code=mdr.project_code,
+        document_num=document.document_num,
+        document_title=document.title,
+        revision_id=revision.id,
+        revision_code=revision.revision_code,
+        issue_purpose=revision.issue_purpose,
+        page=comment.page,
+        review_code=comment.review_code,
+        status=comment.status,
+        contractor_status=comment.contractor_status,
+        text=_clean_remark_text(comment.text),
+        author_name=name(author),
+        author_email=author.email if author else None,
+        created_at=comment.created_at,
+        crs_number=comment.crs_number,
+        crs_sent_at=comment.crs_sent_at,
+        is_published_to_contractor=comment.is_published_to_contractor,
+        attachments=[_comment_attachment_read(item, uploader) for item, uploader in att_rows],
+        history=events,
+    )
 
 
 @router.get("/comments/{comment_id}/attachments", response_model=list[CommentAttachmentRead])

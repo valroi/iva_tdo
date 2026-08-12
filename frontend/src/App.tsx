@@ -12,7 +12,7 @@ import {
   TeamOutlined,
   UnorderedListOutlined,
 } from "@ant-design/icons";
-import { Avatar, Breadcrumb, Button, Layout, Menu, Segmented, Space, Spin, Typography, message } from "antd";
+import { Avatar, Breadcrumb, Button, Input, Layout, Menu, Segmented, Space, Spin, Typography, message } from "antd";
 import { Component, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
@@ -37,6 +37,7 @@ import RevisionsPage from "./pages/RevisionsPage";
 import TrmPage from "./pages/TrmPage";
 import TrmRegistryPage from "./pages/TrmRegistryPage";
 import RevisionCardPage from "./pages/RevisionCardPage";
+import RemarkCardPage from "./pages/RemarkCardPage";
 import DocumentsRegistryPage from "./pages/DocumentsRegistryPage";
 import CrsPage from "./pages/CrsPage";
 import ReportingPage from "./pages/ReportingPage";
@@ -59,6 +60,7 @@ type Section =
   | "reporting"
   | "crs_queue"
   | "revision_card"
+  | "remark_card"
   | "notifications"
   | "tdo_queue"
   | "vendors"
@@ -140,14 +142,14 @@ function MainApp(): JSX.Element {
   // Формат: #/<section>            например, #/projects
   //         #/revision_card/<id>   например, #/revision_card/42
   //         #/module=docchecker    переключает модуль DCC ↔ DOCchecker
-  const parseHash = (): { section: Section; module: AppModule; revisionId: number | null } => {
+  const parseHash = (): { section: Section; module: AppModule; revisionId: number | null; remarkNumber: string | null } => {
     if (typeof window === "undefined") {
-      return { section: "dashboard", module: "dcc", revisionId: null };
+      return { section: "dashboard", module: "dcc", revisionId: null, remarkNumber: null };
     }
     const raw = window.location.hash.replace(/^#\/?/, "").trim();
-    if (!raw) return { section: "dashboard", module: "dcc", revisionId: null };
+    if (!raw) return { section: "dashboard", module: "dcc", revisionId: null, remarkNumber: null };
     if (raw === "module=docchecker" || raw === "docchecker") {
-      return { section: "docchecker", module: "docchecker", revisionId: null };
+      return { section: "docchecker", module: "docchecker", revisionId: null, remarkNumber: null };
     }
     const [seg, arg] = raw.split("/");
     const validSections: Section[] = [
@@ -161,6 +163,7 @@ function MainApp(): JSX.Element {
       "reporting",
       "crs_queue",
       "revision_card",
+      "remark_card",
       "notifications",
       "tdo_queue",
       "sessions",
@@ -170,9 +173,10 @@ function MainApp(): JSX.Element {
     ];
     const section = (validSections as string[]).includes(seg) ? (seg as Section) : "dashboard";
     const revisionId = section === "revision_card" && arg ? Number(arg) || null : null;
+    const remarkNumber = section === "remark_card" && arg ? decodeURIComponent(arg) : null;
     const module: AppModule =
       section === "docchecker" ? "docchecker" : section === "vendors" ? "vendors" : "dcc";
-    return { section, module, revisionId };
+    return { section, module, revisionId, remarkNumber };
   };
   const initialHash = parseHash();
   const [activeSection, setActiveSection] = useState<Section>(initialHash.section);
@@ -190,6 +194,9 @@ function MainApp(): JSX.Element {
     revision_id?: number | null;
   } | null>(null);
   const [openedRevisionId, setOpenedRevisionId] = useState<number | null>(initialHash.revisionId);
+  // Открытая карточка замечания по номеру (IMP-RMK-000123) + строка поиска в шапке.
+  const [openedRemarkNumber, setOpenedRemarkNumber] = useState<string | null>(initialHash.remarkNumber);
+  const [remarkSearch, setRemarkSearch] = useState("");
   const [documentsRegistryPreset, setDocumentsRegistryPreset] = useState<{ overdue_only?: boolean } | null>(null);
   // ТРМ, на который надо перейти по клику-ссылке (раскрыть на странице «ТРМ»).
   const [focusTrm, setFocusTrm] = useState<string | null>(null);
@@ -237,10 +244,13 @@ function MainApp(): JSX.Element {
     if (activeSection === "revision_card" && openedRevisionId) {
       hash = `#/revision_card/${openedRevisionId}`;
     }
+    if (activeSection === "remark_card" && openedRemarkNumber) {
+      hash = `#/remark_card/${encodeURIComponent(openedRemarkNumber)}`;
+    }
     if (window.location.hash !== hash) {
       window.history.replaceState(null, "", hash);
     }
-  }, [activeSection, openedRevisionId]);
+  }, [activeSection, openedRevisionId, openedRemarkNumber]);
 
   // Реакция на «Назад/Вперёд» в браузере — синхронизируем состояние из URL.
   useEffect(() => {
@@ -249,6 +259,7 @@ function MainApp(): JSX.Element {
       const next = parseHash();
       setActiveSection(next.section);
       setActiveModule(next.module);
+      setOpenedRemarkNumber(next.remarkNumber);
       setOpenedRevisionId(next.revisionId);
     };
     window.addEventListener("popstate", onPop);
@@ -378,6 +389,7 @@ function MainApp(): JSX.Element {
     projects: "Проекты",
     vendors: "Закупки",
     documents_registry: "Документы",
+    remark_card: "Замечание",
     trm_registry: "ТРМ",
     revisions: "Ревизии",
     trm: "TRM",
@@ -464,6 +476,22 @@ function MainApp(): JSX.Element {
                 </Typography.Title>
               </div>
               <Space>
+                {/* Поиск по номеру замечания: IMP-RMK-000123 → карточка с историей. */}
+                <Input.Search
+                  allowClear
+                  size="small"
+                  placeholder="Номер замечания…"
+                  value={remarkSearch}
+                  onChange={(event) => setRemarkSearch(event.target.value)}
+                  onSearch={(value) => {
+                    const num = value.trim().toUpperCase();
+                    if (!num) return;
+                    setOpenedRemarkNumber(num);
+                    setActiveSection("remark_card");
+                    setRemarkSearch("");
+                  }}
+                  style={{ width: 210 }}
+                />
                 <LanguageSwitcher />
                 <Button
                   icon={<LogoutOutlined />}
@@ -533,6 +561,16 @@ function MainApp(): JSX.Element {
                   onOpenTrm={openTrm}
                   onOpenRevision={(target) => {
                     setOpenedRevisionId(target.revision_id);
+                    setActiveSection("revision_card");
+                  }}
+                />
+              )}
+              {activeSection === "remark_card" && openedRemarkNumber && user && (
+                <RemarkCardPage
+                  remarkNumber={openedRemarkNumber}
+                  onBack={goBack}
+                  onOpenRevision={(revisionId) => {
+                    setOpenedRevisionId(revisionId);
                     setActiveSection("revision_card");
                   }}
                 />

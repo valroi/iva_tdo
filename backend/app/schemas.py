@@ -430,6 +430,39 @@ class CommentRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class RemarkHistoryEvent(BaseModel):
+    """Шаг жизненного цикла замечания для карточки по номеру."""
+    at: datetime
+    kind: str          # CREATED | CRS_SENT | CONTRACTOR_REPLY | LR_DECISION | CARRY_OVER
+    title: str
+    actor: str | None = None
+    detail: str | None = None
+
+
+class RemarkCardRead(BaseModel):
+    id: int
+    remark_number: str | None = None
+    project_code: str
+    document_num: str
+    document_title: str
+    revision_id: int
+    revision_code: str
+    issue_purpose: str
+    page: int | None = None
+    review_code: ReviewCode | None = None
+    status: CommentStatus
+    contractor_status: ContractorCommentStatus | None = None
+    text: str
+    author_name: str | None = None
+    author_email: str | None = None
+    created_at: datetime
+    crs_number: str | None = None
+    crs_sent_at: datetime | None = None
+    is_published_to_contractor: bool = False
+    attachments: list["CommentAttachmentRead"] = Field(default_factory=list)
+    history: list[RemarkHistoryEvent] = Field(default_factory=list)
+
+
 class CommentAttachmentRead(BaseModel):
     id: int
     comment_id: int

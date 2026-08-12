@@ -541,6 +541,43 @@ export async function downloadTrmTransmittal(trmNumber: string): Promise<void> {
   downloadBlob(blob, `${safe}_transmittal.xlsx`);
 }
 
+export interface RemarkHistoryEvent {
+  at: string;
+  kind: "CREATED" | "CRS_SENT" | "CONTRACTOR_REPLY" | "LR_DECISION" | "CARRY_OVER";
+  title: string;
+  actor?: string | null;
+  detail?: string | null;
+}
+
+export interface RemarkCard {
+  id: number;
+  remark_number: string | null;
+  project_code: string;
+  document_num: string;
+  document_title: string;
+  revision_id: number;
+  revision_code: string;
+  issue_purpose: string;
+  page: number | null;
+  review_code: "AP" | "AN" | "CO" | "RJ" | null;
+  status: "OPEN" | "IN_PROGRESS" | "RESOLVED" | "REJECTED";
+  contractor_status: "A" | "I" | null;
+  text: string;
+  author_name?: string | null;
+  author_email?: string | null;
+  created_at: string;
+  crs_number?: string | null;
+  crs_sent_at?: string | null;
+  is_published_to_contractor: boolean;
+  attachments: CommentAttachmentItem[];
+  history: RemarkHistoryEvent[];
+}
+
+/** Карточка замечания по уникальному номеру (IMP-RMK-000123). */
+export function getRemarkCard(remarkNumber: string): Promise<RemarkCard> {
+  return request<RemarkCard>(`/remarks/${encodeURIComponent(remarkNumber.trim().toUpperCase())}`);
+}
+
 export interface CommentAttachmentItem {
   id: number;
   comment_id: number;
