@@ -416,6 +416,7 @@ class CommentRead(BaseModel):
     in_crs: bool = False
     crs_sent_at: datetime | None = None
     crs_number: str | None = None
+    remark_number: str | None = None
     carry_finalized: bool = False
     page: int | None
     area_x: float | None
@@ -444,6 +445,7 @@ class CommentAttachmentRead(BaseModel):
 class RevisionRegistryCommentRead(BaseModel):
     id: int
     parent_id: int | None = None
+    remark_number: str | None = None
     text: str
     status: CommentStatus
     review_code: ReviewCode | None = None

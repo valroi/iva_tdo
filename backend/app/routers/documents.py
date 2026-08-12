@@ -361,6 +361,7 @@ def _comment_read(
         in_crs=comment.in_crs,
         crs_sent_at=comment.crs_sent_at,
         crs_number=comment.crs_number,
+        remark_number=comment.remark_number,
         carry_finalized=comment.carry_finalized,
         page=comment.page,
         area_x=comment.area_x,
@@ -947,6 +948,26 @@ def _next_trm_number(db: Session, *, project_code: str, sender_company_code: str
     return f"{prefix}{next_seq:05d}"
 
 
+def _next_remark_number(db: Session, *, project_code: str) -> str:
+    """Сквозной по проекту номер замечания: IMP-RMK-000123.
+
+    Присваивается один раз при создании и дальше неизменен — по нему ищется
+    вся история замечания. Нумерация независима от документа и ревизии,
+    поэтому carry-over на следующую ревизию номер не меняет."""
+    prefix = f"{project_code.upper()}-RMK-"
+    rows = (
+        db.query(Comment.remark_number)
+        .filter(Comment.remark_number.isnot(None), Comment.remark_number.like(f"{prefix}%"))
+        .all()
+    )
+    max_seq = 0
+    for (value,) in rows:
+        match = re.match(rf"^{re.escape(prefix)}(\d{{6}})$", value or "")
+        if match:
+            max_seq = max(max_seq, int(match.group(1)))
+    return f"{prefix}{max_seq + 1:06d}"
+
+
 def _next_crs_number(
     db: Session,
     *,
@@ -1160,6 +1181,7 @@ def list_documents_registry(
                 RevisionRegistryCommentRead(
                     id=item.id,
                     parent_id=item.parent_id,
+                    remark_number=item.remark_number,
                     text=item.text,
                     status=item.status,
                     review_code=item.review_code,
@@ -2729,7 +2751,7 @@ def export_comments_xlsx(
 
     header_row_idx = ws.max_row + 1
     headers = [
-        "Проект", "Документ", "Ревизия", "Тип", "ID", "Родит. ID",
+        "Проект", "Документ", "Ревизия", "Тип", "№ замечания", "ID", "Родит. ID",
         "Автор (ФИО)", "Сторона", "Текст", "Код замечания", "Статус",
         "Ответ подрядчика", "Файл", "В CRS", "№ CRS", "Опубл. подрядчику",
         "Дата создания", "Дата решения",
@@ -2750,6 +2772,7 @@ def export_comments_xlsx(
             document.document_num,
             revision.revision_code,
             "Ответ" if is_reply else "Замечание",
+            comment.remark_number or "",
             comment.id,
             comment.parent_id or "",
             author_name,
@@ -2766,7 +2789,7 @@ def export_comments_xlsx(
             fmt(comment.resolved_at),
         ])
 
-    widths = [10, 26, 8, 12, 8, 10, 26, 14, 60, 14, 12, 18, 7, 8, 14, 16, 18, 18]
+    widths = [10, 26, 8, 12, 16, 8, 10, 26, 14, 60, 14, 12, 18, 7, 8, 14, 16, 18, 18]
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[ws.cell(row=header_row_idx, column=i).column_letter].width = w
 
@@ -3856,6 +3879,11 @@ def create_comment(
             )
 
     comment = Comment(**payload.model_dump(), author_id=current_user.id, is_published_to_contractor=False)
+    # Уникальный номер присваиваем только «настоящим» замечаниям (родительским).
+    # Ответы-реплики (parent_id) своего номера не получают — они часть истории
+    # родительского замечания.
+    if comment.parent_id is None:
+        comment.remark_number = _next_remark_number(db, project_code=mdr.project_code)
     db.add(comment)
     db.flush()
 

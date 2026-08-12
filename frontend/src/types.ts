@@ -150,6 +150,7 @@ export interface CommentItem {
   in_crs: boolean;
   crs_sent_at: string | null;
   crs_number?: string | null;
+  remark_number?: string | null;
   carry_finalized?: boolean;
   page: number | null;
   area_x: number | null;
@@ -258,6 +259,7 @@ export interface RevisionCard {
 export interface RegistryRevisionCommentItem {
   id: number;
   parent_id: number | null;
+  remark_number?: string | null;
   text: string;
   status: "OPEN" | "IN_PROGRESS" | "RESOLVED" | "REJECTED";
   review_code: "AP" | "AN" | "CO" | "RJ" | null;

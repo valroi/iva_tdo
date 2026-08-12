@@ -982,6 +982,14 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack, onOp
                   size="small"
                   columns={[
                   {
+                    title: "№ замечания",
+                    dataIndex: "remark_number",
+                    width: 140,
+                    fixed: "left",
+                    render: (value: string | null) =>
+                      value ? <Typography.Text className="mono" copyable={{ text: value }}>{value}</Typography.Text> : "—",
+                  },
+                  {
                     title: "Текст",
                     dataIndex: "text",
                     width: 360,

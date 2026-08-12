@@ -348,6 +348,10 @@ class Comment(Base):
     in_crs: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     crs_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     crs_number: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
+    # Уникальный «человеческий» номер замечания: {ПРОЕКТ}-RMK-000123.
+    # Присваивается при создании и НЕ меняется никогда — по нему ищут историю
+    # замечания (ревизия, CRS, ответ подрядчика, решение LR, carry-over).
+    remark_number: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, index=True)
     carry_finalized: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     page: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     area_x: Mapped[Optional[float]] = mapped_column(Float, nullable=True)

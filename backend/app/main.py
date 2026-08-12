@@ -62,6 +62,11 @@ def on_startup() -> None:
     init_db()
     with SessionLocal() as db:
         seed_default_data(db)
+        # Проставить номера замечаниям, созданным до появления нумерации.
+        # Идемпотентно: трогает только записи с пустым remark_number.
+        from app.services.remark_numbers import backfill_remark_numbers
+
+        backfill_remark_numbers(db)
     # Фоновые напоминания о приближающемся дедлайне рассмотрения (R/LR).
     from app.services.deadline_reminders import start_daemon
 
