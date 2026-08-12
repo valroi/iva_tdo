@@ -471,6 +471,80 @@ def _recompute_revision_contractor_status(db: Session, revision: Revision) -> No
 
 
 
+def _revision_remarks_digest(db: Session, revision: Revision) -> tuple[int, str]:
+    """(сколько замечаний передано подрядчику, итоговый код) по ревизии.
+
+    Итоговый код — «худший» из опубликованных: RJ > CO > AN > AP."""
+    rows = (
+        db.query(Comment.review_code)
+        .filter(
+            Comment.revision_id == revision.id,
+            Comment.parent_id.is_(None),
+            Comment.is_published_to_contractor.is_(True),
+            Comment.status != CommentStatus.REJECTED,
+        )
+        .all()
+    )
+    codes = {
+        (value.value if hasattr(value, "value") else str(value))
+        for (value,) in rows
+        if value is not None
+    }
+    worst = next((code for code in ("RJ", "CO", "AN", "AP") if code in codes), "—")
+    return len(rows), worst
+
+
+def _upsert_crs_notification(
+    db: Session,
+    *,
+    user_id: int,
+    revision: Revision,
+    document: Document,
+    mdr: MDRRecord,
+    crs_number: str | None = None,
+) -> None:
+    """Одно уведомление подрядчику на РЕВИЗИЮ вместо письма на каждое замечание.
+
+    Подрядчик жаловался на спам: при поштучной публикации летело уведомление и
+    письмо на каждое замечание. Теперь по ревизии держим одно непрочитанное
+    уведомление-сводку и обновляем его текст (кол-во замечаний + итоговый код).
+    Обновление существующего письма не порождает — рассылка идёт только на
+    новые Notification (см. services/notification_email)."""
+    db.flush()  # чтобы digest увидел только что опубликованные замечания
+    count, worst = _revision_remarks_digest(db, revision)
+    crs_part = f"CRS {crs_number}: " if crs_number else "Замечания заказчика: "
+    message = (
+        f"{crs_part}{document.document_num}, ревизия {revision.revision_code} — "
+        f"замечаний: {count}, итоговый код: {worst}."
+    )
+    existing = (
+        db.query(Notification)
+        .filter(
+            Notification.user_id == user_id,
+            Notification.revision_id == revision.id,
+            Notification.event_type.in_(["OWNER_COMMENTS_PUBLISHED", "OWNER_COMMENT_PUBLISHED"]),
+            Notification.is_read.is_(False),
+        )
+        .order_by(Notification.id.desc())
+        .first()
+    )
+    if existing is not None:
+        existing.message = message
+        existing.event_type = "OWNER_COMMENTS_PUBLISHED"
+        db.add(existing)
+        return
+    db.add(
+        Notification(
+            user_id=user_id,
+            event_type="OWNER_COMMENTS_PUBLISHED",
+            message=message,
+            project_code=mdr.project_code,
+            document_num=document.document_num,
+            revision_id=revision.id,
+        )
+    )
+
+
 def _mark_notifications_read(
     db: Session,
     *,
@@ -3733,15 +3807,13 @@ def send_crs_comments(
         ).date()
         db.add(revision)
         target_author_id = revision.author_id or document.created_by_id
-        db.add(
-            Notification(
-                user_id=target_author_id,
-                event_type="OWNER_COMMENTS_PUBLISHED",
-                message=f"Замечания заказчика переданы подрядчику (CRS): {document.document_num}, ревизия {revision.revision_code}",
-                project_code=mdr.project_code,
-                document_num=document.document_num,
-                revision_id=revision.id,
-            )
+        _upsert_crs_notification(
+            db,
+            user_id=target_author_id,
+            revision=revision,
+            document=document,
+            mdr=mdr,
+            crs_number=crs_number_by_document.get(document.id),
         )
 
         all_members = db.query(ProjectMember).filter(ProjectMember.project_id == project.id).all()
@@ -4127,16 +4199,8 @@ def publish_comment_to_contractor(
     comment.is_published_to_contractor = True
     db.add(comment)
     target_author_id = revision.author_id or document.created_by_id
-    db.add(
-        Notification(
-            user_id=target_author_id,
-            event_type="OWNER_COMMENT_PUBLISHED",
-            message=f"Новое замечание по документу {document.document_num}, ревизия {revision.revision_code}",
-            project_code=mdr.project_code,
-            document_num=document.document_num,
-            revision_id=revision.id,
-        )
-    )
+    # Не плодим уведомление на каждое замечание — одна сводка на ревизию.
+    _upsert_crs_notification(db, user_id=target_author_id, revision=revision, document=document, mdr=mdr)
     db.commit()
     db.refresh(comment)
     return comment
@@ -4209,16 +4273,7 @@ def owner_comment_decision(
         comment.is_published_to_contractor = True
         comment.contractor_status = ContractorCommentStatus.A
         target_author_id = revision.author_id or document.created_by_id
-        db.add(
-            Notification(
-                user_id=target_author_id,
-                event_type="OWNER_COMMENT_PUBLISHED",
-                message=f"Замечание заказчика опубликовано: {document.document_num}, ревизия {revision.revision_code}",
-                project_code=mdr.project_code,
-                document_num=document.document_num,
-                revision_id=revision.id,
-            )
-        )
+        _upsert_crs_notification(db, user_id=target_author_id, revision=revision, document=document, mdr=mdr)
         _mark_notifications_read(
             db,
             user_id=current_user.id,
