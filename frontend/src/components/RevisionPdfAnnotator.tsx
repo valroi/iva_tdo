@@ -132,7 +132,21 @@ export default function RevisionPdfAnnotator({
   }, [open, onCreated]);
 
   const fileUrl = useMemo(() => (revisionId ? getRevisionPdfUrl(revisionId) : null), [revisionId]);
-  const documentOptions = useMemo(() => ({ httpHeaders: getAuthHeaders() }), [open]);
+  // wasmUrl обязателен для сканов в JPEG 2000 (фильтр JPXDecode): pdf.js
+  // декодирует их через openjpeg.wasm, и без него страница рисуется пустой —
+  // видны только векторные элементы (например подпись). cMapUrl и
+  // standardFontDataUrl нужны для нестандартных кодировок и базовых шрифтов.
+  // Файлы кладёт scripts/copy-pdfjs-assets.mjs (predev/prebuild) в public/pdfjs.
+  const documentOptions = useMemo(
+    () => ({
+      httpHeaders: getAuthHeaders(),
+      wasmUrl: `${import.meta.env.BASE_URL}pdfjs/wasm/`,
+      cMapUrl: `${import.meta.env.BASE_URL}pdfjs/cmaps/`,
+      cMapPacked: true,
+      standardFontDataUrl: `${import.meta.env.BASE_URL}pdfjs/standard_fonts/`,
+    }),
+    [open],
+  );
 
   useEffect(() => {
     let cancelled = false;

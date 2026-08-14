@@ -1,1 +1,4 @@
 .env.local
+
+# Ассеты pdf.js копируются скриптом prebuild
+public/pdfjs/
