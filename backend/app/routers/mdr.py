@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 import re
 from io import BytesIO
-from datetime import datetime
+from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, Field
@@ -611,11 +611,22 @@ def update_mdr(
                     detail=f"Category must match project category ({project.document_category}) or an active document_category reference",
                 )
 
+    def _jsonable(value: object) -> object:
+        """История правок пишется в JSON-колонку mdr.dates, поэтому значения
+        нужно приводить к сериализуемым: date/datetime и Enum (напр.
+        planned_dev_start, review_code) иначе роняли PUT с 500 —
+        «Object of type date is not JSON serializable»."""
+        if isinstance(value, (date, datetime)):
+            return value.isoformat()
+        if hasattr(value, "value"):  # Enum (ReviewCode и т.п.)
+            return value.value
+        return value
+
     changed_fields: dict[str, dict[str, object]] = {}
     for field, value in changes.items():
         old_value = getattr(mdr, field)
         if old_value != value:
-            changed_fields[field] = {"from": old_value, "to": value}
+            changed_fields[field] = {"from": _jsonable(old_value), "to": _jsonable(value)}
 
     for field, value in changes.items():
         setattr(mdr, field, value)

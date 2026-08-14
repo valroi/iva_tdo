@@ -297,7 +297,22 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
       message.error("Недостаточно прав для создания документа");
       return;
     }
-    const values = await form.validateFields();
+    // validateFields бросает исключение — раньше оно улетало «в никуда», и по
+    // кнопке ОК просто ничего не происходило. Теперь показываем, какое поле
+    // мешает, и подкручиваем форму к нему.
+    let values: Record<string, unknown>;
+    try {
+      values = await form.validateFields();
+    } catch (error) {
+      const failed = (error as { errorFields?: { name: (string | number)[]; errors: string[] }[] })?.errorFields ?? [];
+      if (failed.length > 0) {
+        form.scrollToField(failed[0].name, { behavior: "smooth", block: "center" });
+        message.error(`Заполните обязательные поля: ${failed.map((item) => item.errors[0]).join("; ")}`);
+      } else {
+        message.error("Проверьте заполнение формы");
+      }
+      return;
+    }
     const unchangedCipherInEdit =
       Boolean(editingMdrId) && normalizePdCipher(values.doc_number) === normalizePdCipher(editingOriginalDocNumber ?? "");
     if (docNumberExists && !unchangedCipherInEdit) {
@@ -809,7 +824,10 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
             <Form.Item
               name="serial_number"
               label="Порядковый номер (авто, уникален для комбинации кодов)"
-              rules={[{ required: true }]}
+              // В старых записях серийник мог быть пустым (шифр собирался иначе).
+              // При редактировании не требуем его — иначе документ невозможно
+              // отредактировать вообще (например, поправить плановую дату).
+              rules={editingMdrId ? [] : [{ required: true }]}
               normalize={(value: string) => (value ?? "").replace(/\D/g, "").slice(0, 6)}
             >
               <Input
