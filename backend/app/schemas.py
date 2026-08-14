@@ -519,7 +519,6 @@ class DocumentRegistryRead(BaseModel):
     latest_review_code: ReviewCode | None = None
     latest_author_name: str | None = None
     planned_dev_start: date | None = None
-    development_date: datetime | None = None
     first_upload_date: datetime | None = None
     is_overdue: bool = False
     total_comments_count: int = 0

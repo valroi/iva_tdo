@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { downloadRevisionAttachmentsArchive, listDocumentsRegistry } from "../api";
 import ProcessHint from "../components/ProcessHint";
 import type { DocumentRegistryItem, RegistryRevisionItem, User } from "../types";
-import { formatDateTimeRu } from "../utils/datetime";
+import { formatDateRu, formatDateTimeRu } from "../utils/datetime";
 import {
   ContractorReuploadPdfTag,
   RevisionStatusCell,
@@ -121,7 +121,9 @@ export default function DocumentsRegistryPage({ currentUser, onOpenRevision, onO
     },
     { title: "Статус выпуска", dataIndex: "latest_review_code", width: 120, render: (v) => v ?? "—" },
     { title: "Автор", dataIndex: "latest_author_name", width: 170, render: (v) => v ?? "—" },
-    { title: "Дата разработки", dataIndex: "development_date", width: 140, render: (v) => formatDateTimeRu(v) },
+    // Плановая дата из MDR, а не created_at документа: пользователь правит её в
+    // карточке и ждёт, что реестр покажет правку. От неё же считается «Просрочка».
+    { title: "План выпуска ревизии A", dataIndex: "planned_dev_start", width: 150, render: (v) => formatDateRu(v) },
     { title: "Первая загрузка", dataIndex: "first_upload_date", width: 140, render: (v) => formatDateTimeRu(v) },
     {
       title: "Просрочка",

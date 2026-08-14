@@ -1323,7 +1323,6 @@ def list_documents_registry(
                 latest_review_code=latest.review_code if latest else None,
                 latest_author_name=latest_author_name,
                 planned_dev_start=mdr.planned_dev_start,
-                development_date=doc.created_at,
                 first_upload_date=first_upload_date,
                 is_overdue=is_overdue,
                 total_comments_count=total_comments,

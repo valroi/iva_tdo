@@ -300,7 +300,6 @@ export interface DocumentRegistryItem {
   latest_review_code: "AP" | "AN" | "CO" | "RJ" | null;
   latest_author_name: string | null;
   planned_dev_start?: string | null;
-  development_date: string | null;
   first_upload_date: string | null;
   is_overdue?: boolean;
   total_comments_count: number;
