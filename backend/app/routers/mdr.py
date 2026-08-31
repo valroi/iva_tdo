@@ -17,6 +17,7 @@ from app.deps import get_current_user, has_permission, require_permissions
 from app.models import (
     CarryOverDecision,
     Comment,
+    CommentAttachment,
     CommentStatus,
     CipherTemplate,
     CipherTemplateField,
@@ -27,6 +28,8 @@ from app.models import (
     Project,
     ProjectReference,
     Revision,
+    ReviewEvent,
+    RevisionReviewerState,
     User,
 )
 from app.schemas import (
@@ -499,7 +502,30 @@ def create_child_mdr(
                 max_idx = max(max_idx, int(raw))
         serial = str(max_idx + 1).zfill(2)
 
-    child_doc_number = f"{parent.doc_number}-{serial}"
+    # Свой титульный объект: вложенный получает не «шифр родителя + -NN», а
+    # полный шифр по маске категории (IMP-SHP-PF-9505-SE-ACT-001). Так уже
+    # заведены документы под «Концепцией АБЗ» — титул там номер здания.
+    child_title = (payload.title_object or "").strip().upper()
+    parent_title = (parent.title_object or "").strip().upper()
+    if child_title and child_title != parent_title:
+        child_doc_number, _ = _compose_legacy_cipher(
+            ComposeCipherPayload(
+                project_code=parent.project_code,
+                originator_code=parent.originator_code,
+                category=parent.category,
+                title_object=child_title,
+                discipline_code=parent.discipline_code,
+                doc_type=parent.doc_type,
+                # Порядковый номер: свой, если задан, иначе как у родителя —
+                # титул уже делает шифр уникальным.
+                serial_number=serial if payload.serial else parent.serial_number,
+            )
+        )
+        child_serial = serial if payload.serial else parent.serial_number
+    else:
+        child_title = parent_title
+        child_serial = serial
+        child_doc_number = f"{parent.doc_number}-{serial}"
     exists_cipher = (
         db.query(MDRRecord.id)
         .filter(MDRRecord.project_code == parent.project_code, MDRRecord.doc_number == child_doc_number)
@@ -528,10 +554,10 @@ def create_child_mdr(
         project_code=parent.project_code,
         originator_code=parent.originator_code,
         category=parent.category,
-        title_object=parent.title_object,
+        title_object=child_title or parent.title_object,
         discipline_code=parent.discipline_code,
         doc_type=parent.doc_type,
-        serial_number=serial,
+        serial_number=child_serial,
         doc_number=child_doc_number,
         parent_id=parent.id,
         doc_name=payload.doc_name,
@@ -669,40 +695,50 @@ def update_mdr(
     return mdr
 
 
-@router.delete("/{mdr_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_mdr(
-    mdr_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    if current_user.role.value != "admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admin can delete MDR records")
+def _purge_mdr_tree(db: Session, root: MDRRecord) -> list[str]:
+    """Удаляет MDR вместе с вложенными и всем, что на них ссылается.
 
-    mdr = db.query(MDRRecord).filter(MDRRecord.id == mdr_id).first()
-    if not mdr:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="MDR not found")
+    Порядок обхода FK обязателен: Postgres отбивает удаление IntegrityError'ом,
+    а пользователь видит только «ничего не происходит». Уже ловили это на
+    document_attachments/carry_over_decisions/notifications; позже так же
+    выстрелили review_events, revision_reviewer_states и comment_attachments —
+    таблицы, добавленные после первого фикса. Добавляя новую таблицу со ссылкой
+    на revisions/comments/documents, дописывай зачистку сюда.
 
-    # Полный каскад в FK-безопасном порядке. Раньше не чистились
-    # document_attachments / carry_over_decisions / notifications —
-    # Postgres отбивал удаление IntegrityError'ом (500), и «Удалить»
-    # в UI выглядело как «ничего не происходит».
+    Возвращает пути файлов, которые можно стереть после успешного коммита.
+    """
     file_paths: list[str] = []
-    document_ids = [row[0] for row in db.query(Document.id).filter(Document.mdr_id == mdr_id).all()]
+
+    # Вложенные документы (один уровень, см. create_child_mdr) сносим вместе с
+    # родителем: иначе у них остаётся висячий parent_id и удаление падает.
+    mdr_ids = [root.id] + [
+        row[0] for row in db.query(MDRRecord.id).filter(MDRRecord.parent_id == root.id).all()
+    ]
+    doc_numbers = [
+        row[0] for row in db.query(MDRRecord.doc_number).filter(MDRRecord.id.in_(mdr_ids)).all()
+    ]
+
+    document_ids = [row[0] for row in db.query(Document.id).filter(Document.mdr_id.in_(mdr_ids)).all()]
     if document_ids:
         revision_ids = [row[0] for row in db.query(Revision.id).filter(Revision.document_id.in_(document_ids)).all()]
         if revision_ids:
             comment_ids = [row[0] for row in db.query(Comment.id).filter(Comment.revision_id.in_(revision_ids)).all()]
             if comment_ids:
+                db.query(CommentAttachment).filter(
+                    CommentAttachment.comment_id.in_(comment_ids)
+                ).delete(synchronize_session=False)
                 db.query(CarryOverDecision).filter(
                     CarryOverDecision.source_comment_id.in_(comment_ids)
                 ).delete(synchronize_session=False)
             db.query(CarryOverDecision).filter(
                 CarryOverDecision.target_revision_id.in_(revision_ids)
             ).delete(synchronize_session=False)
-            # Уведомления участников по ревизиям этого документа.
+            db.query(ReviewEvent).filter(ReviewEvent.revision_id.in_(revision_ids)).delete(synchronize_session=False)
+            db.query(RevisionReviewerState).filter(
+                RevisionReviewerState.revision_id.in_(revision_ids)
+            ).delete(synchronize_session=False)
             db.query(Notification).filter(Notification.revision_id.in_(revision_ids)).delete(synchronize_session=False)
             db.query(Comment).filter(Comment.revision_id.in_(revision_ids)).delete(synchronize_session=False)
-            # PDF ревизий — собрать пути, файлы стереть после успешного коммита.
             file_paths += [
                 row[0]
                 for row in db.query(Revision.file_path).filter(Revision.id.in_(revision_ids)).all()
@@ -721,10 +757,30 @@ def delete_mdr(
         db.query(Revision).filter(Revision.document_id.in_(document_ids)).delete(synchronize_session=False)
         db.query(Document).filter(Document.id.in_(document_ids)).delete(synchronize_session=False)
 
-    # Контекстные уведомления по шифру документа (без revision_id).
-    db.query(Notification).filter(Notification.document_num == mdr.doc_number).delete(synchronize_session=False)
+    # Контекстные уведомления по шифрам (без revision_id).
+    if doc_numbers:
+        db.query(Notification).filter(Notification.document_num.in_(doc_numbers)).delete(synchronize_session=False)
 
-    db.delete(mdr)
+    # Сначала вложенные, потом родитель — parent_id ссылается на mdr_records.
+    db.query(MDRRecord).filter(MDRRecord.parent_id == root.id).delete(synchronize_session=False)
+    db.delete(root)
+    return file_paths
+
+
+@router.delete("/{mdr_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_mdr(
+    mdr_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role.value != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admin can delete MDR records")
+
+    mdr = db.query(MDRRecord).filter(MDRRecord.id == mdr_id).first()
+    if not mdr:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="MDR not found")
+
+    file_paths = _purge_mdr_tree(db, mdr)
     db.commit()
 
     # Файлы чистим только после успешного коммита БД — сбой ФС не ломает удаление.

@@ -51,6 +51,9 @@ export interface MDRRecord {
   id: number;
   document_key: string;
   project_code: string;
+  // Код разработчика — часть шифра; нужен, чтобы собрать превью шифра
+  // вложенного документа со своим титулом.
+  originator_code: string;
   category: string;
   title_object: string;
   serial_number: string;

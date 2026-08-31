@@ -208,7 +208,13 @@ export function createMdr(payload: Record<string, unknown>): Promise<MDRRecord> 
 
 export function createChildMdr(
   parentId: number,
-  payload: { doc_name: string; doc_weight?: number; planned_dev_start?: string | null; serial?: string | null },
+  payload: {
+    doc_name: string;
+    doc_weight?: number;
+    planned_dev_start?: string | null;
+    serial?: string | null;
+    title_object?: string | null;
+  },
 ): Promise<MDRRecord> {
   return request<MDRRecord>(`/mdr/${parentId}/child`, {
     method: "POST",

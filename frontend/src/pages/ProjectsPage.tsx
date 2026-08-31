@@ -558,9 +558,13 @@ export default function ProjectsPage({
             // комментарии» (item 5): по дисциплине/категории — её документы;
             // по документу — он сам + вложенные, и сразу открываем его карточку.
             const key = String(selectedKeys[0] ?? "");
+            // Вкладку переключаем только если пользователь не в реестре:
+            // из «Реестра документов» клик по дереву должен фильтровать сам
+            // реестр, а не выкидывать на другую вкладку.
+            const keepTab = activeTabKey === "mdr";
             if (key.startsWith("category-")) {
               setTreeFilter({ kind: "category", value: key.slice("category-".length) });
-              setActiveTabKey("documents");
+              if (!keepTab) setActiveTabKey("documents");
               return;
             }
             if (key === "mdr-root" || key.startsWith("project-")) {
@@ -574,6 +578,7 @@ export default function ProjectsPage({
             // Вложенный документ фильтруем по его родителю (чтобы показать
             // всю группу), верхнеуровневый — по нему самому.
             setTreeFilter({ kind: "document", mdrId: item.parent_id ?? item.id });
+            if (keepTab) return;
             setLocalNotificationTarget({
               project_code: selectedProject?.code ?? null,
               document_num: item.doc_number,
@@ -633,6 +638,8 @@ export default function ProjectsPage({
                   currentUser={currentUser}
                   projectReferences={references}
                   onCreated={onReload}
+                  treeFilter={treeFilter}
+                  onResetTreeFilter={() => setTreeFilter(null)}
                   onOpenDocument={(documentNum) => {
                     setTreeFilter(null); // из реестра открываем конкретный документ без фильтра
                     setLocalNotificationTarget({

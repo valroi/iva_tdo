@@ -225,11 +225,15 @@ class MDRCreate(MDRBase):
 
 class MDRChildCreate(BaseModel):
     """Вложенный документ под родительским (напр. программа изысканий).
-    Наследует шифровочные поля родителя; шифр = шифр родителя + "-" + номер."""
+    Наследует шифровочные поля родителя; шифр = шифр родителя + "-" + номер.
+
+    Если задан свой title_object (титульный объект отличается от родительского),
+    шифр собирается по полной маске категории: IMP-SHP-PF-9505-SE-ACT-001."""
     doc_name: str
     doc_weight: float = 0
     planned_dev_start: date | None = None
     serial: str | None = None  # если пусто — авто (следующий среди детей)
+    title_object: str | None = None  # пусто — как у родителя
 
 
 class MDRUpdate(BaseModel):

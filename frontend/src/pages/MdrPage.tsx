@@ -20,6 +20,13 @@ import {
 import type { CipherTemplateField, MDRRecord, ProjectItem, ProjectReference, User } from "../types";
 import { formatDateRu } from "../utils/datetime";
 
+// Фильтр из дерева структуры проекта: тот же тип, что у «Ревизий и
+// комментариев», чтобы клик по узлу одинаково сужал обе вкладки.
+export type MdrTreeFilter =
+  | { kind: "category"; value: string }
+  | { kind: "document"; mdrId: number }
+  | null;
+
 interface Props {
   mdr: MDRRecord[];
   projects: ProjectItem[];
@@ -27,9 +34,30 @@ interface Props {
   projectReferences: ProjectReference[];
   onCreated: () => Promise<void>;
   onOpenDocument?: (documentNum: string) => void;
+  treeFilter?: MdrTreeFilter;
+  onResetTreeFilter?: () => void;
 }
 
-export default function MdrPage({ mdr, projects, currentUser, projectReferences, onCreated, onOpenDocument }: Props): JSX.Element {
+/** «1 вложенный документ» / «2 вложенных документа» / «5 вложенных документов». */
+function pluralNested(count: number): string {
+  const mod100 = count % 100;
+  const mod10 = count % 10;
+  if (mod100 >= 11 && mod100 <= 14) return "вложенных документов";
+  if (mod10 === 1) return "вложенный документ";
+  if (mod10 >= 2 && mod10 <= 4) return "вложенных документа";
+  return "вложенных документов";
+}
+
+export default function MdrPage({
+  mdr,
+  projects,
+  currentUser,
+  projectReferences,
+  onCreated,
+  onOpenDocument,
+  treeFilter,
+  onResetTreeFilter,
+}: Props): JSX.Element {
   const canManageMdr = currentUser.role === "admin" || currentUser.permissions.can_create_mdr;
   const isAdmin = currentUser.role === "admin";
   const [open, setOpen] = useState(false);
@@ -45,8 +73,43 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
   const [editingHistoryLines, setEditingHistoryLines] = useState<string[]>([]);
   const [deletingMdrId, setDeletingMdrId] = useState<number | null>(null);
   const [deletingMdrLoading, setDeletingMdrLoading] = useState(false);
+  // Вложенные сносятся каскадом вместе с родителем (решение 2026-08-31),
+  // поэтому в подтверждении показываем, сколько документов уедет заодно.
+  const deletingChildCount = useMemo(
+    () => (deletingMdrId === null ? 0 : mdr.filter((row) => row.parent_id === deletingMdrId).length),
+    [mdr, deletingMdrId],
+  );
   const [childParent, setChildParent] = useState<MDRRecord | null>(null);
   const [childSubmitting, setChildSubmitting] = useState(false);
+  const [search, setSearch] = useState("");
+  // Реестр сужается двумя способами: клик по узлу дерева (документ + его
+  // вложенные, либо вся категория) и строка поиска по шифру/названию.
+  // Полотно на 30+ документов иначе нечитаемо.
+  const visibleMdr = useMemo(() => {
+    let rows = mdr;
+    if (treeFilter?.kind === "category") {
+      rows = rows.filter((row) => (row.category || "").toUpperCase() === treeFilter.value.toUpperCase());
+    } else if (treeFilter?.kind === "document") {
+      rows = rows.filter((row) => row.id === treeFilter.mdrId || row.parent_id === treeFilter.mdrId);
+    }
+    const query = search.trim().toLowerCase();
+    if (query) {
+      rows = rows.filter(
+        (row) =>
+          (row.doc_number || "").toLowerCase().includes(query) ||
+          (row.doc_name || "").toLowerCase().includes(query),
+      );
+    }
+    return rows;
+  }, [mdr, treeFilter, search]);
+  const treeFilterLabel = useMemo(() => {
+    if (treeFilter?.kind === "category") return `категория ${treeFilter.value}`;
+    if (treeFilter?.kind === "document") {
+      const target = mdr.find((row) => row.id === treeFilter.mdrId);
+      return target ? `${target.doc_number} и вложенные` : "выбранный документ";
+    }
+    return null;
+  }, [treeFilter, mdr]);
   const [childForm] = Form.useForm();
   const normalizePdCipher = (value: string): string => {
     const raw = String(value || "").trim().toUpperCase();
@@ -58,6 +121,34 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
     const [, projectCode, originatorCode, cat, title, section, part, book] = match;
     return `${projectCode}-${originatorCode}-${cat}-${title}-${section}${part}${book ? `.${book}` : ""}`;
   };
+  const childTitleObject = Form.useWatch("title_object", childForm);
+  const childSerial = Form.useWatch("serial", childForm);
+  // Показываем итоговый шифр до создания: со своим титулом собирается полная
+  // маска категории, без него — старая схема «шифр родителя + -NN».
+  const childCipherPreview = useMemo(() => {
+    if (!childParent) return "…";
+    const title = String(childTitleObject ?? "").trim().toUpperCase();
+    const serial = String(childSerial ?? "").trim().toUpperCase();
+    const parentTitle = String(childParent.title_object ?? "").trim().toUpperCase();
+    if (title && title !== parentTitle) {
+      // Через normalizePdCipher: у PD раздел/часть/книга склеиваются (AR33.2),
+      // у остальных категорий шифр остаётся плоским. Так же собирает бэкенд.
+      return normalizePdCipher(
+        [
+          childParent.project_code,
+          childParent.originator_code,
+          childParent.category,
+          title,
+          childParent.discipline_code,
+          childParent.doc_type,
+          serial || childParent.serial_number,
+        ]
+          .join("-")
+          .toUpperCase(),
+      );
+    }
+    return `${childParent.doc_number}-${serial || "NN"}`;
+  }, [childParent, childTitleObject, childSerial]);
 
   const [form] = Form.useForm();
   const latestComposeRequestRef = useRef(0);
@@ -706,7 +797,37 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
           </Button>
         )}
       </Space>
-      <Table rowKey="id" columns={columns} dataSource={mdr} size="small" scroll={{ x: 1280 }} pagination={paginationProps("mdr")} locale={{ emptyText: "МДР пуст. Добавьте документы через кнопку выше." }} />
+      <Space style={{ marginBottom: 12 }} wrap>
+        <Input.Search
+          allowClear
+          placeholder="Поиск по шифру или названию"
+          style={{ width: 320 }}
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+        />
+        {treeFilterLabel && (
+          <Tag closable color="processing" onClose={() => onResetTreeFilter?.()}>
+            Фильтр дерева: {treeFilterLabel}
+          </Tag>
+        )}
+        <Typography.Text type="secondary">
+          Показано {visibleMdr.length} из {mdr.length}
+        </Typography.Text>
+      </Space>
+      <Table
+        rowKey="id"
+        columns={columns}
+        dataSource={visibleMdr}
+        size="small"
+        scroll={{ x: 1280 }}
+        pagination={paginationProps("mdr")}
+        locale={{
+          emptyText:
+            search || treeFilterLabel
+              ? "Ничего не найдено — измените поиск или снимите фильтр."
+              : "МДР пуст. Добавьте документы через кнопку выше.",
+        }}
+      />
 
       <Modal
         open={open}
@@ -917,6 +1038,12 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
         }}
       >
         Будут удалены связанные документы/ревизии/комментарии.
+        {deletingChildCount > 0 && (
+          <Typography.Paragraph type="danger" style={{ marginTop: 8, marginBottom: 0 }}>
+            Вместе с ним будет удалено {deletingChildCount}{" "}
+            {pluralNested(deletingChildCount)} и все их ревизии.
+          </Typography.Paragraph>
+        )}
       </Modal>
 
       <Modal
@@ -939,6 +1066,7 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
               doc_weight: values.doc_weight ?? 0,
               planned_dev_start: values.planned_dev_start || null,
               serial: values.serial || null,
+              title_object: values.title_object || null,
             });
             message.success("Вложенный документ создан");
             setChildParent(null);
@@ -952,15 +1080,21 @@ export default function MdrPage({ mdr, projects, currentUser, projectReferences,
         }}
       >
         <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-          Часть большего документа (напр. программа изысканий под отчётом). Шифр, категория,
-          дисциплина и порядок рассмотрения — как у родителя; шифр = <b>{childParent?.doc_number ?? "…"}-NN</b>.
-          Наименование — своё.
+          Часть большего документа (напр. программа изысканий под отчётом). Категория, дисциплина и
+          порядок рассмотрения — как у родителя. Шифр: <b>{childCipherPreview}</b>.
         </Typography.Paragraph>
         <Form form={childForm} layout="vertical">
           <Form.Item name="doc_name" label="Наименование вложенного документа" rules={[{ required: true, message: "Укажите наименование" }]}>
             <Input placeholder="Программа инженерно-геодезических изысканий" />
           </Form.Item>
-          <Form.Item name="serial" label="Порядковый номер (необязательно, авто)" tooltip="1-4 символа. Пусто — следующий свободный (01, 02, …)">
+          <Form.Item
+            name="title_object"
+            label="Титульный объект (титул)"
+            tooltip="Пусто — титул родителя, шифр = шифр родителя + -NN. Свой титул (напр. 9505) даёт полный шифр по маске категории."
+          >
+            <Input placeholder={childParent?.title_object ?? "как у родителя"} maxLength={10} />
+          </Form.Item>
+          <Form.Item name="serial" label="Порядковый номер (необязательно, авто)" tooltip="1-4 символа. Пусто — следующий свободный (01, 02, …); при своём титуле — номер родителя">
             <Input placeholder="авто" maxLength={4} />
           </Form.Item>
           <Form.Item name="doc_weight" label="Вес (в бюджете категории)">
