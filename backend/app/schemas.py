@@ -851,6 +851,14 @@ class ReviewFlagsUpdate(BaseModel):
     nc_locks_commenting: bool
 
 
+class MatrixGapEmailsRead(BaseModel):
+    emails: str
+
+
+class MatrixGapEmailsUpdate(BaseModel):
+    emails: str
+
+
 class ReviewReportRow(BaseModel):
     document_num: str
     revision_code: str | None = None

@@ -498,6 +498,21 @@ export function getReviewFlags(): Promise<ReviewFlags> {
   return request<ReviewFlags>("/users/admin-settings/review-flags");
 }
 
+export interface MatrixGapEmails {
+  emails: string;
+}
+
+export function getMatrixGapEmails(): Promise<MatrixGapEmails> {
+  return request<MatrixGapEmails>("/users/admin-settings/matrix-gap-emails");
+}
+
+export function updateMatrixGapEmails(payload: MatrixGapEmails): Promise<MatrixGapEmails> {
+  return request<MatrixGapEmails>("/users/admin-settings/matrix-gap-emails", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function updateReviewFlags(payload: ReviewFlags): Promise<ReviewFlags> {
   return request<ReviewFlags>("/users/admin-settings/review-flags", {
     method: "PUT",

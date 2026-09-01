@@ -40,7 +40,9 @@ import {
   revokeUserSession,
   getAdminReviewSlaSettings,
   updateAdminReviewSlaSettings,
+  getMatrixGapEmails,
   getReviewFlags,
+  updateMatrixGapEmails,
   updateReviewFlags,
   clearAllNotifications,
 } from "../api";
@@ -165,6 +167,9 @@ export default function AdminPage({ currentUser, onGlobalReload }: Props): JSX.E
   const [requests, setRequests] = useState<RegistrationRequest[]>([]);
   const [isMainAdmin, setIsMainAdmin] = useState(false);
   const [ncLocksCommenting, setNcLocksCommenting] = useState(true);
+  // Кому (кроме админов) уходит сигнал «подрядчик создаёт документ без LR».
+  const [matrixGapEmails, setMatrixGapEmails] = useState("");
+  const [savingGapEmails, setSavingGapEmails] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -231,6 +236,8 @@ export default function AdminPage({ currentUser, onGlobalReload }: Props): JSX.E
       try {
         const flags = await getReviewFlags();
         setNcLocksCommenting(flags.nc_locks_commenting);
+        const gapEmails = await getMatrixGapEmails();
+        setMatrixGapEmails(gapEmails.emails);
       } catch {
         // ignore for non-main admins
       }
@@ -589,6 +596,40 @@ export default function AdminPage({ currentUser, onGlobalReload }: Props): JSX.E
                     Сохранить SLA
                   </Button>
                 </Form>
+                <Card size="small" style={{ marginTop: 16 }} title="Документы без назначенного LR">
+                  <Typography.Text type="secondary">
+                    Если подрядчик пытается создать документ по разделу, где в матрице нет
+                    лидера-ревьювера, документ не создаётся, а уведомление уходит администраторам и
+                    адресатам из этого списка. Несколько адресов — через запятую.
+                  </Typography.Text>
+                  <Space.Compact style={{ width: "100%", marginTop: 12 }}>
+                    <Input
+                      value={matrixGapEmails}
+                      disabled={!isMainAdmin}
+                      placeholder="rakov.vd@ivamaris.group"
+                      onChange={(event) => setMatrixGapEmails(event.target.value)}
+                    />
+                    <Button
+                      type="primary"
+                      loading={savingGapEmails}
+                      disabled={!isMainAdmin}
+                      onClick={async () => {
+                        setSavingGapEmails(true);
+                        try {
+                          const saved = await updateMatrixGapEmails({ emails: matrixGapEmails });
+                          setMatrixGapEmails(saved.emails);
+                          message.success("Список получателей сохранён");
+                        } catch (error) {
+                          message.error(error instanceof Error ? error.message : "Не удалось сохранить");
+                        } finally {
+                          setSavingGapEmails(false);
+                        }
+                      }}
+                    >
+                      Сохранить
+                    </Button>
+                  </Space.Compact>
+                </Card>
                 <Card size="small" style={{ marginTop: 16 }} title="Замечания ревьюеров (R)">
                   <Space align="start">
                     <Switch

@@ -9,6 +9,7 @@ from app.auth import get_password_hash, verify_password
 from app.config import get_settings
 from app.database import get_db
 from app.seed import seed_default_data
+from app.services import matrix_gap
 from app.services.notification_email import send_welcome_email
 from app.deps import (
     default_permissions_for_role,
@@ -45,6 +46,8 @@ from app.schemas import (
     RegistrationRequestRead,
     AdminReviewSlaSettingsRead,
     AdminReviewSlaSettingsUpdate,
+    MatrixGapEmailsRead,
+    MatrixGapEmailsUpdate,
     ReviewFlagsRead,
     ReviewFlagsUpdate,
     UserActivationUpdate,
@@ -198,6 +201,34 @@ def get_review_flags(
     item = db.query(SystemSetting).filter(SystemSetting.key == "review_nc_locks_commenting").first()
     locks = True if item is None else str(item.value).strip().lower() in ("1", "true", "yes", "on")
     return ReviewFlagsRead(nc_locks_commenting=locks)
+
+
+@router.get("/admin-settings/matrix-gap-emails", response_model=MatrixGapEmailsRead)
+def get_matrix_gap_emails(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_main_admin),
+):
+    """Кому уходит сигнал «подрядчик пытался создать документ без LR»
+    (кроме администраторов — они получают его всегда)."""
+    item = db.query(SystemSetting).filter(SystemSetting.key == matrix_gap.NOTIFY_SETTING_KEY).first()
+    return MatrixGapEmailsRead(emails=item.value if item is not None else matrix_gap.DEFAULT_NOTIFY_EMAILS)
+
+
+@router.put("/admin-settings/matrix-gap-emails", response_model=MatrixGapEmailsRead)
+def update_matrix_gap_emails(
+    payload: MatrixGapEmailsUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_main_admin),
+):
+    value = (payload.emails or "").strip()
+    item = db.query(SystemSetting).filter(SystemSetting.key == matrix_gap.NOTIFY_SETTING_KEY).first()
+    if item is None:
+        item = SystemSetting(key=matrix_gap.NOTIFY_SETTING_KEY, value=value)
+    else:
+        item.value = value
+    db.add(item)
+    db.commit()
+    return MatrixGapEmailsRead(emails=value)
 
 
 @router.put("/admin-settings/review-flags", response_model=ReviewFlagsRead)

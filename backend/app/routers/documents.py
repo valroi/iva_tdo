@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import get_current_user, get_effective_permissions, require_permissions, users_by_company_types
+from app.services import matrix_gap
 from app.models import (
     Comment,
     CommentAttachment,
@@ -175,6 +176,18 @@ def _set_revision_status(revision: Revision, next_status: str) -> bool:
         )
     revision.status = next_status
     return True
+
+
+def _matrix_fallback_receivers(db: Session) -> set[int]:
+    """Кому слать, когда по разделу никто не назначен.
+
+    Раньше письмо уходило ВСЕМ сотрудникам заказчика — спам людям, которые к
+    документу отношения не имеют. Теперь это администраторы системы и адресаты
+    из настройки matrix_gap_notify_emails: пробел в матрице чинят они.
+    Новые документы без LR вообще не создаются (services/matrix_gap), но у
+    старых записей матрица могла быть удалена задним числом.
+    """
+    return matrix_gap.gap_recipient_ids(db)
 
 
 def _matrix_source(db: Session, mdr: MDRRecord | None) -> MDRRecord | None:
@@ -3368,11 +3381,7 @@ def create_revision(
         if matrix_level_1:
             receiver_ids = {item.user_id for item in matrix_level_1}
         else:
-            fallback = users_by_company_types(
-                db,
-                company_types=[CompanyType.owner],
-            )
-            receiver_ids = {user.id for user in fallback}
+            receiver_ids = _matrix_fallback_receivers(db)
 
     for receiver_id in receiver_ids:
         event_type = "NEW_REVISION_FOR_TDO" if lead_ids else "NEW_REVISION"
@@ -3468,8 +3477,7 @@ def make_tdo_decision(
         if matrix_level_1:
             receiver_ids = {item.user_id for item in matrix_level_1}
         else:
-            fallback = users_by_company_types(db, company_types=[CompanyType.owner])
-            receiver_ids = {user.id for user in fallback}
+            receiver_ids = _matrix_fallback_receivers(db)
         for receiver_id in receiver_ids:
             db.add(
                 Notification(
@@ -3650,8 +3658,7 @@ def make_tdo_bulk_decision(
             if matrix_level_1:
                 receiver_ids = {item.user_id for item in matrix_level_1}
             else:
-                fallback = users_by_company_types(db, company_types=[CompanyType.owner])
-                receiver_ids = {user.id for user in fallback}
+                receiver_ids = _matrix_fallback_receivers(db)
             for receiver_id in receiver_ids:
                 db.add(
                     Notification(

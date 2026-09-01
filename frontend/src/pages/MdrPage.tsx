@@ -1,5 +1,5 @@
 import { paginationProps } from "../utils/pagination";
-import { AutoComplete, Button, Dropdown, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
+import { Alert, AutoComplete, Button, Dropdown, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
 import { DownOutlined, FileExcelOutlined } from "@ant-design/icons";
 import type { MenuProps } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -17,7 +17,7 @@ import {
   importMdr,
   updateMdr,
 } from "../api";
-import type { CipherTemplateField, MDRRecord, ProjectItem, ProjectReference, User } from "../types";
+import type { CipherTemplateField, MDRRecord, ProjectItem, ProjectReference, ReviewMatrixMember, User } from "../types";
 import { formatDateRu } from "../utils/datetime";
 
 // Фильтр из дерева структуры проекта: тот же тип, что у «Ревизий и
@@ -36,6 +36,7 @@ interface Props {
   onOpenDocument?: (documentNum: string) => void;
   treeFilter?: MdrTreeFilter;
   onResetTreeFilter?: () => void;
+  reviewMatrix?: ReviewMatrixMember[];
 }
 
 /** «1 вложенный документ» / «2 вложенных документа» / «5 вложенных документов». */
@@ -57,6 +58,7 @@ export default function MdrPage({
   onOpenDocument,
   treeFilter,
   onResetTreeFilter,
+  reviewMatrix = [],
 }: Props): JSX.Element {
   const canManageMdr = currentUser.role === "admin" || currentUser.permissions.can_create_mdr;
   const isAdmin = currentUser.role === "admin";
@@ -247,6 +249,21 @@ export default function MdrPage({
       ["SM", "12"],
     ]);
   }, []);
+  // Подсказка до нажатия «Создать»: бэкенд всё равно не даст завести документ
+  // без LR по разделу (services/matrix_gap), но подрядчик должен понимать это
+  // сразу, а не после ошибки. Для SE матрица ведётся одним условным разделом.
+  const matrixDisciplineKey = isSeCategory ? "SE" : String(currentDisciplineCode || "").toUpperCase();
+  const hasLeadReviewer = useMemo(() => {
+    if (!matrixDisciplineKey) return true;
+    return reviewMatrix.some(
+      (row) =>
+        String(row.discipline_code || "").toUpperCase() === matrixDisciplineKey &&
+        row.level === 1 &&
+        row.state === "LR",
+    );
+  }, [reviewMatrix, matrixDisciplineKey]);
+  const missingReviewerNotice =
+    !isAdmin && matrixDisciplineKey && !hasLeadReviewer ? matrixDisciplineKey : null;
   const currentSectionNumber = (pdSectionNumberByCode.get(String(currentDisciplineCode || "").toUpperCase()) ?? "—");
   const categoryWeight = useMemo(() => {
     if (!currentProjectCode || !currentCategory) return 0;
@@ -906,6 +923,21 @@ export default function MdrPage({
               placeholder={isPdCategory ? "Из справочника разделов ПД" : isSeCategory ? "Из справочника «SE отчеты»" : "Из справочника «Дисциплина»"}
             />
           </Form.Item>
+          {missingReviewerNotice && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 16 }}
+              message={`По разделу «${missingReviewerNotice}» не назначен лидер-ревьювер (LR) заказчика`}
+              description={
+                <>
+                  Документ создать нельзя — его некому рассматривать. Свяжитесь с администратором
+                  системы заказчика, чтобы он завёл LR и R в матрице назначений проекта. Уведомление
+                  ему уйдёт автоматически, если всё-таки нажать «Создать».
+                </>
+              }
+            />
+          )}
           {isPdCategory && (
             <Form.Item label="Номер раздела (инфо)">
               <Input value={currentSectionNumber} readOnly />

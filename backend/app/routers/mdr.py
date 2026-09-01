@@ -32,6 +32,7 @@ from app.models import (
     RevisionReviewerState,
     User,
 )
+from app.services import matrix_gap
 from app.schemas import (
     CipherTemplateFieldRead,
     CipherTemplateRead,
@@ -416,11 +417,46 @@ def check_cipher(
     return CheckCipherResponse(exists=exists)
 
 
+def _ensure_reviewers_assigned(
+    db: Session,
+    *,
+    project: Project,
+    current_user: User,
+    doc_number: str,
+    category: str | None,
+    discipline_code: str | None,
+    doc_type: str | None,
+) -> None:
+    """Не даём завести документ, по которому некому работать.
+
+    Без LR в матрице ревизия уходит «в никуда»: рассылка сваливается в fallback
+    «всем сотрудникам заказчика», а согласовать документ и отправить CRS никто
+    не может. Админа не блокируем — он и заполняет матрицу.
+    """
+    if current_user.role.value == "admin":
+        return
+    discipline = matrix_gap.matrix_discipline(category=category, discipline_code=discipline_code)
+    if matrix_gap.has_lead_reviewer(db, project_id=project.id, discipline=discipline):
+        return
+    matrix_gap.notify_gap(
+        db,
+        project=project,
+        requester=current_user,
+        doc_number=doc_number,
+        discipline=discipline,
+        doc_type=doc_type,
+    )
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=matrix_gap.gap_detail(discipline=discipline),
+    )
+
+
 @router.post("", response_model=MDRRead, status_code=status.HTTP_201_CREATED)
 def create_mdr(
     payload: MDRCreate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_permissions("can_create_mdr")),
+    current_user: User = Depends(require_permissions("can_create_mdr")),
 ):
     project = db.query(Project).filter(Project.code == payload.project_code).first()
     if project is None:
@@ -462,6 +498,16 @@ def create_mdr(
         project_code=payload.project_code,
         category=payload.category.upper(),
         new_weight=payload.doc_weight,
+    )
+
+    _ensure_reviewers_assigned(
+        db,
+        project=project,
+        current_user=current_user,
+        doc_number=payload.doc_number,
+        category=payload.category,
+        discipline_code=payload.discipline_code,
+        doc_type=payload.doc_type,
     )
 
     mdr = MDRRecord(**payload.model_dump())
@@ -587,6 +633,20 @@ def create_child_mdr(
         category=parent.category.upper(),
         new_weight=payload.doc_weight or 0,
     )
+
+    # Матрица у вложенного — родительская (см. _matrix_source), поэтому и
+    # проверяем раздел родителя, а не тот, что задан в шифре части.
+    parent_project = db.query(Project).filter(Project.code == parent.project_code).first()
+    if parent_project is not None:
+        _ensure_reviewers_assigned(
+            db,
+            project=parent_project,
+            current_user=current_user,
+            doc_number=child_doc_number,
+            category=parent.category,
+            discipline_code=parent.discipline_code,
+            doc_type=parent.doc_type,
+        )
 
     child = MDRRecord(
         document_key=document_key,
@@ -836,7 +896,7 @@ def delete_mdr(
 def download_mdr_template(
     project_code: str = Query(...),
     db: Session = Depends(get_db),
-    _: User = Depends(require_permissions("can_create_mdr")),
+    current_user: User = Depends(require_permissions("can_create_mdr")),
 ):
     project = db.query(Project).filter(Project.code == project_code).first()
     if project is None:
@@ -1017,6 +1077,7 @@ def import_mdr(
     imported = 0
     skipped = 0
     errors: list[MdrImportError] = []
+    gap_disciplines: set[str] = set()
     auto_serial_next_by_field: dict[int, int] = {}
 
     # Вес 1000 — на категорию (весь импорт идёт под одной category), а не на doc_type.
@@ -1136,6 +1197,17 @@ def import_mdr(
             if projected > 1000:
                 line_errors.append(f"Weight limit exceeded for {project_code}/{category}: {projected:.2f} > 1000")
 
+        # Строки без LR в матрице пропускаем с понятной причиной: иначе
+        # импорт заводит документы, которые некому рассматривать.
+        if not line_errors and current_user.role.value != "admin":
+            row_discipline = matrix_gap.matrix_discipline(category=category, discipline_code=discipline_code)
+            if not matrix_gap.has_lead_reviewer(db, project_id=project.id, discipline=row_discipline):
+                line_errors.append(
+                    f"В матрице назначений нет LR по разделу «{row_discipline or '—'}» — "
+                    f"обратитесь к администратору системы заказчика"
+                )
+                gap_disciplines.add(row_discipline or "—")
+
         if line_errors:
             errors.append(MdrImportError(row=row_idx, message="; ".join(line_errors)))
             skipped += 1
@@ -1169,6 +1241,18 @@ def import_mdr(
 
     if not dry_run:
         db.commit()
+
+    # Одно уведомление на импорт, а не на каждую строку.
+    if gap_disciplines and not dry_run:
+        for discipline in sorted(gap_disciplines):
+            matrix_gap.notify_gap(
+                db,
+                project=project,
+                requester=current_user,
+                doc_number=f"импорт реестра ({project_code})",
+                discipline=discipline,
+                doc_type=None,
+            )
 
     return {
         "dry_run": dry_run,

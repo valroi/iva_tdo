@@ -640,6 +640,7 @@ export default function ProjectsPage({
                   onCreated={onReload}
                   treeFilter={treeFilter}
                   onResetTreeFilter={() => setTreeFilter(null)}
+                  reviewMatrix={reviewMatrix}
                   onOpenDocument={(documentNum) => {
                     setTreeFilter(null); // из реестра открываем конкретный документ без фильтра
                     setLocalNotificationTarget({
