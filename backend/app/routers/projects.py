@@ -357,8 +357,9 @@ def _validate_mark_discipline_mapping(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                f"Mark {mark_code} is mapped to discipline {mapping.value}. "
-                f"Use matching discipline for LR/R assignment."
+                f"Марка «{mark_code}» в справочнике проекта привязана к дисциплине "
+                f"«{mapping.value}», а назначение идёт на «{discipline_code}». "
+                f"Выберите дисциплину «{mapping.value}» либо поправьте справочник «mark_discipline»."
             ),
         )
 
@@ -891,9 +892,9 @@ def create_review_matrix_item(
     current_user: User = Depends(get_current_user),
 ):
     if not has_permission(current_user, "can_manage_review_matrix"):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Review matrix permission required")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет права управлять матрицей назначений")
     if not _can_manage_project_matrix(db, project_id, current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No rights to manage review matrix")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Матрицу этого проекта может менять администратор или руководитель проекта заказчика")
     _get_project_or_404(db, project_id)
 
     user = db.query(User).filter(User.id == payload.user_id).first()
@@ -902,7 +903,7 @@ def create_review_matrix_item(
     if user.company_type != CompanyType.owner:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only owner users can be assigned to review matrix",
+            detail="В матрицу можно назначать только сотрудников заказчика — подрядчики документы не рассматривают",
         )
     member = (
         db.query(ProjectMember)
@@ -912,12 +913,12 @@ def create_review_matrix_item(
     if member is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="User must be project member",
+            detail="Сначала добавьте сотрудника в участники проекта (вкладка «Участники проекта»)",
         )
     if member.member_role not in {ProjectMemberRole.owner_member, ProjectMemberRole.observer}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only owner-side project members can be assigned to matrix",
+            detail="Назначать можно только участников со стороны заказчика (роль «Участник заказчика» или «Наблюдатель»)",
         )
 
     _validate_mark_discipline_mapping(
@@ -939,7 +940,15 @@ def create_review_matrix_item(
         .first()
     )
     if exists is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Matrix row already exists")
+        role = "LR (лидер-ревьювер)" if exists.state == "LR" else "R (ревьювер)"
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"{user.full_name or user.email} уже назначен по разделу «{payload.discipline_code}» "
+                f"как {role}. Чтобы сменить роль, откройте «Изменить» в строке матрицы — "
+                f"добавлять вторую строку на того же человека не нужно."
+            ),
+        )
 
     item = ReviewMatrixMember(project_id=project_id, **payload.model_dump())
     db.add(item)
@@ -957,11 +966,11 @@ def update_review_matrix_item(
 ):
     item = db.query(ReviewMatrixMember).filter(ReviewMatrixMember.id == item_id).first()
     if item is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Matrix row not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Строка матрицы не найдена")
     if not has_permission(current_user, "can_manage_review_matrix"):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Review matrix permission required")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет права управлять матрицей назначений")
     if not _can_manage_project_matrix(db, item.project_id, current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No rights to manage review matrix")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Матрицу этого проекта может менять администратор или руководитель проекта заказчика")
 
     next_discipline = payload.discipline_code if payload.discipline_code is not None else item.discipline_code
     next_mark = payload.doc_type if payload.doc_type is not None else item.doc_type
@@ -989,11 +998,11 @@ def delete_review_matrix_item(
 ):
     item = db.query(ReviewMatrixMember).filter(ReviewMatrixMember.id == item_id).first()
     if item is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Matrix row not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Строка матрицы не найдена")
     if not has_permission(current_user, "can_manage_review_matrix"):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Review matrix permission required")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет права управлять матрицей назначений")
     if not _can_manage_project_matrix(db, item.project_id, current_user):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No rights to manage review matrix")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Матрицу этого проекта может менять администратор или руководитель проекта заказчика")
 
     db.delete(item)
     db.commit()

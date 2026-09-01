@@ -1,4 +1,5 @@
 import {
+  Alert,
   Button,
   Card,
   Divider,
@@ -332,16 +333,74 @@ export default function ProjectsPage({
   ];
 
   const matrixColumns: ColumnsType<ReviewMatrixMember> = [
-    { title: "Раздел ПД", dataIndex: "discipline_code", key: "discipline_code" },
     {
-      title: "Пользователь",
+      title: "Раздел",
+      dataIndex: "discipline_code",
+      key: "discipline_code",
+      width: 220,
+      // Матрица ведётся по РАЗДЕЛУ, а не по категории: одна строка покрывает
+      // документы всех категорий с этим разделом (у категории SE раздел
+      // всегда условный «SE»). Показываем это явно — иначе непонятно, почему
+      // назначение «на PF» не заводится отдельно от «на SE».
+      render: (value: string, row) => {
+        const stats = matrixCoverage.get(String(value).toUpperCase());
+        return (
+          <Space direction="vertical" size={0}>
+            <Typography.Text strong>{value}</Typography.Text>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {stats?.title ?? "нет в справочнике проекта"}
+            </Typography.Text>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              документов: {stats?.docs ?? 0}
+              {stats?.categories?.length ? ` (категории: ${stats.categories.join(", ")})` : ""}
+            </Typography.Text>
+            {row.doc_type && row.doc_type.toUpperCase() !== String(value).toUpperCase() && (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                тип документа: {row.doc_type}
+              </Typography.Text>
+            )}
+          </Space>
+        );
+      },
+    },
+    {
+      title: "Роль в рассмотрении",
+      dataIndex: "state",
+      key: "state",
+      width: 210,
+      render: (value: "LR" | "R", row) => {
+        const leads = reviewMatrix.filter(
+          (item) =>
+            String(item.discipline_code).toUpperCase() === String(row.discipline_code).toUpperCase() &&
+            item.state === "LR",
+        );
+        return (
+          <Space direction="vertical" size={2}>
+            <Tag color={value === "LR" ? "gold" : "blue"}>
+              {value === "LR" ? "LR — лидер-ревьювер" : "R — ревьювер"}
+            </Tag>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              {value === "LR"
+                ? "согласует документ и отправляет CRS подрядчику"
+                : "выдаёт замечания, CRS не отправляет"}
+            </Typography.Text>
+            {value === "LR" && leads.length > 1 && (
+              <Typography.Text type="warning" style={{ fontSize: 12 }}>
+                LR по разделу: {leads.length} — уведомления получат все
+              </Typography.Text>
+            )}
+          </Space>
+        );
+      },
+    },
+    {
+      title: "Сотрудник заказчика",
       key: "user_id",
       render: (_, row) =>
         row.user_full_name
           ? `${row.user_full_name} (${row.user_email ?? "—"})`
           : userById.get(row.user_id)?.full_name ?? row.user_id,
     },
-    { title: "Состояние", dataIndex: "state", key: "state", render: (v: "LR" | "R") => <Tag>{v}</Tag> },
     {
       title: "Действие",
       key: "action",
@@ -351,7 +410,12 @@ export default function ProjectsPage({
             size="small"
             onClick={() => {
               setSelectedMatrixItem(row);
-              matrixEditForm.setFieldsValue({ level: row.level, state: row.state });
+              matrixEditForm.setFieldsValue({
+                level: row.level,
+                state: row.state,
+                discipline_code: row.discipline_code,
+                user_id: row.user_id,
+              });
               setMatrixEditOpen(true);
             }}
           >
@@ -375,6 +439,42 @@ export default function ProjectsPage({
   ];
 
   const selectedProject = projects.find((p) => p.id === selectedProjectId) ?? null;
+
+  // Что покрывает каждый раздел матрицы: название из справочника и сколько
+  // документов проекта под него попадает. Раздел документа считается так же,
+  // как на бэке (_matrix_discipline): категория SE → условный раздел «SE».
+  const matrixCoverage = useMemo(() => {
+    const map = new Map<string, { title: string; docs: number; categories: string[] }>();
+    const titleByCode = new Map<string, string>();
+    references.forEach((ref) => {
+      if (!["discipline", "pd_section", "se_reporting_type"].includes(ref.ref_type)) return;
+      titleByCode.set(ref.code.toUpperCase(), ref.value);
+    });
+    titleByCode.set("SE", titleByCode.get("SE") ?? "Инженерные изыскания — все отчёты");
+    const projectRows = selectedProject ? mdr.filter((row) => row.project_code === selectedProject.code) : [];
+    const bump = (code: string, category: string) => {
+      const key = code.toUpperCase();
+      const entry = map.get(key) ?? { title: titleByCode.get(key) ?? "", docs: 0, categories: [] };
+      entry.docs += 1;
+      if (category && !entry.categories.includes(category)) entry.categories.push(category);
+      map.set(key, entry);
+    };
+    projectRows.forEach((row) => {
+      const code = String(row.category || "").toUpperCase() === "SE" ? "SE" : String(row.discipline_code || "");
+      if (code) bump(code, String(row.category || ""));
+    });
+    // Разделы, на которые есть назначения, но пока нет документов.
+    reviewMatrix.forEach((row) => {
+      const key = String(row.discipline_code || "").toUpperCase();
+      if (!key || map.has(key)) return;
+      map.set(key, { title: titleByCode.get(key) ?? "", docs: 0, categories: [] });
+    });
+    map.forEach((entry, key) => {
+      if (!entry.title) entry.title = titleByCode.get(key) ?? "";
+    });
+    return map;
+  }, [references, mdr, selectedProject, reviewMatrix]);
+
   const referenceTypeOptions = useMemo(
     () =>
       Array.from(new Set(references.map((ref) => ref.ref_type)))
@@ -450,6 +550,41 @@ export default function ProjectsPage({
       .filter((ref) => ref.ref_type === refType && ref.is_active)
       .map((ref) => ({ value: ref.code, label: `${ref.code} - ${ref.value}` }));
   }, [references, matrixCategory]);
+  // Сводка по выбранному в форме разделу: кто уже назначен и есть ли LR.
+  // Без неё непонятно, почему «назначить LR» не срабатывает — человек уже
+  // числится по этому разделу, и бэкенд отдаёт 409.
+  const matrixDisciplineDraft = Form.useWatch("discipline_code", matrixForm) as string | undefined;
+  const matrixSectionSummary = useMemo(() => {
+    const code = String(matrixDisciplineDraft || "").toUpperCase();
+    if (!code) return null;
+    const rows = reviewMatrix.filter((row) => String(row.discipline_code).toUpperCase() === code);
+    const label = (row: ReviewMatrixMember) =>
+      `${row.user_full_name ?? userById.get(row.user_id)?.full_name ?? row.user_id} — ${row.state}`;
+    const leads = rows.filter((row) => row.state === "LR");
+    return {
+      code,
+      hasLead: leads.length > 0,
+      leads: leads.map((row) => row.user_full_name ?? String(row.user_id)).join(", "),
+      assigned: rows.map(label).join("; "),
+      docs: matrixCoverage.get(code)?.docs ?? 0,
+    };
+  }, [matrixDisciplineDraft, reviewMatrix, userById, matrixCoverage]);
+  // В редактировании показываем разделы всех справочников сразу: строка уже
+  // существует, категорию-фильтр заново выбирать незачем.
+  const matrixEditDisciplineOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const options: { value: string; label: string }[] = [{ value: "SE", label: "SE — Инженерные изыскания (все отчёты)" }];
+    seen.add("SE");
+    references
+      .filter((ref) => ["discipline", "pd_section"].includes(ref.ref_type) && ref.is_active)
+      .forEach((ref) => {
+        if (seen.has(ref.code.toUpperCase())) return;
+        seen.add(ref.code.toUpperCase());
+        options.push({ value: ref.code, label: `${ref.code} - ${ref.value}` });
+      });
+    return options;
+  }, [references]);
+
   const hierarchyTree = useMemo(
     () => {
       const treeTitle = (value: string, maxWidth = 560) => (
@@ -1238,7 +1373,21 @@ export default function ProjectsPage({
         }}
       >
         <Form form={matrixForm} layout="vertical" initialValues={{ level: 1, state: "R" }}>
-          <Form.Item name="category" label="Категория документа" rules={[{ required: true }]}>
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="Назначение действует на раздел, а не на категорию"
+            description={
+              <>
+                Категория ниже — только фильтр, чтобы подобрать раздел из нужного справочника; в
+                матрицу она не записывается. Строка покрывает все документы проекта с этим разделом,
+                в любой категории. У категории SE раздел всегда один — «SE», он покрывает все отчёты
+                изысканий.
+              </>
+            }
+          />
+          <Form.Item name="category" label="Категория документа (фильтр справочника)" rules={[{ required: true }]}>
             <Select
               showSearch
               optionFilterProp="label"
@@ -1273,16 +1422,48 @@ export default function ProjectsPage({
               placeholder={!matrixCategory ? "Сначала выберите категорию" : "Из справочника"}
             />
           </Form.Item>
-          <Form.Item name="user_id" label="Сотрудник" rules={[{ required: true }]}>
+          {matrixSectionSummary && (
+            <Alert
+              type={matrixSectionSummary.hasLead ? "success" : "warning"}
+              showIcon
+              style={{ marginBottom: 16 }}
+              message={
+                matrixSectionSummary.hasLead
+                  ? `По разделу «${matrixSectionSummary.code}» уже есть LR: ${matrixSectionSummary.leads}`
+                  : `По разделу «${matrixSectionSummary.code}» нет LR — документы этого раздела создать нельзя`
+              }
+              description={
+                matrixSectionSummary.assigned
+                  ? `Назначено сейчас: ${matrixSectionSummary.assigned}. Документов раздела в проекте: ${matrixSectionSummary.docs}.`
+                  : `Назначений пока нет. Документов раздела в проекте: ${matrixSectionSummary.docs}.`
+              }
+            />
+          )}
+          <Form.Item
+            name="user_id"
+            label="Сотрудник заказчика"
+            rules={[{ required: true }]}
+            extra="В списке только участники проекта со стороны заказчика. Нет нужного — добавьте его во вкладке «Участники проекта»."
+          >
             <Select
               showSearch
               optionFilterProp="label"
               options={ownerProjectMemberOptions}
-              placeholder="Только owner-участники проекта"
+              placeholder="Участник проекта со стороны заказчика"
             />
           </Form.Item>
-          <Form.Item name="state" label="Состояние" rules={[{ required: true }]}>
-            <Select options={[{ value: "R", label: "R" }, { value: "LR", label: "LR" }]} />
+          <Form.Item
+            name="state"
+            label="Роль в рассмотрении"
+            rules={[{ required: true }]}
+            extra="LR согласует документ и отправляет CRS подрядчику. R только выдаёт замечания. Без LR документы раздела создать нельзя."
+          >
+            <Select
+              options={[
+                { value: "LR", label: "LR — лидер-ревьювер (согласует, отправляет CRS)" },
+                { value: "R", label: "R — ревьювер (выдаёт замечания)" },
+              ]}
+            />
           </Form.Item>
         </Form>
       </Modal>
@@ -1301,8 +1482,24 @@ export default function ProjectsPage({
         }}
       >
         <Form form={matrixEditForm} layout="vertical">
-          <Form.Item name="state" label="Состояние" rules={[{ required: true }]}>
-            <Select options={[{ value: "R", label: "R" }, { value: "LR", label: "LR" }]} />
+          <Form.Item
+            name="discipline_code"
+            label="Раздел"
+            rules={[{ required: true }]}
+            extra="Строка покрывает документы этого раздела во всех категориях проекта."
+          >
+            <Select showSearch optionFilterProp="label" options={matrixEditDisciplineOptions} />
+          </Form.Item>
+          <Form.Item name="user_id" label="Сотрудник заказчика" rules={[{ required: true }]}>
+            <Select showSearch optionFilterProp="label" options={ownerProjectMemberOptions} />
+          </Form.Item>
+          <Form.Item name="state" label="Роль в рассмотрении" rules={[{ required: true }]}>
+            <Select
+              options={[
+                { value: "LR", label: "LR — лидер-ревьювер (согласует, отправляет CRS)" },
+                { value: "R", label: "R — ревьювер (выдаёт замечания)" },
+              ]}
+            />
           </Form.Item>
         </Form>
       </Modal>
