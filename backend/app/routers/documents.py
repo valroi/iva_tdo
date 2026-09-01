@@ -2607,9 +2607,18 @@ def mark_revision_no_comments(
         )
 
     state = review_events_service.get_or_create_reviewer_state(db, revision_id=revision.id, user_id=current_user.id)
+    # Повторный клик — не ошибка (кнопка остаётся на экране, пользователь жмёт
+    # ещё раз), но и события с уведомлением он давать не должен: 01.09.2026 три
+    # клика подряд оставили в журнале три одинаковые записи.
+    already_decided = bool(state.no_comments)
     state.no_comments = True
-    state.decided_at = datetime.utcnow()
+    if state.decided_at is None:
+        state.decided_at = datetime.utcnow()
     db.add(state)
+
+    if already_decided:
+        db.commit()
+        return _build_reviewer_summary(db, revision, project, mdr, current_user)
 
     review_events_service.record_event(
         db,
