@@ -1015,7 +1015,7 @@ def import_mdr(
     dry_run: bool = Query(False),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    _: User = Depends(require_permissions("can_create_mdr")),
+    current_user: User = Depends(require_permissions("can_create_mdr")),
 ):
     project = db.query(Project).filter(Project.code == project_code).first()
     if project is None:

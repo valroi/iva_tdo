@@ -2649,7 +2649,7 @@ def mark_revision_no_comments(
     return _build_reviewer_summary(db, revision, project, mdr, current_user)
 
 
-def _build_reviewer_summary(db, revision, project, discipline, current_user) -> RevisionReviewerSummary:
+def _build_reviewer_summary(db, revision, project, mdr, current_user) -> RevisionReviewerSummary:
     members = _assigned_owner_reviewers(db, project_id=project.id, mdr=mdr)
     states = {
         s.user_id: s
