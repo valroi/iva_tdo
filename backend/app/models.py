@@ -207,10 +207,19 @@ class ProjectReference(Base):
 
 
 class ReviewMatrixMember(Base):
+    """Назначение сотрудника заказчика на рассмотрение документов проекта.
+
+    Строка адресуется парой «категория + раздел»: одна и та же дисциплина в
+    разных категориях — это разные документы и разные люди (напр. концепции
+    PF с дисциплиной SE и отчёты изысканий категории SE). category = NULL —
+    легаси-строки и осознанное «все категории».
+    """
+
     __tablename__ = "review_matrix_members"
     __table_args__ = (
         UniqueConstraint(
             "project_id",
+            "category",
             "discipline_code",
             "doc_type",
             "user_id",
@@ -221,6 +230,9 @@ class ReviewMatrixMember(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
+    # NULL — строка покрывает документы любой категории (так вели матрицу до
+    # 2026-09-01; новые строки заводятся с конкретной категорией).
+    category: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
     discipline_code: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     doc_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)

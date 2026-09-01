@@ -103,6 +103,11 @@ const documentCategoryOptions: { value: string; label: string }[] = [
   { value: "PM", label: "PM - Документы управления проектом / Project Management Documents" },
 ];
 
+/** Ключ покрытия матрицы: пара «категория + раздел» ("" = все категории). */
+function coverageKey(category: string | null | undefined, discipline: string): string {
+  return `${String(category ?? "").toUpperCase()}|${String(discipline ?? "").toUpperCase()}`;
+}
+
 export default function ProjectsPage({
   currentUser,
   projects,
@@ -334,6 +339,23 @@ export default function ProjectsPage({
 
   const matrixColumns: ColumnsType<ReviewMatrixMember> = [
     {
+      title: "Категория",
+      dataIndex: "category",
+      key: "category",
+      width: 190,
+      render: (value: string | null | undefined) =>
+        value ? (
+          <Tag color="geekblue">{value}</Tag>
+        ) : (
+          <Space direction="vertical" size={0}>
+            <Tag>все категории</Tag>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              строка заведена до разделения по категориям
+            </Typography.Text>
+          </Space>
+        ),
+    },
+    {
       title: "Раздел",
       dataIndex: "discipline_code",
       key: "discipline_code",
@@ -343,7 +365,7 @@ export default function ProjectsPage({
       // всегда условный «SE»). Показываем это явно — иначе непонятно, почему
       // назначение «на PF» не заводится отдельно от «на SE».
       render: (value: string, row) => {
-        const stats = matrixCoverage.get(String(value).toUpperCase());
+        const stats = matrixCoverage.get(coverageKey(row.category, value));
         return (
           <Space direction="vertical" size={0}>
             <Typography.Text strong>{value}</Typography.Text>
@@ -372,6 +394,7 @@ export default function ProjectsPage({
         const leads = reviewMatrix.filter(
           (item) =>
             String(item.discipline_code).toUpperCase() === String(row.discipline_code).toUpperCase() &&
+            String(item.category ?? "").toUpperCase() === String(row.category ?? "").toUpperCase() &&
             item.state === "LR",
         );
         return (
@@ -413,6 +436,7 @@ export default function ProjectsPage({
               matrixEditForm.setFieldsValue({
                 level: row.level,
                 state: row.state,
+                category: row.category ?? null,
                 discipline_code: row.discipline_code,
                 user_id: row.user_id,
               });
@@ -452,25 +476,31 @@ export default function ProjectsPage({
     });
     titleByCode.set("SE", titleByCode.get("SE") ?? "Инженерные изыскания — все отчёты");
     const projectRows = selectedProject ? mdr.filter((row) => row.project_code === selectedProject.code) : [];
-    const bump = (code: string, category: string) => {
-      const key = code.toUpperCase();
-      const entry = map.get(key) ?? { title: titleByCode.get(key) ?? "", docs: 0, categories: [] };
+    // Ключ покрытия — пара «категория + раздел». Легаси-строка без категории
+    // покрывает раздел в любой категории; строка «SE/SE» — все виды отчётов
+    // изысканий. Правила те же, что в _matrix_match_clause на бэке.
+    const bump = (key: string, code: string, category: string) => {
+      const entry = map.get(key) ?? { title: titleByCode.get(code.toUpperCase()) ?? "", docs: 0, categories: [] };
       entry.docs += 1;
       if (category && !entry.categories.includes(category)) entry.categories.push(category);
       map.set(key, entry);
     };
     projectRows.forEach((row) => {
-      const code = String(row.category || "").toUpperCase() === "SE" ? "SE" : String(row.discipline_code || "");
-      if (code) bump(code, String(row.category || ""));
+      const category = String(row.category || "").toUpperCase();
+      const code = String(row.discipline_code || "").toUpperCase();
+      if (!code) return;
+      bump(coverageKey(category, code), code, category);
+      bump(coverageKey(null, code), code, category); // «все категории»
+      if (category === "SE") {
+        bump(coverageKey("SE", "SE"), "SE", category); // «весь SE» одной строкой
+        bump(coverageKey(null, "SE"), "SE", category);
+      }
     });
-    // Разделы, на которые есть назначения, но пока нет документов.
+    // Пары, на которые есть назначения, но пока нет документов.
     reviewMatrix.forEach((row) => {
-      const key = String(row.discipline_code || "").toUpperCase();
-      if (!key || map.has(key)) return;
-      map.set(key, { title: titleByCode.get(key) ?? "", docs: 0, categories: [] });
-    });
-    map.forEach((entry, key) => {
-      if (!entry.title) entry.title = titleByCode.get(key) ?? "";
+      const key = coverageKey(row.category, row.discipline_code);
+      if (map.has(key)) return;
+      map.set(key, { title: titleByCode.get(String(row.discipline_code).toUpperCase()) ?? "", docs: 0, categories: [] });
     });
     return map;
   }, [references, mdr, selectedProject, reviewMatrix]);
@@ -543,7 +573,15 @@ export default function ProjectsPage({
   const disciplineOptions = useMemo(() => {
     const category = (matrixCategory || "").toUpperCase();
     if (category === "SE") {
-      return [{ value: "SE", label: "SE — Инженерные изыскания (все отчёты)" }];
+      // Либо один состав на все отчёты изысканий, либо точечно по виду отчёта
+      // (ИГМИ, ИГДИ, ИЭИ …) — на проекте это бывают разные люди.
+      return [
+        { value: "SE", label: "SE — все отчёты изысканий (один состав)" },
+        ...references
+          // код SE из справочника не показываем: он и есть «все отчёты» выше.
+          .filter((ref) => ref.ref_type === "se_reporting_type" && ref.is_active && ref.code.toUpperCase() !== "SE")
+          .map((ref) => ({ value: ref.code, label: `${ref.code} - ${ref.value}` })),
+      ];
     }
     const refType = category === "PD" ? "pd_section" : "discipline";
     return references
@@ -556,27 +594,38 @@ export default function ProjectsPage({
   const matrixDisciplineDraft = Form.useWatch("discipline_code", matrixForm) as string | undefined;
   const matrixSectionSummary = useMemo(() => {
     const code = String(matrixDisciplineDraft || "").toUpperCase();
+    const cat = String(matrixCategory || "").toUpperCase();
     if (!code) return null;
-    const rows = reviewMatrix.filter((row) => String(row.discipline_code).toUpperCase() === code);
+    // Учитываем строки этой категории и легаси-строки «все категории» —
+    // они тоже обслуживают документы выбранной пары.
+    const rows = reviewMatrix.filter((row) => {
+      const rowSection = String(row.discipline_code).toUpperCase();
+      // Правила из _matrix_match_clause: раздел «SE» в категории SE покрывает
+      // все виды отчётов, строка без категории — любую категорию.
+      const sectionMatches = rowSection === code || (cat === "SE" && rowSection === "SE");
+      if (!sectionMatches) return false;
+      const rowCat = String(row.category ?? "").toUpperCase();
+      return rowCat === "" || rowCat === cat;
+    });
     const label = (row: ReviewMatrixMember) =>
       `${row.user_full_name ?? userById.get(row.user_id)?.full_name ?? row.user_id} — ${row.state}`;
     const leads = rows.filter((row) => row.state === "LR");
     return {
-      code,
+      code: cat ? `${cat} / ${code}` : code,
       hasLead: leads.length > 0,
       leads: leads.map((row) => row.user_full_name ?? String(row.user_id)).join(", "),
       assigned: rows.map(label).join("; "),
-      docs: matrixCoverage.get(code)?.docs ?? 0,
+      docs: matrixCoverage.get(coverageKey(cat, code))?.docs ?? 0,
     };
-  }, [matrixDisciplineDraft, reviewMatrix, userById, matrixCoverage]);
+  }, [matrixDisciplineDraft, matrixCategory, reviewMatrix, userById, matrixCoverage]);
   // В редактировании показываем разделы всех справочников сразу: строка уже
   // существует, категорию-фильтр заново выбирать незачем.
   const matrixEditDisciplineOptions = useMemo(() => {
     const seen = new Set<string>();
-    const options: { value: string; label: string }[] = [{ value: "SE", label: "SE — Инженерные изыскания (все отчёты)" }];
+    const options: { value: string; label: string }[] = [{ value: "SE", label: "SE — все отчёты изысканий (один состав)" }];
     seen.add("SE");
     references
-      .filter((ref) => ["discipline", "pd_section"].includes(ref.ref_type) && ref.is_active)
+      .filter((ref) => ["discipline", "pd_section", "se_reporting_type"].includes(ref.ref_type) && ref.is_active)
       .forEach((ref) => {
         if (seen.has(ref.code.toUpperCase())) return;
         seen.add(ref.code.toUpperCase());
@@ -1354,12 +1403,12 @@ export default function ProjectsPage({
           try {
             if (!selectedProjectId) return;
             const values = await matrixForm.validateFields();
-            // category — только UI-фильтр каскада; матчинг с документами
-            // идёт по discipline_code, на бэк категория не отправляется.
-            const { category: _category, ...payload } = values;
+            // Категория — часть адресации: одна дисциплина в разных категориях
+            // это разные документы и разные люди (концепции PF с дисциплиной SE
+            // и отчёты изысканий категории SE).
             await createReviewMatrixItem(selectedProjectId, {
-              ...payload,
-              doc_type: payload.discipline_code,
+              ...values,
+              doc_type: values.discipline_code,
               level: 1,
             });
             message.success("Строка матрицы добавлена");
@@ -1377,17 +1426,17 @@ export default function ProjectsPage({
             type="info"
             showIcon
             style={{ marginBottom: 16 }}
-            message="Назначение действует на раздел, а не на категорию"
+            message="Назначение адресуется парой «категория + раздел»"
             description={
               <>
-                Категория ниже — только фильтр, чтобы подобрать раздел из нужного справочника; в
-                матрицу она не записывается. Строка покрывает все документы проекта с этим разделом,
-                в любой категории. У категории SE раздел всегда один — «SE», он покрывает все отчёты
-                изысканий.
+                Одна и та же дисциплина в разных категориях — разные документы и разные люди:
+                концепции PF с дисциплиной SE и отчёты изысканий категории SE рассматривают разные
+                составы. В категории SE можно назначить сразу на все виды отчётов, выбрав раздел
+                «SE — все отчёты изысканий», либо точечно на IGM, IGD, IEL и т. д.
               </>
             }
           />
-          <Form.Item name="category" label="Категория документа (фильтр справочника)" rules={[{ required: true }]}>
+          <Form.Item name="category" label="Категория документа" rules={[{ required: true }]}>
             <Select
               showSearch
               optionFilterProp="label"
@@ -1482,6 +1531,13 @@ export default function ProjectsPage({
         }}
       >
         <Form form={matrixEditForm} layout="vertical">
+          <Form.Item
+            name="category"
+            label="Категория документа"
+            extra="Пусто — строка покрывает документы любой категории (так велась матрица раньше)."
+          >
+            <Select allowClear showSearch optionFilterProp="label" options={matrixCategoryOptions} placeholder="все категории" />
+          </Form.Item>
           <Form.Item
             name="discipline_code"
             label="Раздел"

@@ -252,16 +252,20 @@ export default function MdrPage({
   // Подсказка до нажатия «Создать»: бэкенд всё равно не даст завести документ
   // без LR по разделу (services/matrix_gap), но подрядчик должен понимать это
   // сразу, а не после ошибки. Для SE матрица ведётся одним условным разделом.
-  const matrixDisciplineKey = isSeCategory ? "SE" : String(currentDisciplineCode || "").toUpperCase();
+  const matrixDisciplineKey = String(currentDisciplineCode || "").toUpperCase();
   const hasLeadReviewer = useMemo(() => {
     if (!matrixDisciplineKey) return true;
-    return reviewMatrix.some(
-      (row) =>
-        String(row.discipline_code || "").toUpperCase() === matrixDisciplineKey &&
-        row.level === 1 &&
-        row.state === "LR",
-    );
-  }, [reviewMatrix, matrixDisciplineKey]);
+    const category = String(currentCategory || "").toUpperCase();
+    // Те же правила, что в _matrix_match_clause на бэке: строка без категории
+    // покрывает любую, а раздел «SE» в категории SE — все виды отчётов.
+    return reviewMatrix.some((row) => {
+      if (row.level !== 1 || row.state !== "LR") return false;
+      const rowCategory = String(row.category ?? "").toUpperCase();
+      if (rowCategory && rowCategory !== category) return false;
+      const rowSection = String(row.discipline_code || "").toUpperCase();
+      return rowSection === matrixDisciplineKey || (category === "SE" && rowSection === "SE");
+    });
+  }, [reviewMatrix, matrixDisciplineKey, currentCategory]);
   const missingReviewerNotice =
     !isAdmin && matrixDisciplineKey && !hasLeadReviewer ? matrixDisciplineKey : null;
   const currentSectionNumber = (pdSectionNumberByCode.get(String(currentDisciplineCode || "").toUpperCase()) ?? "—");

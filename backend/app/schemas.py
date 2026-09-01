@@ -163,6 +163,8 @@ class CipherTemplateUpsert(BaseModel):
 
 class ReviewMatrixMemberCreate(BaseModel):
     user_id: int
+    # None — строка покрывает документы любой категории (легаси-поведение).
+    category: str | None = None
     discipline_code: str
     doc_type: str
     level: int = Field(ge=1, le=2, default=1)
@@ -170,16 +172,19 @@ class ReviewMatrixMemberCreate(BaseModel):
 
 
 class ReviewMatrixMemberUpdate(BaseModel):
+    category: str | None = None
     discipline_code: str | None = None
     doc_type: str | None = None
     level: int | None = Field(default=None, ge=1, le=2)
     state: str | None = Field(default=None, pattern="^(LR|R)$")
+    user_id: int | None = None
 
 
 class ReviewMatrixMemberRead(BaseModel):
     id: int
     project_id: int
     user_id: int
+    category: str | None = None
     discipline_code: str
     doc_type: str
     level: int

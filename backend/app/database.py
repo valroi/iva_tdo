@@ -33,6 +33,7 @@ def init_db() -> None:
 
     Base.metadata.create_all(bind=engine)
     _ensure_projects_document_category_column()
+    _ensure_review_matrix_category()
     _ensure_users_permissions_column()
     _ensure_users_company_code_column()
     _ensure_notifications_context_columns()
@@ -46,6 +47,72 @@ def init_db() -> None:
     # новые таблицы, но НЕ добавляет колонки в уже существующие — из-за этого
     # на проде падало `column feed_files.lang does not exist`.
     _ensure_all_model_columns()
+
+
+def _ensure_review_matrix_category() -> None:
+    """Колонка category в матрице + уникальность с её учётом.
+
+    Старый констрейнт (project, discipline, doc_type, user, level) не различал
+    категорию — одного человека нельзя было назначить на один раздел в двух
+    категориях (напр. дисциплина SE в PF и в SE — это разные документы и разные
+    люди). Пересоздаём индекс; NULL-категория трактуется как «все категории».
+    """
+    inspector = inspect(engine)
+    if "review_matrix_members" not in set(inspector.get_table_names()):
+        return
+    columns = {column["name"] for column in inspector.get_columns("review_matrix_members")}
+    with engine.begin() as connection:
+        if "category" not in columns:
+            connection.execute(text("ALTER TABLE review_matrix_members ADD COLUMN category VARCHAR(20)"))
+        if engine.dialect.name.startswith("postgresql"):
+            try:
+                connection.execute(
+                    text("ALTER TABLE review_matrix_members DROP CONSTRAINT IF EXISTS uq_review_matrix_member")
+                )
+                connection.execute(
+                    text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS uq_review_matrix_member_cat "
+                        "ON review_matrix_members "
+                        "(project_id, discipline_code, doc_type, user_id, level, COALESCE(category, ''))"
+                    )
+                )
+            except Exception as exc:  # индекс не критичен, дубли ловит эндпоинт
+                logger.warning("Не удалось пересоздать уникальный индекс матрицы: %s", exc)
+        elif engine.dialect.name == "sqlite":
+            # SQLite не умеет DROP CONSTRAINT — таблицу пересоздаём с переносом
+            # данных. Локальная разработка, объём строк минимальный.
+            has_old_constraint = any(
+                index["name"] == "uq_review_matrix_member_cat" for index in inspector.get_indexes("review_matrix_members")
+            )
+            if not has_old_constraint:
+                try:
+                    connection.execute(
+                        text(
+                            "CREATE TABLE review_matrix_members_new ("
+                            "id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, category VARCHAR(20), "
+                            "discipline_code VARCHAR(50) NOT NULL, doc_type VARCHAR(50) NOT NULL, "
+                            "user_id INTEGER NOT NULL, level INTEGER NOT NULL, state VARCHAR(2) NOT NULL, "
+                            "created_at DATETIME NOT NULL)"
+                        )
+                    )
+                    connection.execute(
+                        text(
+                            "INSERT INTO review_matrix_members_new "
+                            "(id, project_id, category, discipline_code, doc_type, user_id, level, state, created_at) "
+                            "SELECT id, project_id, category, discipline_code, doc_type, user_id, level, state, created_at "
+                            "FROM review_matrix_members"
+                        )
+                    )
+                    connection.execute(text("DROP TABLE review_matrix_members"))
+                    connection.execute(text("ALTER TABLE review_matrix_members_new RENAME TO review_matrix_members"))
+                    connection.execute(
+                        text(
+                            "CREATE UNIQUE INDEX uq_review_matrix_member_cat ON review_matrix_members "
+                            "(project_id, discipline_code, doc_type, user_id, level, COALESCE(category, ''))"
+                        )
+                    )
+                except Exception as exc:
+                    logger.warning("SQLite: не удалось пересоздать таблицу матрицы: %s", exc)
 
 
 def _ensure_projects_document_category_column() -> None:

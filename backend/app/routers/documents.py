@@ -10,7 +10,7 @@ import zipfile
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -204,25 +204,41 @@ def _matrix_source(db: Session, mdr: MDRRecord | None) -> MDRRecord | None:
 
 
 def _matrix_discipline(db: Session, mdr: MDRRecord | None) -> str | None:
-    """Код раздела для матрицы назначений.
-
-    Категория SE (инженерные изыскания) в матрице представлена ОДНИМ условным
-    разделом "SE": назначения на него распространяются на все SE-документы,
-    независимо от конкретного вида отчёта в шифре. Для остальных категорий —
-    фактический раздел документа (раздел ПД). У вложенного берётся раздел
-    головного документа."""
+    """Раздел документа в терминах матрицы. У вложенного — раздел головного."""
     source = _matrix_source(db, mdr)
-    if source is None:
-        return None
-    if (source.category or "").upper() == "SE":
-        return "SE"
-    return source.discipline_code
+    return source.discipline_code if source is not None else None
 
 
-def _matrix_doc_type(db: Session, mdr: MDRRecord | None) -> str | None:
-    """Тип документа для матрицы — у вложенного тип головного."""
+def _matrix_category(db: Session, mdr: MDRRecord | None) -> str | None:
+    """Категория документа в терминах матрицы. У вложенного — категория головного."""
     source = _matrix_source(db, mdr)
-    return source.doc_type if source is not None else None
+    return source.category if source is not None else None
+
+
+def _matrix_match_clause(db: Session, mdr: MDRRecord | None):
+    """Условие «строка матрицы обслуживает этот документ».
+
+    Адресация — пара «категория + раздел»: одна дисциплина в разных категориях
+    это разные документы и разные люди (концепции PF с дисциплиной SE и отчёты
+    изысканий категории SE рассматривают разные составы).
+
+    - `category IS NULL` — строка покрывает любую категорию. Так велась матрица
+      до 2026-09-01, такие строки продолжают работать как раньше.
+    - раздел `SE` в категории `SE` покрывает ВСЕ виды отчётов изысканий
+      (IGM, IGD, IEL…) — одна строка вместо шести, если состав общий. Точечные
+      назначения на конкретный вид отчёта задаются его кодом.
+    """
+    discipline = (_matrix_discipline(db, mdr) or "").upper()
+    category = (_matrix_category(db, mdr) or "").upper()
+
+    category_clause = or_(
+        ReviewMatrixMember.category.is_(None),
+        func.upper(ReviewMatrixMember.category) == category,
+    )
+    discipline_clauses = [func.upper(ReviewMatrixMember.discipline_code) == discipline]
+    if category == "SE":
+        discipline_clauses.append(func.upper(ReviewMatrixMember.discipline_code) == "SE")
+    return and_(category_clause, or_(*discipline_clauses))
 
 
 def _can_manage_owner_remark(
@@ -230,7 +246,7 @@ def _can_manage_owner_remark(
     *,
     current_user: User,
     project_id: int,
-    discipline_code: str | None,
+    mdr: MDRRecord | None,
     comment_author_id: int,
 ) -> bool:
     if current_user.role.value == "admin":
@@ -239,13 +255,13 @@ def _can_manage_owner_remark(
         return True
     if comment_author_id == current_user.id:
         return True
-    if discipline_code:
+    if mdr is not None:
         matrix_row = (
             db.query(ReviewMatrixMember.id)
             .filter(
                 ReviewMatrixMember.project_id == project_id,
                 ReviewMatrixMember.user_id == current_user.id,
-                ReviewMatrixMember.discipline_code == discipline_code,
+                _matrix_match_clause(db, mdr),
                 ReviewMatrixMember.level == 1,
                 ReviewMatrixMember.state == "LR",
             )
@@ -263,27 +279,27 @@ def _is_lr_for_document(
     *,
     current_user: User,
     project_id: int,
-    discipline_code: str | None,
-    doc_type: str | None,
+    mdr: MDRRecord | None,
 ) -> bool:
+    """LR ли текущий пользователь по паре «категория + раздел» документа."""
     if current_user.role.value == "admin":
         return True
     if current_user.company_type != CompanyType.owner:
         return False
-    if not discipline_code:
+    if mdr is None or not _matrix_discipline(db, mdr):
         return False
-    query = db.query(ReviewMatrixMember.id).filter(
-        ReviewMatrixMember.project_id == project_id,
-        ReviewMatrixMember.user_id == current_user.id,
-        ReviewMatrixMember.discipline_code == discipline_code,
-        ReviewMatrixMember.level == 1,
-        ReviewMatrixMember.state == "LR",
+    return (
+        db.query(ReviewMatrixMember.id)
+        .filter(
+            ReviewMatrixMember.project_id == project_id,
+            ReviewMatrixMember.user_id == current_user.id,
+            _matrix_match_clause(db, mdr),
+            ReviewMatrixMember.level == 1,
+            ReviewMatrixMember.state == "LR",
+        )
+        .first()
+        is not None
     )
-    if doc_type:
-        exact = query.filter(ReviewMatrixMember.doc_type == doc_type).first()
-        if exact is not None:
-            return True
-    return query.first() is not None
 
 
 def _owner_matrix_role_for_document(
@@ -291,27 +307,24 @@ def _owner_matrix_role_for_document(
     *,
     current_user: User,
     project_id: int,
-    discipline_code: str | None,
-    doc_type: str | None,
+    mdr: MDRRecord | None,
 ) -> str | None:
+    """Роль пользователя по документу: LR, R или None (не назначен)."""
     if current_user.role.value == "admin":
         return "LR"
-    if current_user.company_type != CompanyType.owner or not discipline_code:
+    if current_user.company_type != CompanyType.owner or mdr is None:
         return None
-    base_filter = [
-        ReviewMatrixMember.project_id == project_id,
-        ReviewMatrixMember.user_id == current_user.id,
-        ReviewMatrixMember.discipline_code == discipline_code,
-    ]
-    # Сначала ищем строгое совпадение по типу документа.
-    rows = []
-    if doc_type:
-        rows = db.query(ReviewMatrixMember).filter(*base_filter, ReviewMatrixMember.doc_type == doc_type).all()
-    # Fallback: если по доку нет, пробуем без типа (назначение «по
-    # дисциплине целиком» — типичный случай в матрице, когда строка
-    # покрывает все типы документов в этой дисциплине).
-    if not rows:
-        rows = db.query(ReviewMatrixMember).filter(*base_filter).all()
+    if not _matrix_discipline(db, mdr):
+        return None
+    rows = (
+        db.query(ReviewMatrixMember)
+        .filter(
+            ReviewMatrixMember.project_id == project_id,
+            ReviewMatrixMember.user_id == current_user.id,
+            _matrix_match_clause(db, mdr),
+        )
+        .all()
+    )
     if not rows:
         return None
     lr_row = next((item for item in rows if item.level == 1 and item.state == "LR"), None)
@@ -335,8 +348,7 @@ def _ensure_lr_can_publish_for_revision(db: Session, *, current_user: User, revi
         db,
         current_user=current_user,
         project_id=project.id,
-        discipline_code=_matrix_discipline(db, mdr),
-        doc_type=_matrix_doc_type(db, mdr),
+        mdr=mdr,
     ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -844,8 +856,7 @@ def list_owner_review_queue(
                 db,
                 current_user=current_user,
                 project_id=project_id,
-                discipline_code=_matrix_discipline(db, mdr),
-                doc_type=_matrix_doc_type(db, mdr),
+                mdr=mdr,
             )
         )
         result.append(
@@ -2438,8 +2449,7 @@ def set_revision_review_code(
         db,
         current_user=current_user,
         project_id=project.id,
-        discipline_code=_matrix_discipline(db, mdr),
-        doc_type=None,
+        mdr=mdr,
     ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only LR/Admin can set AP")
 
@@ -2544,13 +2554,15 @@ def _revision_context(db: Session, revision: Revision):
     return document, mdr, project
 
 
-def _assigned_owner_reviewers(db: Session, *, project_id: int, discipline_code: str | None):
-    """Матричные ревьюеры (R/LR) уровня 1 по дисциплине документа."""
+def _assigned_owner_reviewers(db: Session, *, project_id: int, mdr: MDRRecord | None):
+    """Матричные ревьюеры (R/LR) уровня 1, обслуживающие этот документ."""
+    if mdr is None:
+        return []
     return (
         db.query(ReviewMatrixMember)
         .filter(
             ReviewMatrixMember.project_id == project_id,
-            ReviewMatrixMember.discipline_code == discipline_code,
+            _matrix_match_clause(db, mdr),
             ReviewMatrixMember.level == 1,
             ReviewMatrixMember.state.in_(["LR", "R"]),
         )
@@ -2572,14 +2584,12 @@ def mark_revision_no_comments(
     if revision is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
     document, mdr, project = _revision_context(db, revision)
-    discipline = _matrix_discipline(db, mdr)
 
     role = _owner_matrix_role_for_document(
         db,
         current_user=current_user,
         project_id=project.id,
-        discipline_code=discipline,
-        doc_type=_matrix_doc_type(db, mdr),
+        mdr=mdr,
     )
     if current_user.role.value != "admin" and role not in {"LR", "R"}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет назначения по матрице для этого документа")
@@ -2614,7 +2624,7 @@ def mark_revision_no_comments(
 
     # Уведомляем LR, что ревьюер посмотрел.
     actor_name = current_user.full_name or current_user.email
-    for member in _assigned_owner_reviewers(db, project_id=project.id, discipline_code=discipline):
+    for member in _assigned_owner_reviewers(db, project_id=project.id, mdr=mdr):
         if member.state == "LR" and member.user_id != current_user.id:
             db.add(
                 Notification(
@@ -2636,11 +2646,11 @@ def mark_revision_no_comments(
         event_types=["TDO_SENT_TO_OWNER", "OWNER_COMMENT_CREATED", "NEW_COMMENT", "CARRY_OVER_DECISION", "REVIEW_DEADLINE_SOON"],
     )
     db.commit()
-    return _build_reviewer_summary(db, revision, project, discipline, current_user)
+    return _build_reviewer_summary(db, revision, project, mdr, current_user)
 
 
 def _build_reviewer_summary(db, revision, project, discipline, current_user) -> RevisionReviewerSummary:
-    members = _assigned_owner_reviewers(db, project_id=project.id, discipline_code=discipline)
+    members = _assigned_owner_reviewers(db, project_id=project.id, mdr=mdr)
     states = {
         s.user_id: s
         for s in db.query(RevisionReviewerState).filter(RevisionReviewerState.revision_id == revision.id).all()
@@ -2701,7 +2711,7 @@ def get_revision_reviewer_states(
     if not _owner_can_access_revision(db, current_user, revision):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Revision not found")
     _document, mdr, project = _revision_context(db, revision)
-    return _build_reviewer_summary(db, revision, project, _matrix_discipline(db, mdr), current_user)
+    return _build_reviewer_summary(db, revision, project, mdr, current_user)
 
 
 @router.get("/revisions/{revision_id}/events", response_model=list[ReviewEventRead])
@@ -3125,8 +3135,7 @@ def upsert_carry_decision(
         db,
         current_user=current_user,
         project_id=project.id,
-        discipline_code=_matrix_discipline(db, mdr),
-        doc_type=_matrix_doc_type(db, mdr),
+        mdr=mdr,
     )
     if current_user.role.value != "admin" and matrix_role not in {"LR", "R"}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No matrix assignment for carry-over decision")
@@ -3189,7 +3198,7 @@ def upsert_carry_decision(
         db.query(ReviewMatrixMember)
         .filter(
             ReviewMatrixMember.project_id == project.id,
-            ReviewMatrixMember.discipline_code == _matrix_discipline(db, mdr),
+            _matrix_match_clause(db, mdr),
             ReviewMatrixMember.level == 1,
             ReviewMatrixMember.state.in_(["LR", "R"]),
         )
@@ -3373,7 +3382,7 @@ def create_revision(
         db.query(ReviewMatrixMember)
         .filter(
             ReviewMatrixMember.project_id == project.id,
-            ReviewMatrixMember.discipline_code == _matrix_discipline(db, mdr),
+            _matrix_match_clause(db, mdr),
             ReviewMatrixMember.level == 1,
         )
         .all()
@@ -3469,7 +3478,7 @@ def make_tdo_decision(
             db.query(ReviewMatrixMember)
             .filter(
                 ReviewMatrixMember.project_id == project.id,
-                ReviewMatrixMember.discipline_code == _matrix_discipline(db, mdr),
+                _matrix_match_clause(db, mdr),
                 ReviewMatrixMember.level == 1,
             )
             .all()
@@ -3650,7 +3659,7 @@ def make_tdo_bulk_decision(
                 db.query(ReviewMatrixMember)
                 .filter(
                     ReviewMatrixMember.project_id == project.id,
-                    ReviewMatrixMember.discipline_code == _matrix_discipline(db, mdr),
+                    _matrix_match_clause(db, mdr),
                     ReviewMatrixMember.level == 1,
                 )
                 .all()
@@ -3792,8 +3801,7 @@ def list_crs_queue(
                 db,
                 current_user=current_user,
                 project_id=project.id,
-                discipline_code=_matrix_discipline(db, mdr),
-                doc_type=_matrix_doc_type(db, mdr),
+                mdr=mdr,
             ):
                 continue
         result.append(
@@ -3834,7 +3842,7 @@ def add_comment_to_crs(
         db,
         current_user=current_user,
         project_id=project.id,
-        discipline_code=_matrix_discipline(db, mdr),
+        mdr=mdr,
         comment_author_id=comment.author_id,
     ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No permissions to manage this remark")
@@ -3989,7 +3997,7 @@ def send_crs_comments(
         member_ids = {member.user_id for member in all_members}
         matrix_users = (
             db.query(ReviewMatrixMember.user_id)
-            .filter(ReviewMatrixMember.project_id == project.id, ReviewMatrixMember.discipline_code == _matrix_discipline(db, mdr))
+            .filter(ReviewMatrixMember.project_id == project.id, _matrix_match_clause(db, mdr))
             .all()
         )
         for row in matrix_users:
@@ -4087,7 +4095,7 @@ def create_comment(
             .filter(
                 ReviewMatrixMember.project_id == project.id,
                 ReviewMatrixMember.user_id == current_user.id,
-                ReviewMatrixMember.discipline_code == _matrix_discipline(db, mdr),
+                _matrix_match_clause(db, mdr),
                 ReviewMatrixMember.doc_type == mdr.doc_type,
                 ReviewMatrixMember.level == 1,
                 ReviewMatrixMember.state.in_(["LR", "R"]),
@@ -4101,7 +4109,7 @@ def create_comment(
                 .filter(
                     ReviewMatrixMember.project_id == project.id,
                     ReviewMatrixMember.user_id == current_user.id,
-                    ReviewMatrixMember.discipline_code == _matrix_discipline(db, mdr),
+                    _matrix_match_clause(db, mdr),
                     ReviewMatrixMember.level == 1,
                     ReviewMatrixMember.state.in_(["LR", "R"]),
                 )
@@ -4133,8 +4141,7 @@ def create_comment(
             db,
             current_user=current_user,
             project_id=project.id,
-            discipline_code=_matrix_discipline(db, mdr),
-            doc_type=_matrix_doc_type(db, mdr),
+            mdr=mdr,
         )
         review_events_service.record_event(
             db,
@@ -4158,7 +4165,7 @@ def create_comment(
         db.query(ReviewMatrixMember)
         .filter(
             ReviewMatrixMember.project_id == project.id,
-            ReviewMatrixMember.discipline_code == _matrix_discipline(db, mdr),
+            _matrix_match_clause(db, mdr),
             ReviewMatrixMember.level == 1,
             ReviewMatrixMember.state == "LR",
         )
@@ -4311,7 +4318,7 @@ def respond_comment(
                 db.query(ReviewMatrixMember)
                 .filter(
                     ReviewMatrixMember.project_id == project.id,
-                    ReviewMatrixMember.discipline_code == _matrix_discipline(db, mdr),
+                    _matrix_match_clause(db, mdr),
                     ReviewMatrixMember.level == 1,
                     ReviewMatrixMember.state == "LR",
                 )
@@ -4402,7 +4409,7 @@ def owner_comment_decision(
         db,
         current_user=current_user,
         project_id=project.id,
-        discipline_code=_matrix_discipline(db, mdr),
+        mdr=mdr,
         comment_author_id=comment.author_id,
     ):
         raise HTTPException(
@@ -4616,7 +4623,7 @@ def delete_owner_comment(
         db,
         current_user=current_user,
         project_id=project.id,
-        discipline_code=_matrix_discipline(db, mdr),
+        mdr=mdr,
         comment_author_id=comment.author_id,
     ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No permissions to manage this remark")
@@ -4658,8 +4665,7 @@ def publish_revision_comments_to_contractor(
         db,
         current_user=current_user,
         project_id=project.id,
-        discipline_code=_matrix_discipline(db, mdr),
-        doc_type=_matrix_doc_type(db, mdr),
+        mdr=mdr,
     ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -4749,7 +4755,7 @@ def get_revision_card(
             .filter(
                 ReviewMatrixMember.project_id == project.id,
                 ReviewMatrixMember.user_id == current_user.id,
-                ReviewMatrixMember.discipline_code == _matrix_discipline(db, mdr),
+                _matrix_match_clause(db, mdr),
             )
             .order_by(ReviewMatrixMember.level.asc(), ReviewMatrixMember.id.asc())
             .first()
@@ -4771,7 +4777,7 @@ def get_revision_card(
         .join(User, User.id == ReviewMatrixMember.user_id)
         .filter(
             ReviewMatrixMember.project_id == project.id,
-            ReviewMatrixMember.discipline_code == _matrix_discipline(db, mdr),
+            _matrix_match_clause(db, mdr),
             ReviewMatrixMember.level == 1,
             ReviewMatrixMember.state == "LR",
         )

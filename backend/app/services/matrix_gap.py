@@ -13,7 +13,7 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from app.models import Notification, Project, ReviewMatrixMember, SystemSetting, User, UserRole
 
@@ -25,26 +25,40 @@ EVENT_TYPE = "MATRIX_GAP_BLOCKED"
 
 
 def matrix_discipline(*, category: str | None, discipline_code: str | None) -> str | None:
-    """Раздел в терминах матрицы: у категории SE это один условный раздел «SE».
-
-    Дублирует _matrix_discipline из routers/documents.py, но без обращения к БД —
-    здесь проверка идёт до создания записи. Логику менять синхронно.
-    """
-    if (category or "").upper() == "SE":
-        return "SE"
+    """Раздел документа в терминах матрицы (проверка идёт до создания записи,
+    поэтому без обращения к БД). Категория передаётся отдельно."""
     return (discipline_code or "").strip() or None
 
 
-def has_lead_reviewer(db: Session, *, project_id: int, discipline: str | None) -> bool:
-    """Есть ли LR (level=1) по разделу. R можно добавить позже, LR — обязателен:
-    без него некому согласовать документ и отправить CRS."""
+def has_lead_reviewer(
+    db: Session,
+    *,
+    project_id: int,
+    discipline: str | None,
+    category: str | None = None,
+) -> bool:
+    """Есть ли LR (level=1) по паре «категория + раздел».
+
+    Правила совпадают с _matrix_match_clause в routers/documents.py — менять
+    синхронно: строка без категории покрывает любую, а раздел «SE» в категории
+    SE покрывает все виды отчётов изысканий.
+    """
     if not discipline:
         return False
+    section = discipline.strip().upper()
+    cat = (category or "").strip().upper()
+    disciplines = [section]
+    if cat == "SE":
+        disciplines.append("SE")
     return (
         db.query(ReviewMatrixMember.id)
         .filter(
             ReviewMatrixMember.project_id == project_id,
-            ReviewMatrixMember.discipline_code == discipline,
+            or_(
+                ReviewMatrixMember.category.is_(None),
+                func.upper(ReviewMatrixMember.category) == cat,
+            ),
+            func.upper(ReviewMatrixMember.discipline_code).in_(disciplines),
             ReviewMatrixMember.level == 1,
             ReviewMatrixMember.state == "LR",
         )
@@ -85,7 +99,7 @@ def notify_gap(
     requester: User,
     doc_number: str,
     discipline: str | None,
-    doc_type: str | None,
+    category: str | None,
 ) -> None:
     """Уведомление админам и адресатам из настройки. Письма уходят сами —
     на новые Notification навешен хук рассылки (services/notification_email).
@@ -98,7 +112,7 @@ def notify_gap(
 
     message = (
         f"Подрядчик {requester.full_name or requester.email} пытался создать документ {doc_number} "
-        f"(проект {project.code}, раздел {discipline or '—'}, тип {doc_type or '—'}), "
+        f"(проект {project.code}, категория {category or '—'}, раздел {discipline or '—'}), "
         f"но в матрице назначений нет LR по этому разделу. Документ не создан. "
         f"Назначьте LR (и R) в матрице проекта, затем сообщите подрядчику."
     )
@@ -130,9 +144,10 @@ def notify_gap(
     db.commit()
 
 
-def gap_detail(*, discipline: str | None) -> str:
+def gap_detail(*, discipline: str | None, category: str | None = None) -> str:
+    where = f"«{category}» / «{discipline or '—'}»" if category else f"«{discipline or '—'}»"
     return (
-        f"По разделу «{discipline or '—'}» в матрице назначений нет лидера-ревьювера (LR) от заказчика. "
+        f"По разделу {where} в матрице назначений нет лидера-ревьювера (LR) от заказчика. "
         f"Документ создать нельзя — его некому рассматривать. "
         f"Мы уже сообщили администратору системы заказчика; свяжитесь с ним, "
         f"чтобы назначить LR и R, после этого создайте документ повторно."

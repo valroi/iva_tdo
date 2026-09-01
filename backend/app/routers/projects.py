@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi import File, UploadFile
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook, load_workbook
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -928,12 +929,14 @@ def create_review_matrix_item(
         mark_code=payload.doc_type,
     )
 
+    # Дубль считается в пределах пары «категория + раздел»: один и тот же
+    # человек может вести дисциплину SE в категории PF и не вести её в SE.
     exists = (
         db.query(ReviewMatrixMember)
         .filter(
             ReviewMatrixMember.project_id == project_id,
+            func.coalesce(ReviewMatrixMember.category, "") == (payload.category or ""),
             ReviewMatrixMember.discipline_code == payload.discipline_code,
-            ReviewMatrixMember.doc_type == payload.doc_type,
             ReviewMatrixMember.user_id == payload.user_id,
             ReviewMatrixMember.level == payload.level,
         )
@@ -944,9 +947,10 @@ def create_review_matrix_item(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                f"{user.full_name or user.email} уже назначен по разделу «{payload.discipline_code}» "
-                f"как {role}. Чтобы сменить роль, откройте «Изменить» в строке матрицы — "
-                f"добавлять вторую строку на того же человека не нужно."
+                f"{user.full_name or user.email} уже назначен по "
+                f"{'категории «' + payload.category + '», ' if payload.category else ''}"
+                f"разделу «{payload.discipline_code}» как {role}. Чтобы сменить роль, откройте "
+                f"«Изменить» в строке матрицы — добавлять вторую строку на того же человека не нужно."
             ),
         )
 

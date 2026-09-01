@@ -1198,7 +1198,15 @@ export function listReviewMatrix(projectId: number): Promise<ReviewMatrixMember[
 
 export function createReviewMatrixItem(
   projectId: number,
-  payload: { user_id: number; discipline_code: string; doc_type: string; level: 1 | 2; state: "LR" | "R" },
+  payload: {
+    user_id: number;
+    // Категория документа: вместе с разделом адресует строку матрицы.
+    category?: string | null;
+    discipline_code: string;
+    doc_type: string;
+    level: 1 | 2;
+    state: "LR" | "R";
+  },
 ): Promise<ReviewMatrixMember> {
   return request<ReviewMatrixMember>(`/projects/${projectId}/review-matrix`, {
     method: "POST",
@@ -1208,7 +1216,7 @@ export function createReviewMatrixItem(
 
 export function updateReviewMatrixItem(
   itemId: number,
-  payload: { level?: 1 | 2; state?: "LR" | "R" },
+  payload: { level?: 1 | 2; state?: "LR" | "R"; category?: string | null; discipline_code?: string; doc_type?: string; user_id?: number },
 ): Promise<ReviewMatrixMember> {
   return request<ReviewMatrixMember>(`/projects/review-matrix/${itemId}`, {
     method: "PUT",

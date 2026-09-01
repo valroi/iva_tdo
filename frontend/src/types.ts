@@ -415,6 +415,8 @@ export interface ReviewMatrixMember {
   id: number;
   project_id: number;
   user_id: number;
+  // null — легаси-строка: покрывает документы любой категории.
+  category?: string | null;
   discipline_code: string;
   doc_type: string;
   level: 1 | 2;

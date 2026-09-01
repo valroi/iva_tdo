@@ -436,7 +436,7 @@ def _ensure_reviewers_assigned(
     if current_user.role.value == "admin":
         return
     discipline = matrix_gap.matrix_discipline(category=category, discipline_code=discipline_code)
-    if matrix_gap.has_lead_reviewer(db, project_id=project.id, discipline=discipline):
+    if matrix_gap.has_lead_reviewer(db, project_id=project.id, discipline=discipline, category=category):
         return
     matrix_gap.notify_gap(
         db,
@@ -444,11 +444,11 @@ def _ensure_reviewers_assigned(
         requester=current_user,
         doc_number=doc_number,
         discipline=discipline,
-        doc_type=doc_type,
+        category=category,
     )
     raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,
-        detail=matrix_gap.gap_detail(discipline=discipline),
+        detail=matrix_gap.gap_detail(discipline=discipline, category=category),
     )
 
 
@@ -1201,7 +1201,9 @@ def import_mdr(
         # импорт заводит документы, которые некому рассматривать.
         if not line_errors and current_user.role.value != "admin":
             row_discipline = matrix_gap.matrix_discipline(category=category, discipline_code=discipline_code)
-            if not matrix_gap.has_lead_reviewer(db, project_id=project.id, discipline=row_discipline):
+            if not matrix_gap.has_lead_reviewer(
+                db, project_id=project.id, discipline=row_discipline, category=category
+            ):
                 line_errors.append(
                     f"В матрице назначений нет LR по разделу «{row_discipline or '—'}» — "
                     f"обратитесь к администратору системы заказчика"
@@ -1251,7 +1253,7 @@ def import_mdr(
                 requester=current_user,
                 doc_number=f"импорт реестра ({project_code})",
                 discipline=discipline,
-                doc_type=None,
+                category=None,
             )
 
     return {
