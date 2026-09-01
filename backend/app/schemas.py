@@ -233,7 +233,11 @@ class MDRChildCreate(BaseModel):
     doc_weight: float = 0
     planned_dev_start: date | None = None
     serial: str | None = None  # если пусто — авто (следующий среди детей)
-    title_object: str | None = None  # пусто — как у родителя
+    # Пусто — как у родителя. Любое отличие переводит шифр на полную маску
+    # категории; состав ревьюверов при этом всё равно берётся от родителя.
+    title_object: str | None = None
+    discipline_code: str | None = None
+    doc_type: str | None = None
 
 
 class MDRUpdate(BaseModel):

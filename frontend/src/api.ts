@@ -214,6 +214,8 @@ export function createChildMdr(
     planned_dev_start?: string | null;
     serial?: string | null;
     title_object?: string | null;
+    discipline_code?: string | null;
+    doc_type?: string | null;
   },
 ): Promise<MDRRecord> {
   return request<MDRRecord>(`/mdr/${parentId}/child`, {

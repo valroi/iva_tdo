@@ -471,6 +471,18 @@ def create_mdr(
     return mdr
 
 
+def _next_serial(value: str) -> str:
+    """Следующий порядковый номер шифра с сохранением ширины: 001 → 002, 09 → 10.
+
+    Нужен, когда несколько вложенных идут под одним титулом и дисциплиной:
+    шифры совпадают, и различает их только последний сегмент маски.
+    Нечисловой номер наращиваем суффиксом-цифрой (ABC → ABC1)."""
+    raw = (value or "").strip()
+    if raw.isdigit():
+        return str(int(raw) + 1).zfill(len(raw))
+    return f"{raw}1" if raw else "1"
+
+
 @router.post("/{parent_id}/child", response_model=MDRRead, status_code=status.HTTP_201_CREATED)
 def create_child_mdr(
     parent_id: int,
@@ -502,37 +514,64 @@ def create_child_mdr(
                 max_idx = max(max_idx, int(raw))
         serial = str(max_idx + 1).zfill(2)
 
-    # Свой титульный объект: вложенный получает не «шифр родителя + -NN», а
+    # Свои шифровочные поля: вложенный получает не «шифр родителя + -NN», а
     # полный шифр по маске категории (IMP-SHP-PF-9505-SE-ACT-001). Так уже
     # заведены документы под «Концепцией АБЗ» — титул там номер здания.
-    child_title = (payload.title_object or "").strip().upper()
-    parent_title = (parent.title_object or "").strip().upper()
-    if child_title and child_title != parent_title:
-        child_doc_number, _ = _compose_legacy_cipher(
-            ComposeCipherPayload(
-                project_code=parent.project_code,
-                originator_code=parent.originator_code,
-                category=parent.category,
-                title_object=child_title,
-                discipline_code=parent.discipline_code,
-                doc_type=parent.doc_type,
-                # Порядковый номер: свой, если задан, иначе как у родителя —
-                # титул уже делает шифр уникальным.
-                serial_number=serial if payload.serial else parent.serial_number,
-            )
+    # Состав ревьюверов при этом всё равно берётся от родителя
+    # (см. _matrix_source в routers/documents.py).
+    child_title = (payload.title_object or "").strip().upper() or (parent.title_object or "").strip().upper()
+    child_discipline = (payload.discipline_code or "").strip().upper() or (parent.discipline_code or "").strip().upper()
+    child_doc_type = (payload.doc_type or "").strip().upper() or (parent.doc_type or "").strip().upper()
+    own_cipher_fields = (
+        child_title != (parent.title_object or "").strip().upper()
+        or child_discipline != (parent.discipline_code or "").strip().upper()
+        or child_doc_type != (parent.doc_type or "").strip().upper()
+    )
+
+    def _cipher_taken(value: str) -> bool:
+        return (
+            db.query(MDRRecord.id)
+            .filter(MDRRecord.project_code == parent.project_code, MDRRecord.doc_number == value)
+            .first()
+            is not None
         )
-        child_serial = serial if payload.serial else parent.serial_number
+
+    if own_cipher_fields:
+        # Порядковый номер: свой, если задан, иначе родительский. Если такой
+        # шифр уже занят (несколько частей с одним титулом и дисциплиной) —
+        # инкрементим последний сегмент маски, пока не найдём свободный.
+        # Постфикс не добавляем: шифр должен оставаться разбираемым по маске.
+        base_serial = serial if payload.serial else (parent.serial_number or "").strip()
+        child_serial = base_serial
+        child_doc_number = ""
+        for _ in range(1000):
+            child_doc_number, _kind = _compose_legacy_cipher(
+                ComposeCipherPayload(
+                    project_code=parent.project_code,
+                    originator_code=parent.originator_code,
+                    category=parent.category,
+                    title_object=child_title,
+                    discipline_code=child_discipline,
+                    doc_type=child_doc_type,
+                    serial_number=child_serial,
+                )
+            )
+            if not _cipher_taken(child_doc_number):
+                break
+            child_serial = _next_serial(child_serial)
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Не удалось подобрать свободный порядковый номер — укажите его вручную",
+            )
     else:
-        child_title = parent_title
         child_serial = serial
         child_doc_number = f"{parent.doc_number}-{serial}"
-    exists_cipher = (
-        db.query(MDRRecord.id)
-        .filter(MDRRecord.project_code == parent.project_code, MDRRecord.doc_number == child_doc_number)
-        .first()
-    )
-    if exists_cipher:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Вложенный документ {child_doc_number} уже существует")
+        if _cipher_taken(child_doc_number):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Вложенный документ {child_doc_number} уже существует",
+            )
 
     # Уникальный document_key (DOC-XXXX).
     max_key = 0
@@ -555,8 +594,8 @@ def create_child_mdr(
         originator_code=parent.originator_code,
         category=parent.category,
         title_object=child_title or parent.title_object,
-        discipline_code=parent.discipline_code,
-        doc_type=parent.doc_type,
+        discipline_code=child_discipline or parent.discipline_code,
+        doc_type=child_doc_type or parent.doc_type,
         serial_number=child_serial,
         doc_number=child_doc_number,
         parent_id=parent.id,

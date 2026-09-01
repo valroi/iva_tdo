@@ -1,5 +1,5 @@
 import { paginationProps } from "../utils/pagination";
-import { Button, Dropdown, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
+import { AutoComplete, Button, Dropdown, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography, message } from "antd";
 import { DownOutlined, FileExcelOutlined } from "@ant-design/icons";
 import type { MenuProps } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -123,14 +123,29 @@ export default function MdrPage({
   };
   const childTitleObject = Form.useWatch("title_object", childForm);
   const childSerial = Form.useWatch("serial", childForm);
+  const childDiscipline = Form.useWatch("discipline_code", childForm);
+  const childDocType = Form.useWatch("doc_type", childForm);
+  // Справочник разделов зависит от категории РОДИТЕЛЯ (у вложенного она своя
+  // не бывает): PD — разделы ПД, SE — виды отчётов, остальное — дисциплины.
+  const childDisciplineOptions = useMemo(() => {
+    const category = String(childParent?.category || "").toUpperCase();
+    const wanted = category === "PD" ? "pd_section" : category === "SE" ? "se_reporting_type" : "discipline";
+    return projectReferences
+      .filter((ref) => ref.ref_type === wanted && ref.is_active)
+      .map((ref) => ({ value: ref.code, label: `${ref.code} - ${ref.value}` }));
+  }, [projectReferences, childParent?.category]);
   // Показываем итоговый шифр до создания: со своим титулом собирается полная
   // маска категории, без него — старая схема «шифр родителя + -NN».
   const childCipherPreview = useMemo(() => {
     if (!childParent) return "…";
-    const title = String(childTitleObject ?? "").trim().toUpperCase();
-    const serial = String(childSerial ?? "").trim().toUpperCase();
     const parentTitle = String(childParent.title_object ?? "").trim().toUpperCase();
-    if (title && title !== parentTitle) {
+    const parentDiscipline = String(childParent.discipline_code ?? "").trim().toUpperCase();
+    const parentDocType = String(childParent.doc_type ?? "").trim().toUpperCase();
+    const title = String(childTitleObject ?? "").trim().toUpperCase() || parentTitle;
+    const discipline = String(childDiscipline ?? "").trim().toUpperCase() || parentDiscipline;
+    const docType = String(childDocType ?? "").trim().toUpperCase() || parentDocType;
+    const serial = String(childSerial ?? "").trim().toUpperCase();
+    if (title !== parentTitle || discipline !== parentDiscipline || docType !== parentDocType) {
       // Через normalizePdCipher: у PD раздел/часть/книга склеиваются (AR33.2),
       // у остальных категорий шифр остаётся плоским. Так же собирает бэкенд.
       return normalizePdCipher(
@@ -139,8 +154,8 @@ export default function MdrPage({
           childParent.originator_code,
           childParent.category,
           title,
-          childParent.discipline_code,
-          childParent.doc_type,
+          discipline,
+          docType,
           serial || childParent.serial_number,
         ]
           .join("-")
@@ -148,7 +163,7 @@ export default function MdrPage({
       );
     }
     return `${childParent.doc_number}-${serial || "NN"}`;
-  }, [childParent, childTitleObject, childSerial]);
+  }, [childParent, childTitleObject, childSerial, childDiscipline, childDocType]);
 
   const [form] = Form.useForm();
   const latestComposeRequestRef = useRef(0);
@@ -1061,14 +1076,18 @@ export default function MdrPage({
           const values = await childForm.validateFields();
           setChildSubmitting(true);
           try {
-            await createChildMdr(childParent.id, {
+            const created = await createChildMdr(childParent.id, {
               doc_name: values.doc_name,
               doc_weight: values.doc_weight ?? 0,
               planned_dev_start: values.planned_dev_start || null,
               serial: values.serial || null,
               title_object: values.title_object || null,
+              discipline_code: values.discipline_code || null,
+              doc_type: values.doc_type || null,
             });
-            message.success("Вложенный документ создан");
+            // Шифр показываем из ответа: при конфликте бэкенд подобрал
+            // следующий свободный порядковый номер.
+            message.success(`Вложенный документ создан: ${created.doc_number}`);
             setChildParent(null);
             childForm.resetFields();
             await onCreated();
@@ -1080,8 +1099,9 @@ export default function MdrPage({
         }}
       >
         <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-          Часть большего документа (напр. программа изысканий под отчётом). Категория, дисциплина и
-          порядок рассмотрения — как у родителя. Шифр: <b>{childCipherPreview}</b>.
+          Часть большего документа (напр. программа изысканий под отчётом). Порядок рассмотрения
+          (LR/R) всегда берётся от головного документа. Шифр: <b>{childCipherPreview}</b>. Если такой
+          шифр занят, порядковый номер увеличится на следующий свободный.
         </Typography.Paragraph>
         <Form form={childForm} layout="vertical">
           <Form.Item name="doc_name" label="Наименование вложенного документа" rules={[{ required: true, message: "Укажите наименование" }]}>
@@ -1090,9 +1110,44 @@ export default function MdrPage({
           <Form.Item
             name="title_object"
             label="Титульный объект (титул)"
-            tooltip="Пусто — титул родителя, шифр = шифр родителя + -NN. Свой титул (напр. 9505) даёт полный шифр по маске категории."
+            tooltip="Пусто — как у родителя (шифр = шифр родителя + -NN). Свой титул, раздел или тип дают полный шифр по маске категории."
           >
-            <Input placeholder={childParent?.title_object ?? "как у родителя"} maxLength={10} />
+            <AutoComplete
+              allowClear
+              options={titleObjectOptions}
+              filterOption={(input, option) =>
+                String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())
+              }
+              placeholder={childParent?.title_object ?? "как у родителя"}
+            />
+          </Form.Item>
+          <Form.Item
+            name="discipline_code"
+            label={
+              String(childParent?.category || "").toUpperCase() === "PD"
+                ? "Раздел ПД"
+                : String(childParent?.category || "").toUpperCase() === "SE"
+                  ? "Вид отчёта (SE)"
+                  : "Дисциплина"
+            }
+            tooltip="Пусто — как у родителя. Состав ревьюверов всё равно определяется по головному документу."
+          >
+            <Select
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              options={childDisciplineOptions}
+              placeholder={childParent?.discipline_code ?? "как у родителя"}
+            />
+          </Form.Item>
+          <Form.Item name="doc_type" label="Тип документа" tooltip="Пусто — как у родителя.">
+            <Select
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              options={documentTypeOptions}
+              placeholder={childParent?.doc_type ?? "как у родителя"}
+            />
           </Form.Item>
           <Form.Item name="serial" label="Порядковый номер (необязательно, авто)" tooltip="1-4 символа. Пусто — следующий свободный (01, 02, …); при своём титуле — номер родителя">
             <Input placeholder="авто" maxLength={4} />
