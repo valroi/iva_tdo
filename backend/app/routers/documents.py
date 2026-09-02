@@ -1092,24 +1092,32 @@ def _next_remark_number(db: Session, *, project_code: str) -> str:
 def _next_crs_number(
     db: Session,
     *,
-    document_id: int,
     project_code: str,
     sender_company_code: str,
     receiver_company_code: str,
 ) -> str:
+    """Сквозной по проекту номер CRS: IMP-IVA-SHP-CRS-00001.
+
+    Раньше счётчик считался В ПРЕДЕЛАХ ДОКУМЕНТА, и каждый документ начинал
+    с 00001 — на проде так появилось четыре разных CRS с номером ...00001,
+    и сослаться на пакет в переписке было нельзя. Теперь нумерация сквозная
+    по проекту и паре компаний, как у ТРМ.
+    """
     prefix = f"{project_code.upper()}-{sender_company_code.upper()}-{receiver_company_code.upper()}-CRS-"
-    matches = (
-        db.query(Comment.crs_number)
-        .join(Revision, Revision.id == Comment.revision_id)
-        .filter(
-            Revision.document_id == document_id,
-            Comment.crs_number.isnot(None),
-            Comment.crs_number.like(f"{prefix}%"),
-        )
+    matches = [
+        row[0]
+        for row in db.query(Comment.crs_number)
+        .filter(Comment.crs_number.isnot(None), Comment.crs_number.like(f"{prefix}%"))
         .all()
-    )
+    ] + [
+        # AP-без-замечаний не создаёт Comment, номер живёт на ревизии.
+        row[0]
+        for row in db.query(Revision.ap_crs_number)
+        .filter(Revision.ap_crs_number.isnot(None), Revision.ap_crs_number.like(f"{prefix}%"))
+        .all()
+    ]
     max_seq = 0
-    for (value,) in matches:
+    for value in matches:
         if not value:
             continue
         match = re.match(rf"^{re.escape(prefix)}(\d{{5}})$", value)
@@ -2492,19 +2500,26 @@ def set_revision_review_code(
     )
     if revision.status in {"UNDER_REVIEW", "OWNER_COMMENTS_SENT", "CONTRACTOR_REPLY_I"}:
         _set_revision_status(revision, "CONTRACTOR_REPLY_A")
-    receiver_code = _project_reference_value(
+    # CRS всегда идёт ОТ заказчика подрядчику. Раньше здесь стороны были
+    # перевёрнуты (отправителем подставлялся код разработчика), и номер выходил
+    # вида IMP-SHP-IVA-CRS-… вместо IMP-IVA-SHP-CRS-….
+    sender_code = (current_user.company_code or "").strip().upper() or _project_reference_value(
         db,
         project_id=project.id,
         code="TRM_RECEIVER_COMPANY_CODE",
     ) or "IVA"
-    sender_code = (mdr.originator_code or "").strip().upper() or "CTR"
+    receiver_code = (mdr.originator_code or "").strip().upper() or "SHP"
     auto_crs_number = _next_crs_number(
         db,
-        document_id=document.id,
         project_code=mdr.project_code,
         sender_company_code=sender_code,
         receiver_company_code=receiver_code,
     )
+    # Номер обязан осесть в данных: раньше он жил только в тексте уведомления,
+    # поэтому счётчик его не видел и выдавал тот же номер следующему CRS.
+    # Фиктивных замечаний не заводим — храним номер на самой ревизии.
+    revision.ap_crs_number = auto_crs_number
+    db.add(revision)
     db.add(
         Notification(
             user_id=revision.author_id or document.created_by_id,
@@ -3886,7 +3901,6 @@ def add_comment_to_crs(
     else:
         comment.crs_number = _next_crs_number(
             db,
-            document_id=document.id,
             project_code=mdr.project_code,
             sender_company_code=sender_code,
             receiver_company_code=receiver_code,
@@ -3960,7 +3974,6 @@ def send_crs_comments(
         if document.id not in crs_number_by_document:
             crs_number_by_document[document.id] = _next_crs_number(
                 db,
-                document_id=document.id,
                 project_code=mdr.project_code,
                 sender_company_code=sender_code,
                 receiver_company_code=receiver_code,

@@ -320,6 +320,9 @@ class Revision(Base):
     file_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     review_code: Mapped[Optional[ReviewCode]] = mapped_column(Enum(ReviewCode), nullable=True)
     review_deadline: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    # Номер CRS, выданный при согласовании без замечаний (AP): Comment там не
+    # создаётся, а номер должен быть уникальным и видимым в переписке.
+    ap_crs_number: Mapped[Optional[str]] = mapped_column(String(60), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
