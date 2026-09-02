@@ -2569,11 +2569,35 @@ def _revision_context(db: Session, revision: Revision):
     return document, mdr, project
 
 
-def _assigned_owner_reviewers(db: Session, *, project_id: int, mdr: MDRRecord | None):
-    """Матричные ревьюеры (R/LR) уровня 1, обслуживающие этот документ."""
+def _revision_sent_to_owner_at(db: Session, revision: Revision) -> datetime:
+    """Момент, когда ревизия ушла на рассмотрение заказчику.
+
+    Основной источник — событие SENT_TO_OWNER в журнале; если его нет
+    (единичные старые ревизии), берём дату создания ревизии.
+    """
+    row = (
+        db.query(func.min(ReviewEvent.created_at))
+        .filter(ReviewEvent.revision_id == revision.id, ReviewEvent.event_type == "SENT_TO_OWNER")
+        .scalar()
+    )
+    return row or revision.created_at
+
+
+def _assigned_owner_reviewers(db: Session, *, project_id: int, mdr: MDRRecord | None, revision: Revision | None = None):
+    """Матричные ревьюеры (R/LR) уровня 1, обслуживающие этот документ.
+
+    Если передана ревизия — отсекаем тех, кого назначили в матрицу ПОСЛЕ того,
+    как ревизия ушла на рассмотрение: их действия по ней уже не ожидаются,
+    иначе новый человек мгновенно «повисает» на всех старых и закрытых
+    ревизиях со статусом «рассматривает». Работать он начинает со следующего
+    круга рассмотрения.
+
+    Если под отсечку не попал никто (матрицу заполнили уже после отправки),
+    возвращаем полный состав — лучше показать всех, чем пустой список.
+    """
     if mdr is None:
         return []
-    return (
+    rows = (
         db.query(ReviewMatrixMember)
         .filter(
             ReviewMatrixMember.project_id == project_id,
@@ -2583,6 +2607,13 @@ def _assigned_owner_reviewers(db: Session, *, project_id: int, mdr: MDRRecord | 
         )
         .all()
     )
+    if revision is None or not rows:
+        return rows
+    sent_at = _revision_sent_to_owner_at(db, revision)
+    if sent_at is None:
+        return rows
+    assigned_before = [item for item in rows if item.created_at is None or item.created_at <= sent_at]
+    return assigned_before or rows
 
 
 @router.post("/revisions/{revision_id}/no-comments", response_model=RevisionReviewerSummary)
@@ -2648,7 +2679,7 @@ def mark_revision_no_comments(
 
     # Уведомляем LR, что ревьюер посмотрел.
     actor_name = current_user.full_name or current_user.email
-    for member in _assigned_owner_reviewers(db, project_id=project.id, mdr=mdr):
+    for member in _assigned_owner_reviewers(db, project_id=project.id, mdr=mdr, revision=revision):
         if member.state == "LR" and member.user_id != current_user.id:
             db.add(
                 Notification(
@@ -2674,7 +2705,7 @@ def mark_revision_no_comments(
 
 
 def _build_reviewer_summary(db, revision, project, mdr, current_user) -> RevisionReviewerSummary:
-    members = _assigned_owner_reviewers(db, project_id=project.id, mdr=mdr)
+    members = _assigned_owner_reviewers(db, project_id=project.id, mdr=mdr, revision=revision)
     states = {
         s.user_id: s
         for s in db.query(RevisionReviewerState).filter(RevisionReviewerState.revision_id == revision.id).all()
