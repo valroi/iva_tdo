@@ -242,16 +242,20 @@ export default function DashboardPage({
     return acc;
   }, {});
   const openByNotification = (item: DashboardTask): void => {
+    // Карточка ревизии — самый короткий путь: сразу нужный документ с PDF и
+    // замечаниями. Списки-очереди открываем, только если ревизия неизвестна:
+    // раньше заказчика по любой задаче уводило в «Очередь ТРМ», где документ
+    // приходилось искать глазами.
+    if (item.revision_id) {
+      onNavigate("revision_card", item.revision_id);
+      return;
+    }
     if (item.event_type === "REVISION_UPLOADED_FOR_TDO" || item.event_type === "NEW_REVISION_FOR_TDO") {
       onNavigate(currentUser.company_type === "owner" ? "trm" : "tdo_queue");
       return;
     }
     if (item.event_type === "OWNER_COMMENTS_PUBLISHED" && currentUser.permissions.can_publish_comments) {
       onNavigate("crs_queue");
-      return;
-    }
-    if (item.revision_id) {
-      onNavigate("revision_card", item.revision_id);
       return;
     }
     onNavigate("notifications");
