@@ -205,6 +205,11 @@ function MainApp(): JSX.Element {
     setActiveSection("trm_registry");
   }, []);
 
+  const openRemark = useCallback((remarkNumber: string) => {
+    setOpenedRemarkNumber(remarkNumber.trim().toUpperCase());
+    setActiveSection("remark_card");
+  }, []);
+
   // История секций для кнопок «Назад» — возвращаемся туда, откуда пришли,
   // а не на фиксированную страницу. Пуш прошлой секции при каждой смене;
   // при переходе через goBack пуш пропускаем (флаг), чтобы не зациклиться.
@@ -541,6 +546,7 @@ function MainApp(): JSX.Element {
                   notificationTarget={notificationTarget}
                   onNotificationTargetHandled={() => setNotificationTarget(null)}
                   onReload={loadInitialData}
+                  onOpenRemark={openRemark}
                 />
               )}
               {activeSection === "vendors" && user && <VendorsPage currentUser={user} />}
@@ -598,7 +604,9 @@ function MainApp(): JSX.Element {
               {activeSection === "reporting" && user?.permissions.can_view_reporting && (
                 <ReportingPage projects={projects} mdr={mdr} />
               )}
-              {activeSection === "crs_queue" && user?.permissions.can_publish_comments && <CrsPage />}
+              {activeSection === "crs_queue" && user?.permissions.can_publish_comments && (
+                <CrsPage onOpenRemark={openRemark} />
+              )}
               {activeSection === "revision_card" && openedRevisionId && user && (
                 <RevisionCardPage
                   revisionId={openedRevisionId}

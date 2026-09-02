@@ -215,6 +215,7 @@ export interface RevisionOverviewItem {
 
 export interface CsrQueueItem {
   comment_id: number;
+  remark_number?: string | null;
   trm_number: string | null;
   crs_number?: string | null;
   document_num: string;

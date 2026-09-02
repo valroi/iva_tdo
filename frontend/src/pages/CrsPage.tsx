@@ -9,7 +9,12 @@ import type { CsrQueueItem } from "../types";
 import { formatDateTimeRu } from "../utils/datetime";
 import { getCleanRemarkText, getDisplayRevisionCode } from "../utils/revisionProcess";
 
-export default function CrsPage(): JSX.Element {
+interface Props {
+  /** Открыть карточку замечания по сквозному номеру (IMP-RMK-000123). */
+  onOpenRemark?: (remarkNumber: string) => void;
+}
+
+export default function CrsPage({ onOpenRemark }: Props): JSX.Element {
   const { message } = App.useApp();
   const [items, setItems] = useState<CsrQueueItem[]>([]);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
@@ -29,6 +34,20 @@ export default function CrsPage(): JSX.Element {
   }, []);
 
   const columns: ColumnsType<CsrQueueItem> = [
+    {
+      title: "№ замечания",
+      dataIndex: "remark_number",
+      width: 150,
+      fixed: "left",
+      render: (value: string | null | undefined) =>
+        value ? (
+          <Button type="link" style={{ padding: 0 }} onClick={() => onOpenRemark?.(value)}>
+            <Typography.Text className="mono">{value}</Typography.Text>
+          </Button>
+        ) : (
+          "—"
+        ),
+    },
     { title: "TRM", dataIndex: "trm_number", width: 220, render: (v: string | null) => v ?? "—" },
     { title: "CRS", dataIndex: "crs_number", width: 220, render: (v: string | null | undefined) => v ?? "—" },
     { title: "Документ", dataIndex: "document_num", width: 220 },

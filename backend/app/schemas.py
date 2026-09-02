@@ -691,6 +691,8 @@ class TdoQueueItem(BaseModel):
 
 class CsrQueueItem(BaseModel):
     comment_id: int
+    # Сквозной номер замечания (IMP-RMK-000123) — по нему ищут историю.
+    remark_number: str | None = None
     trm_number: str | None = None
     crs_number: str | None = None
     document_num: str

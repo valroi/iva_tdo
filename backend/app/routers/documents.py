@@ -3816,6 +3816,7 @@ def list_crs_queue(
         result.append(
             CsrQueueItem(
                 comment_id=comment.id,
+                remark_number=comment.remark_number,
                 trm_number=revision.trm_number,
                 crs_number=comment.crs_number,
                 document_num=document.document_num,

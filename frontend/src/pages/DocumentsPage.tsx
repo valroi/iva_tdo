@@ -98,6 +98,8 @@ interface Props {
   notificationTarget?: { project_code?: string | null; document_num?: string | null; revision_id?: number | null } | null;
   onNotificationTargetHandled?: () => void;
   treeFilter?: DocumentsTreeFilter;
+  /** Открыть карточку замечания по сквозному номеру (IMP-RMK-000123). */
+  onOpenRemark?: (remarkNumber: string) => void;
 }
 
 export default function DocumentsPage({
@@ -108,6 +110,7 @@ export default function DocumentsPage({
   notificationTarget,
   onNotificationTargetHandled,
   treeFilter = null,
+  onOpenRemark,
 }: Props): JSX.Element {
   // Фильтр по клику в дереве проекта (item 5): дисциплина/категория —
   // показываем только её документы; верхнеуровневый документ — его самого
@@ -951,6 +954,22 @@ export default function DocumentsPage({
   });
 
   const commentColumns: ColumnsType<CommentItem> = [
+    {
+      // Сквозной номер замечания — по нему ищут историю через поиск в шапке
+      // и ссылаются в переписке. Раньше он был виден только в карточке ревизии.
+      title: "№ замечания",
+      key: "remark_number",
+      width: 150,
+      fixed: "left",
+      render: (_: unknown, row: CommentItem) =>
+        row.remark_number ? (
+          <Button type="link" style={{ padding: 0 }} onClick={() => onOpenRemark?.(row.remark_number as string)}>
+            <Typography.Text className="mono">{row.remark_number}</Typography.Text>
+          </Button>
+        ) : (
+          "—"
+        ),
+    },
     {
       title: "Код замечания",
       key: "review_code",

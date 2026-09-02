@@ -66,6 +66,8 @@ interface Props {
   notificationTarget?: { project_code?: string | null; document_num?: string | null; revision_id?: number | null } | null;
   onNotificationTargetHandled?: () => void;
   onReload: () => Promise<void>;
+  /** Открыть карточку замечания по сквозному номеру. */
+  onOpenRemark?: (remarkNumber: string) => void;
 }
 
 const projectMemberRoleOptions: { value: ProjectMemberRole; label: string }[] = [
@@ -116,6 +118,7 @@ export default function ProjectsPage({
   notificationTarget,
   onNotificationTargetHandled,
   onReload,
+  onOpenRemark,
 }: Props): JSX.Element {
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(projects[0]?.id ?? null);
   const [members, setMembers] = useState<ProjectMember[]>([]);
@@ -842,6 +845,7 @@ export default function ProjectsPage({
               label: "Ревизии и комментарии",
               children: (
                 <DocumentsPage
+                  onOpenRemark={onOpenRemark}
                   documents={projectDocuments}
                   mdr={projectMdr}
                   currentUser={currentUser}
