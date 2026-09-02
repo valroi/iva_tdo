@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 
 from sqlalchemy import event
 from sqlalchemy.orm import Session as OrmSession
@@ -79,6 +80,13 @@ def _deliver(item: dict) -> None:
             body_parts += ["", f"Открыть в системе: {link}"]
         body_parts += ["", "Это автоматическое уведомление. Отвечать на письмо не нужно."]
         send_email(to=user.email, subject=subject, body="\n".join(body_parts))
+        # Помечаем, что письмо ушло — иначе вечерний дайджест продублирует его.
+        if item.get("id"):
+            row = db.query(Notification).filter(Notification.id == item["id"]).first()
+            if row is not None and row.email_sent_at is None:
+                row.email_sent_at = datetime.utcnow()
+                db.add(row)
+                db.commit()
     except Exception:  # noqa: BLE001 — почта не должна ронять фоновый поток
         logger.exception("Не удалось отправить email-уведомление user_id=%s", item.get("user_id"))
     finally:
@@ -118,17 +126,27 @@ def send_welcome_email(*, to_email: str, full_name: str, password: str) -> None:
     _executor.submit(_deliver_welcome, to_email=to_email, full_name=full_name, password=password)
 
 
+# Письмо уходит сразу только по срочным событиям: с них начинается отсчёт
+# срока (CRS) или человек не может работать, пока не отреагируют (регистрация).
+# Всё остальное копится и уходит одним вечерним письмом — см. daily_digest.
+INSTANT_EVENT_TYPES = {
+    "OWNER_COMMENTS_PUBLISHED",
+    "REGISTRATION_REQUEST",
+}
+
+
 @event.listens_for(OrmSession, "after_flush")
 def _collect_new_notifications(session: OrmSession, _flush_context) -> None:
     pending = [
         {
+            "id": obj.id,
             "user_id": obj.user_id,
             "event_type": obj.event_type,
             "message": obj.message,
             "revision_id": obj.revision_id,
         }
         for obj in session.new
-        if isinstance(obj, Notification)
+        if isinstance(obj, Notification) and obj.event_type in INSTANT_EVENT_TYPES
     ]
     if pending:
         session.info.setdefault(_SESSION_INFO_KEY, []).extend(pending)

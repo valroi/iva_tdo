@@ -428,6 +428,9 @@ class Notification(Base):
     document_num: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     revision_id: Mapped[Optional[int]] = mapped_column(ForeignKey("revisions.id"), nullable=True)
     is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Когда по уведомлению ушло письмо. NULL — письма ещё не было: такие
+    # уведомления забирает вечерний дайджест (services/daily_digest).
+    email_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 

@@ -72,6 +72,10 @@ def on_startup() -> None:
 
     start_daemon()
 
+    from app.services.daily_digest import start_daemon as start_digest_daemon
+
+    start_digest_daemon()
+
 
 @app.get("/health")
 def health() -> dict[str, str]:
