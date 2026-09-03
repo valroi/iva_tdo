@@ -376,10 +376,15 @@ export default function DashboardPage({
           <Card
             className="hrp-card dashboard-stat-card"
             hoverable
-            onClick={() => onNavigate(currentUser.company_type === "owner" ? "trm" : (currentUser.permissions.can_publish_comments ? "crs_queue" : "notifications"))}
+            // Плитка ведёт к списку задач ниже на этой же странице: оттуда
+            // каждая задача открывается в карточке нужного документа. Раньше
+            // заказчика уводило в «Очередь ТРМ», где документ надо было искать.
+            onClick={() => {
+              document.getElementById("dashboard-tasks")?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
           >
             <Statistic
-              title="Задачи по замечаниям"
+              title="Мои задачи"
               value={myTasks.length}
             />
           </Card>
@@ -438,7 +443,7 @@ export default function DashboardPage({
           />
         </Card>
       )}
-      <Card title="Текущие задачи" className="hrp-card" style={{ marginTop: 16 }}>
+      <Card id="dashboard-tasks" title="Текущие задачи" className="hrp-card" style={{ marginTop: 16 }}>
         <Table
           columns={taskColumns}
           dataSource={myTasks}

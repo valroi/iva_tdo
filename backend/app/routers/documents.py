@@ -824,11 +824,28 @@ def list_owner_review_queue(
         if existing is None or revision.id > existing:
             latest_revision_by_doc[document.id] = revision.id
 
+    is_owner_side = current_user.company_type == CompanyType.owner and current_user.role.value != "admin"
+
     result: list[TdoQueueItem] = []
     for revision, document, mdr, author in rows:
         # Только последняя ревизия документа
         if latest_revision_by_doc.get(document.id) != revision.id:
             continue
+        # Ревьюверу заказчика — только его документы. Раньше очередь
+        # фильтровалась лишь по проекту, и человек, назначенный на один раздел,
+        # видел все 26 документов проекта как свои задачи.
+        if is_owner_side:
+            project_id_for_matrix = project_id_by_code.get(mdr.project_code)
+            if not project_id_for_matrix:
+                continue
+            assigned = _assigned_owner_reviewers(
+                db,
+                project_id=project_id_for_matrix,
+                mdr=mdr,
+                revision=revision,
+            )
+            if current_user.id not in {item.user_id for item in assigned}:
+                continue
         # Закрытые review_code-ом ревизии больше не задачи
         if revision.review_code is not None:
             continue
