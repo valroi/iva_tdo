@@ -2569,28 +2569,45 @@ def _revision_context(db: Session, revision: Revision):
     return document, mdr, project
 
 
-def _revision_sent_to_owner_at(db: Session, revision: Revision) -> datetime:
-    """Момент, когда ревизия ушла на рассмотрение заказчику.
+# Рассмотрение заказчиком закончено, когда LR отправил CRS или поставил AP.
+_REVIEW_CLOSED_EVENTS = ("LR_SENT_TO_CONTRACTOR", "AP_SET")
 
-    Основной источник — событие SENT_TO_OWNER в журнале; если его нет
-    (единичные старые ревизии), берём дату создания ревизии.
+
+def _review_closed_at(db: Session, revision: Revision) -> datetime | None:
+    """Момент, когда заказчик закрыл рассмотрение ревизии.
+
+    None — рассмотрение ещё идёт (ревизия на столе у заказчика), и состав
+    ревьюверов не зафиксирован: любой, кого добавили в матрицу сейчас, должен
+    участвовать. Как только LR отправил CRS или выставил AP, состав считается
+    закрытым, и назначенные позже по этой ревизии уже не ожидаются.
     """
-    row = (
+    if (revision.status or "") == "UNDER_REVIEW":
+        return None
+    closed_at = (
+        db.query(func.min(ReviewEvent.created_at))
+        .filter(ReviewEvent.revision_id == revision.id, ReviewEvent.event_type.in_(_REVIEW_CLOSED_EVENTS))
+        .scalar()
+    )
+    if closed_at is not None:
+        return closed_at
+    # Событий нет (старые ревизии до журнала) — берём момент отправки заказчику.
+    sent_at = (
         db.query(func.min(ReviewEvent.created_at))
         .filter(ReviewEvent.revision_id == revision.id, ReviewEvent.event_type == "SENT_TO_OWNER")
         .scalar()
     )
-    return row or revision.created_at
+    return sent_at or revision.created_at
 
 
 def _assigned_owner_reviewers(db: Session, *, project_id: int, mdr: MDRRecord | None, revision: Revision | None = None):
     """Матричные ревьюеры (R/LR) уровня 1, обслуживающие этот документ.
 
-    Если передана ревизия — отсекаем тех, кого назначили в матрицу ПОСЛЕ того,
-    как ревизия ушла на рассмотрение: их действия по ней уже не ожидаются,
-    иначе новый человек мгновенно «повисает» на всех старых и закрытых
-    ревизиях со статусом «рассматривает». Работать он начинает со следующего
-    круга рассмотрения.
+    Если передана ревизия — отсекаем тех, кого назначили ПОСЛЕ того, как
+    заказчик ЗАКРЫЛ рассмотрение (отправил CRS или поставил AP): по отработанным
+    ревизиям их действия уже не ожидаются, иначе новый человек мгновенно
+    «повисает» на всех старых и закрытых ревизиях со статусом «рассматривает».
+    Пока ревизия на рассмотрении (UNDER_REVIEW), состав не зафиксирован —
+    добавленный сегодня ревьювер обязан участвовать в текущем круге.
 
     Если под отсечку не попал никто (матрицу заполнили уже после отправки),
     возвращаем полный состав — лучше показать всех, чем пустой список.
@@ -2609,10 +2626,10 @@ def _assigned_owner_reviewers(db: Session, *, project_id: int, mdr: MDRRecord | 
     )
     if revision is None or not rows:
         return rows
-    sent_at = _revision_sent_to_owner_at(db, revision)
-    if sent_at is None:
-        return rows
-    assigned_before = [item for item in rows if item.created_at is None or item.created_at <= sent_at]
+    closed_at = _review_closed_at(db, revision)
+    if closed_at is None:
+        return rows  # рассмотрение идёт — участвуют все, кто назначен сейчас
+    assigned_before = [item for item in rows if item.created_at is None or item.created_at <= closed_at]
     return assigned_before or rows
 
 
