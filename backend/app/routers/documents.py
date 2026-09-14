@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -17,6 +19,7 @@ from app.database import get_db
 from app.deps import get_current_user, get_effective_permissions, require_permissions, users_by_company_types
 from app.services import matrix_gap
 from app.models import (
+    DocumentReviewer,
     Comment,
     CommentAttachment,
     CarryOverDecision,
@@ -255,20 +258,10 @@ def _can_manage_owner_remark(
         return True
     if comment_author_id == current_user.id:
         return True
-    if mdr is not None:
-        matrix_row = (
-            db.query(ReviewMatrixMember.id)
-            .filter(
-                ReviewMatrixMember.project_id == project_id,
-                ReviewMatrixMember.user_id == current_user.id,
-                _matrix_match_clause(db, mdr),
-                ReviewMatrixMember.level == 1,
-                ReviewMatrixMember.state == "LR",
-            )
-            .first()
-        )
-        if matrix_row is not None:
-            return True
+    if mdr is not None and current_user.id in _document_reviewer_ids(
+        db, project_id=project_id, mdr=mdr, states=("LR",)
+    ):
+        return True
     # Owner reviewer (R) may manage only own remarks.
     # Managing others is allowed only for LR/admin.
     return False
@@ -288,18 +281,7 @@ def _is_lr_for_document(
         return False
     if mdr is None or not _matrix_discipline(db, mdr):
         return False
-    return (
-        db.query(ReviewMatrixMember.id)
-        .filter(
-            ReviewMatrixMember.project_id == project_id,
-            ReviewMatrixMember.user_id == current_user.id,
-            _matrix_match_clause(db, mdr),
-            ReviewMatrixMember.level == 1,
-            ReviewMatrixMember.state == "LR",
-        )
-        .first()
-        is not None
-    )
+    return current_user.id in _document_reviewer_ids(db, project_id=project_id, mdr=mdr, states=("LR",))
 
 
 def _owner_matrix_role_for_document(
@@ -316,22 +298,11 @@ def _owner_matrix_role_for_document(
         return None
     if not _matrix_discipline(db, mdr):
         return None
-    rows = (
-        db.query(ReviewMatrixMember)
-        .filter(
-            ReviewMatrixMember.project_id == project_id,
-            ReviewMatrixMember.user_id == current_user.id,
-            _matrix_match_clause(db, mdr),
-        )
-        .all()
+    mine = next(
+        (item for item in _document_reviewers(db, project_id=project_id, mdr=mdr) if item.user_id == current_user.id),
+        None,
     )
-    if not rows:
-        return None
-    lr_row = next((item for item in rows if item.level == 1 and item.state == "LR"), None)
-    if lr_row is not None:
-        return "LR"
-    row = sorted(rows, key=lambda item: (item.level, 0 if item.state == "LR" else 1))[0]
-    return "R"
+    return mine.state if mine is not None else None
 
 
 def _ensure_lr_can_publish_for_revision(db: Session, *, current_user: User, revision: Revision) -> tuple[Document, MDRRecord, Project]:
@@ -773,6 +744,16 @@ def list_owner_review_queue(
         item.project_id
         for item in db.query(ReviewMatrixMember)
         .filter(ReviewMatrixMember.user_id == current_user.id, ReviewMatrixMember.level == 1)
+        .all()
+    }
+    # Добавленный на отдельный документ ревьювер (в т.ч. наблюдатель проекта)
+    # тоже получает задачи по этому проекту — какие именно, решает фильтр ниже.
+    matrix_project_ids |= {
+        row[0]
+        for row in db.query(Project.id)
+        .join(MDRRecord, MDRRecord.project_code == Project.code)
+        .join(DocumentReviewer, DocumentReviewer.mdr_id == MDRRecord.id)
+        .filter(DocumentReviewer.user_id == current_user.id, DocumentReviewer.removed_at.is_(None))
         .all()
     }
     project_ids = list(membership_project_ids | matrix_project_ids)
@@ -2616,22 +2597,53 @@ def _review_closed_at(db: Session, revision: Revision) -> datetime | None:
     return sent_at or revision.created_at
 
 
-def _assigned_owner_reviewers(db: Session, *, project_id: int, mdr: MDRRecord | None, revision: Revision | None = None):
-    """Матричные ревьюеры (R/LR) уровня 1, обслуживающие этот документ.
+@dataclass
+class ReviewerAssignment:
+    """Строка состава ревьюверов документа — из матрицы или добавленная вручную."""
 
-    Если передана ревизия — отсекаем тех, кого назначили ПОСЛЕ того, как
-    заказчик ЗАКРЫЛ рассмотрение (отправил CRS или поставил AP): по отработанным
-    ревизиям их действия уже не ожидаются, иначе новый человек мгновенно
-    «повисает» на всех старых и закрытых ревизиях со статусом «рассматривает».
-    Пока ревизия на рассмотрении (UNDER_REVIEW), состав не зафиксирован —
-    добавленный сегодня ревьювер обязан участвовать в текущем круге.
+    user_id: int
+    state: str  # LR | R
+    created_at: datetime | None
+    source: str  # "matrix" — по матрице назначений; "added" — добавлен на документ
+    assignment_id: int | None = None
+    added_by_id: int | None = None
+    level: int = 1
 
-    Если под отсечку не попал никто (матрицу заполнили уже после отправки),
-    возвращаем полный состав — лучше показать всех, чем пустой список.
+
+def _document_reviewers(
+    db: Session,
+    *,
+    project_id: int,
+    mdr: MDRRecord | None,
+    revision: Revision | None = None,
+) -> list[ReviewerAssignment]:
+    """ЕДИНАЯ точка ответа на вопрос «кто рассматривает этот документ».
+
+    Состав = строки матрицы (по паре «категория + раздел», у вложенного — от
+    головного документа) + ревьюверы, добавленные на сам документ или на его
+    головной документ (`document_reviewers`). Если человек есть в обоих
+    источниках, берётся более сильная роль (LR важнее R).
+
+    Через этот помощник идут права (LR/R), очередь задач, сводка по ревизии,
+    рассылки и напоминания — новое обращение к составу ревьюверов пиши только
+    через него, иначе добавленные вручную люди «потеряются» в этом месте.
+
+    Если передана ревизия — отсекаем назначенных ПОСЛЕ того, как заказчик
+    закрыл по ней рассмотрение (CRS отправлен или AP): по отработанным кругам
+    их действия не ожидаются. Пока ревизия UNDER_REVIEW, участвуют все
+    назначенные на текущий момент. Если под отсечку не попал никто, возвращаем
+    полный состав — лучше показать всех, чем пустой список.
     """
     if mdr is None:
         return []
-    rows = (
+    by_user: dict[int, ReviewerAssignment] = {}
+
+    def _merge(item: ReviewerAssignment) -> None:
+        current = by_user.get(item.user_id)
+        if current is None or (current.state != "LR" and item.state == "LR"):
+            by_user[item.user_id] = item
+
+    for row in (
         db.query(ReviewMatrixMember)
         .filter(
             ReviewMatrixMember.project_id == project_id,
@@ -2640,14 +2652,55 @@ def _assigned_owner_reviewers(db: Session, *, project_id: int, mdr: MDRRecord | 
             ReviewMatrixMember.state.in_(["LR", "R"]),
         )
         .all()
-    )
-    if revision is None or not rows:
-        return rows
+    ):
+        _merge(ReviewerAssignment(user_id=row.user_id, state=row.state, created_at=row.created_at, source="matrix"))
+
+    source = _matrix_source(db, mdr)
+    mdr_ids = {mdr.id} | ({source.id} if source is not None else set())
+    for row in (
+        db.query(DocumentReviewer)
+        .filter(DocumentReviewer.mdr_id.in_(mdr_ids), DocumentReviewer.removed_at.is_(None))
+        .all()
+    ):
+        _merge(
+            ReviewerAssignment(
+                user_id=row.user_id,
+                state=row.state,
+                created_at=row.created_at,
+                source="added",
+                assignment_id=row.id,
+                added_by_id=row.added_by_id,
+            )
+        )
+
+    items = list(by_user.values())
+    if revision is None or not items:
+        return items
     closed_at = _review_closed_at(db, revision)
     if closed_at is None:
-        return rows  # рассмотрение идёт — участвуют все, кто назначен сейчас
-    assigned_before = [item for item in rows if item.created_at is None or item.created_at <= closed_at]
-    return assigned_before or rows
+        return items  # рассмотрение идёт — участвуют все, кто назначен сейчас
+    assigned_before = [item for item in items if item.created_at is None or item.created_at <= closed_at]
+    return assigned_before or items
+
+
+def _document_reviewer_ids(
+    db: Session,
+    *,
+    project_id: int,
+    mdr: MDRRecord | None,
+    revision: Revision | None = None,
+    states: tuple[str, ...] = ("LR", "R"),
+) -> set[int]:
+    return {
+        item.user_id
+        for item in _document_reviewers(db, project_id=project_id, mdr=mdr, revision=revision)
+        if item.state in states
+    }
+
+
+def _assigned_owner_reviewers(db: Session, *, project_id: int, mdr: MDRRecord | None, revision: Revision | None = None):
+    """Совместимая обёртка: состав ревьюверов документа (см. _document_reviewers)."""
+    return _document_reviewers(db, project_id=project_id, mdr=mdr, revision=revision)
 
 
 @router.post("/revisions/{revision_id}/no-comments", response_model=RevisionReviewerSummary)
@@ -2754,8 +2807,10 @@ def _build_reviewer_summary(db, revision, project, mdr, current_user) -> Revisio
         .distinct()
         .all()
     }
-    user_ids = {m.user_id for m in members}
+    user_ids = {m.user_id for m in members} | {m.added_by_id for m in members if m.added_by_id}
     users = {u.id: u for u in db.query(User).filter(User.id.in_(user_ids)).all()} if user_ids else {}
+    viewer_is_admin = current_user.role.value == "admin"
+    viewer_is_lr = viewer_is_admin or _is_lr_for_document(db, current_user=current_user, project_id=project.id, mdr=mdr)
     reviewers: list[ReviewerStateRead] = []
     r_members = [m for m in members if m.state == "R"]
     for member in members:
@@ -2763,6 +2818,7 @@ def _build_reviewer_summary(db, revision, project, mdr, current_user) -> Revisio
         if user is None:
             continue
         st = states.get(member.user_id)
+        added_by = users.get(member.added_by_id) if member.added_by_id else None
         reviewers.append(
             ReviewerStateRead(
                 user_id=member.user_id,
@@ -2772,6 +2828,12 @@ def _build_reviewer_summary(db, revision, project, mdr, current_user) -> Revisio
                 no_comments=bool(st and st.no_comments),
                 has_comments=member.user_id in commented_ids,
                 decided_at=st.decided_at if st else None,
+                source=member.source,
+                assignment_id=member.assignment_id,
+                added_by_name=(added_by.full_name or added_by.email) if added_by else None,
+                # Снять можно только добавленного вручную: админ — любого,
+                # LR документа — только R (второго LR назначает админ).
+                can_remove=member.source == "added" and (viewer_is_admin or (viewer_is_lr and member.state == "R")),
             )
         )
     all_r_no_comments = bool(r_members) and all(
@@ -3283,16 +3345,7 @@ def upsert_carry_decision(
         db.add(source)
 
     db.add(existing)
-    recipients = (
-        db.query(ReviewMatrixMember)
-        .filter(
-            ReviewMatrixMember.project_id == project.id,
-            _matrix_match_clause(db, mdr),
-            ReviewMatrixMember.level == 1,
-            ReviewMatrixMember.state.in_(["LR", "R"]),
-        )
-        .all()
-    )
+    recipients = _document_reviewers(db, project_id=project.id, mdr=mdr)
     recipient_ids = {item.user_id for item in recipients if item.user_id != current_user.id}
     decision_label = {
         "OPEN": "не устранено",
@@ -3467,15 +3520,7 @@ def create_revision(
     if lead_ids:
         receiver_ids = lead_ids
     else:
-        matrix_level_1 = (
-        db.query(ReviewMatrixMember)
-        .filter(
-            ReviewMatrixMember.project_id == project.id,
-            _matrix_match_clause(db, mdr),
-            ReviewMatrixMember.level == 1,
-        )
-        .all()
-        )
+        matrix_level_1 = _document_reviewers(db, project_id=project.id, mdr=mdr)
         if matrix_level_1:
             receiver_ids = {item.user_id for item in matrix_level_1}
         else:
@@ -3563,15 +3608,7 @@ def make_tdo_decision(
             + _setting_days(db, "review_sla_owner_lr_approval_days", 1)
         )
         revision.review_deadline = (datetime.utcnow() + timedelta(days=owner_review_days)).date()
-        matrix_level_1 = (
-            db.query(ReviewMatrixMember)
-            .filter(
-                ReviewMatrixMember.project_id == project.id,
-                _matrix_match_clause(db, mdr),
-                ReviewMatrixMember.level == 1,
-            )
-            .all()
-        )
+        matrix_level_1 = _document_reviewers(db, project_id=project.id, mdr=mdr)
         if matrix_level_1:
             receiver_ids = {item.user_id for item in matrix_level_1}
         else:
@@ -3744,15 +3781,7 @@ def make_tdo_bulk_decision(
                 + _setting_days(db, "review_sla_owner_lr_approval_days", 1)
             )
             revision.review_deadline = (datetime.utcnow() + timedelta(days=owner_review_days)).date()
-            matrix_level_1 = (
-                db.query(ReviewMatrixMember)
-                .filter(
-                    ReviewMatrixMember.project_id == project.id,
-                    _matrix_match_clause(db, mdr),
-                    ReviewMatrixMember.level == 1,
-                )
-                .all()
-            )
+            matrix_level_1 = _document_reviewers(db, project_id=project.id, mdr=mdr)
             if matrix_level_1:
                 receiver_ids = {item.user_id for item in matrix_level_1}
             else:
@@ -4083,13 +4112,7 @@ def send_crs_comments(
 
         all_members = db.query(ProjectMember).filter(ProjectMember.project_id == project.id).all()
         member_ids = {member.user_id for member in all_members}
-        matrix_users = (
-            db.query(ReviewMatrixMember.user_id)
-            .filter(ReviewMatrixMember.project_id == project.id, _matrix_match_clause(db, mdr))
-            .all()
-        )
-        for row in matrix_users:
-            member_ids.add(row[0])
+        member_ids |= _document_reviewer_ids(db, project_id=project.id, mdr=mdr)
         for member_id in member_ids:
             _mark_notifications_read(
                 db,
@@ -4178,31 +4201,10 @@ def create_comment(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Comments are locked for owner side after LR sends remarks to contractor",
             )
+        # Матрица + ревьюверы, добавленные на документ (единый состав).
         matrix_match = (
-            db.query(ReviewMatrixMember.id)
-            .filter(
-                ReviewMatrixMember.project_id == project.id,
-                ReviewMatrixMember.user_id == current_user.id,
-                _matrix_match_clause(db, mdr),
-                ReviewMatrixMember.doc_type == mdr.doc_type,
-                ReviewMatrixMember.level == 1,
-                ReviewMatrixMember.state.in_(["LR", "R"]),
-            )
-            .first()
+            True if current_user.id in _document_reviewer_ids(db, project_id=project.id, mdr=mdr) else None
         )
-        if matrix_match is None:
-            # Fallback for legacy data where MDR doc_type may not match matrix doc_type.
-            matrix_match = (
-                db.query(ReviewMatrixMember.id)
-                .filter(
-                    ReviewMatrixMember.project_id == project.id,
-                    ReviewMatrixMember.user_id == current_user.id,
-                    _matrix_match_clause(db, mdr),
-                    ReviewMatrixMember.level == 1,
-                    ReviewMatrixMember.state.in_(["LR", "R"]),
-                )
-                .first()
-            )
         if matrix_match is None:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No matrix assignment for this document")
         if payload.review_code is None:
@@ -4249,16 +4251,7 @@ def create_comment(
     # ошибочно попадал document.created_by_id → замечания «падали» подрядчику
     # сразу.
     recipients: set[int] = set()
-    lr_rows = (
-        db.query(ReviewMatrixMember)
-        .filter(
-            ReviewMatrixMember.project_id == project.id,
-            _matrix_match_clause(db, mdr),
-            ReviewMatrixMember.level == 1,
-            ReviewMatrixMember.state == "LR",
-        )
-        .all()
-    )
+    lr_rows = [item for item in _document_reviewers(db, project_id=project.id, mdr=mdr) if item.state == "LR"]
     for row in lr_rows:
         if row.user_id != current_user.id:
             recipients.add(row.user_id)
@@ -4402,16 +4395,7 @@ def respond_comment(
     if current_user.company_type != CompanyType.contractor or contractor_status == "I":
         receiver_ids: set[int] = {parent.author_id}
         if project is not None and mdr is not None:
-            lr_rows = (
-                db.query(ReviewMatrixMember)
-                .filter(
-                    ReviewMatrixMember.project_id == project.id,
-                    _matrix_match_clause(db, mdr),
-                    ReviewMatrixMember.level == 1,
-                    ReviewMatrixMember.state == "LR",
-                )
-                .all()
-            )
+            lr_rows = [item for item in _document_reviewers(db, project_id=project.id, mdr=mdr) if item.state == "LR"]
             for row in lr_rows:
                 receiver_ids.add(row.user_id)
         receiver_ids.discard(current_user.id)
@@ -4838,15 +4822,9 @@ def get_revision_card(
     can_owner_raise_comments = True
     if current_user.company_type == CompanyType.owner and current_user.role.value != "admin":
         can_owner_raise_comments = False
-        matrix_row = (
-            db.query(ReviewMatrixMember)
-            .filter(
-                ReviewMatrixMember.project_id == project.id,
-                ReviewMatrixMember.user_id == current_user.id,
-                _matrix_match_clause(db, mdr),
-            )
-            .order_by(ReviewMatrixMember.level.asc(), ReviewMatrixMember.id.asc())
-            .first()
+        matrix_row = next(
+            (item for item in _document_reviewers(db, project_id=project.id, mdr=mdr) if item.user_id == current_user.id),
+            None,
         )
         if matrix_row is not None:
             can_owner_raise_comments = True
@@ -4860,17 +4838,11 @@ def get_revision_card(
     )
     developer_user = db.query(User).filter(User.id == (revision.author_id or document.created_by_id)).first()
     developer_name = developer_user.full_name if developer_user and developer_user.full_name else (developer_user.email if developer_user else None)
+    lr_user_ids = [item.user_id for item in _document_reviewers(db, project_id=project.id, mdr=mdr) if item.state == "LR"]
     lr_rows = (
-        db.query(ReviewMatrixMember, User)
-        .join(User, User.id == ReviewMatrixMember.user_id)
-        .filter(
-            ReviewMatrixMember.project_id == project.id,
-            _matrix_match_clause(db, mdr),
-            ReviewMatrixMember.level == 1,
-            ReviewMatrixMember.state == "LR",
-        )
-        .order_by(ReviewMatrixMember.id.asc())
-        .all()
+        [(None, lr_user) for lr_user in db.query(User).filter(User.id.in_(lr_user_ids)).order_by(User.id.asc()).all()]
+        if lr_user_ids
+        else []
     )
     if lr_rows:
         unique_lr_names: list[str] = []

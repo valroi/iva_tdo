@@ -1,8 +1,9 @@
-import { Alert, App, Button, Card, Descriptions, Modal, Space, Steps, Switch, Table, Tabs, Tag, Tooltip, Typography, Upload } from "antd";
+import { Alert, App, Button, Card, Descriptions, Modal, Popconfirm, Select, Space, Steps, Switch, Table, Tabs, Tag, Tooltip, Typography, Upload } from "antd";
 import { DownloadOutlined, FileTextOutlined, PaperClipOutlined, UploadOutlined } from "@ant-design/icons";
 import { useEffect, useMemo, useState } from "react";
 
-import { addCommentToCrs, createComment, deleteOwnerComment, docDownloadName, downloadCommentAttachment, downloadCommentsExport, downloadRevisionAnnotatedPdf, downloadRevisionAttachmentsArchive, getRevisionCard, getRevisionReviewerStates, listCarryDecisions, listCommentAttachments, listRevisionEvents, markRevisionNoComments, ownerCommentDecision, setCarryDecision, setRevisionReviewCode, uploadRevisionPdf } from "../api";
+import { addCommentToCrs, createComment, deleteOwnerComment, docDownloadName, downloadCommentAttachment, downloadCommentsExport, downloadRevisionAnnotatedPdf, downloadRevisionAttachmentsArchive, getRevisionCard, getReviewerManagement, getRevisionReviewerStates, addDocumentReviewer, removeDocumentReviewer, listCarryDecisions, listCommentAttachments, listRevisionEvents, markRevisionNoComments, ownerCommentDecision, setCarryDecision, setRevisionReviewCode, uploadRevisionPdf } from "../api";
+import type { DocumentReviewerManage } from "../api";
 import type { ReviewEventItem, RevisionReviewerSummary } from "../api";
 import ProcessHint from "../components/ProcessHint";
 import RevisionPdfAnnotator from "../components/RevisionPdfAnnotator";
@@ -29,6 +30,8 @@ const REVIEW_EVENT_LABELS: Record<string, string> = {
   COMMENT_REJECTED: "Замечание отклонено",
   AP_SET: "Согласовано (AP)",
   DEADLINE_REMINDER: "Напоминание о дедлайне",
+  REVIEWER_ADDED: "Добавлен ревьювер",
+  REVIEWER_REMOVED: "Снят ревьювер",
 };
 
 /** Скрепка «есть файл» у замечания: по клику скачивает вложение(я). */
@@ -78,6 +81,12 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack, onOp
   const [carryClosedByRevision, setCarryClosedByRevision] = useState<Record<number, number[]>>({});
   const [carryDecisionsByRevision, setCarryDecisionsByRevision] = useState<Record<number, CarryDecisionItem[]>>({});
   const [reviewerSummary, setReviewerSummary] = useState<RevisionReviewerSummary | null>(null);
+  // Кто может добавлять ревьюверов на документ (LR документа, админ) и из кого выбирать.
+  const [reviewerManage, setReviewerManage] = useState<DocumentReviewerManage | null>(null);
+  const [addReviewerOpen, setAddReviewerOpen] = useState(false);
+  const [addReviewerUserId, setAddReviewerUserId] = useState<number | undefined>(undefined);
+  const [addReviewerState, setAddReviewerState] = useState<"R" | "LR">("R");
+  const [addingReviewer, setAddingReviewer] = useState(false);
   const [reviewEvents, setReviewEvents] = useState<ReviewEventItem[]>([]);
   const [markingNoComments, setMarkingNoComments] = useState(false);
   // Индикаторы загрузки для кнопок скачивания (item 5).
@@ -86,12 +95,14 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack, onOp
 
   const loadReviewMeta = async (revId: number): Promise<void> => {
     try {
-      const [summary, events] = await Promise.all([
+      const [summary, events, manage] = await Promise.all([
         getRevisionReviewerStates(revId).catch(() => null),
         listRevisionEvents(revId).catch(() => [] as ReviewEventItem[]),
+        getReviewerManagement(revId).catch(() => null),
       ]);
       setReviewerSummary(summary);
       setReviewEvents(events);
+      setReviewerManage(manage);
     } catch {
       /* мета необязательна — карточка работает и без неё */
     }
@@ -597,8 +608,35 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack, onOp
           </Tooltip>
         )}
       </Space>
-      {reviewerSummary && reviewerSummary.reviewers.length > 0 && (
-        <Card size="small" style={{ marginBottom: 12 }} title="Рассмотрение ревьюверами">
+      {reviewerSummary && (reviewerSummary.reviewers.length > 0 || reviewerManage?.can_add) && (
+        <Card
+          size="small"
+          style={{ marginBottom: 12 }}
+          title="Рассмотрение ревьюверами"
+          extra={
+            reviewerManage?.can_add ? (
+              <Tooltip
+                title={
+                  reviewerManage.candidates.length
+                    ? "Подключить к рассмотрению ещё одного сотрудника заказчика из участников проекта"
+                    : "Все сотрудники заказчика из участников проекта уже рассматривают документ"
+                }
+              >
+                <Button
+                  size="small"
+                  disabled={!reviewerManage.candidates.length}
+                  onClick={() => {
+                    setAddReviewerUserId(undefined);
+                    setAddReviewerState("R");
+                    setAddReviewerOpen(true);
+                  }}
+                >
+                  + Ревьювер
+                </Button>
+              </Tooltip>
+            ) : null
+          }
+        >
           {reviewerSummary.approved ? (
             <Alert
               type="success"
@@ -623,6 +661,13 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack, onOp
               <Space key={r.user_id} size={8}>
                 <Tag color={r.role === "LR" ? "blue" : "default"}>{r.role}</Tag>
                 <Typography.Text>{r.full_name}</Typography.Text>
+                {r.source === "added" && (
+                  <Tooltip
+                    title={`Добавлен на этот документ${r.added_by_name ? ` — ${r.added_by_name}` : ""}, не из матрицы назначений`}
+                  >
+                    <Tag color="purple">добавлен</Tag>
+                  </Tooltip>
+                )}
                 {reviewerSummary.approved ? (
                   <Tag color="success">согласовано (AP)</Tag>
                 ) : crsSentForSelectedRevision && r.role === "LR" ? (
@@ -634,11 +679,94 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack, onOp
                 ) : (
                   <Tag>рассматривает</Tag>
                 )}
+                {r.can_remove && r.assignment_id ? (
+                  <Popconfirm
+                    title={`Снять ${r.full_name} с рассмотрения документа?`}
+                    description="Оставленные замечания сохранятся. Его решение по документу больше не ожидается."
+                    okText="Снять"
+                    cancelText="Отмена"
+                    onConfirm={async () => {
+                      try {
+                        const next = await removeDocumentReviewer(reviewerSummary.revision_id, r.assignment_id as number);
+                        setReviewerSummary(next);
+                        await loadReviewMeta(reviewerSummary.revision_id);
+                        message.success(`${r.full_name} снят с рассмотрения`);
+                      } catch (error) {
+                        message.error(error instanceof Error ? error.message : "Не удалось снять ревьювера");
+                      }
+                    }}
+                  >
+                    <Button size="small" type="link" danger style={{ padding: 0 }}>
+                      снять
+                    </Button>
+                  </Popconfirm>
+                ) : null}
               </Space>
             ))}
           </Space>
         </Card>
       )}
+      <Modal
+        open={addReviewerOpen}
+        title="Добавить ревьювера на документ"
+        okText="Добавить"
+        cancelText="Отмена"
+        okButtonProps={{ disabled: !addReviewerUserId, loading: addingReviewer }}
+        onCancel={() => setAddReviewerOpen(false)}
+        onOk={async () => {
+          if (!reviewerSummary || !addReviewerUserId) return;
+          setAddingReviewer(true);
+          try {
+            const next = await addDocumentReviewer(reviewerSummary.revision_id, {
+              user_id: addReviewerUserId,
+              state: addReviewerState,
+            });
+            setReviewerSummary(next);
+            await loadReviewMeta(reviewerSummary.revision_id);
+            setAddReviewerOpen(false);
+            message.success("Ревьювер добавлен — он получит уведомление и задачу по документу");
+          } catch (error) {
+            message.error(error instanceof Error ? error.message : "Не удалось добавить ревьювера");
+          } finally {
+            setAddingReviewer(false);
+          }
+        }}
+      >
+        <Space direction="vertical" size={12} style={{ width: "100%" }}>
+          <Typography.Text type="secondary">
+            Ревьювер подключится к текущему кругу рассмотрения и останется в составе на следующих ревизиях
+            этого документа, пока его не снимут. Матрица назначений проекта не меняется.
+          </Typography.Text>
+          <Select
+            showSearch
+            optionFilterProp="label"
+            placeholder="Сотрудник заказчика из участников проекта"
+            style={{ width: "100%" }}
+            value={addReviewerUserId}
+            onChange={(value) => setAddReviewerUserId(value as number)}
+            options={(reviewerManage?.candidates ?? []).map((candidate) => ({
+              value: candidate.user_id,
+              label: `${candidate.full_name} (${candidate.email})${candidate.member_role === "observer" ? " — наблюдатель" : ""}`,
+            }))}
+          />
+          <Select
+            style={{ width: "100%" }}
+            value={addReviewerState}
+            onChange={(value) => setAddReviewerState(value as "R" | "LR")}
+            options={[
+              { value: "R", label: "R — ревьювер (выдаёт замечания)" },
+              ...(reviewerManage?.allowed_states.includes("LR")
+                ? [{ value: "LR", label: "LR — лидер-ревьювер (согласует, отправляет CRS)" }]
+                : []),
+            ]}
+          />
+          {!reviewerManage?.allowed_states.includes("LR") && (
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              Второго LR на документ назначает администратор.
+            </Typography.Text>
+          )}
+        </Space>
+      </Modal>
       {reviewEvents.length > 0 && (
         <Card size="small" style={{ marginBottom: 12 }}>
           <Tabs

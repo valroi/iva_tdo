@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.deps import get_current_user, has_permission, is_main_admin
 from app.models import (
+    DocumentReviewer,
     Comment,
     CompanyType,
     Document,
@@ -525,6 +526,7 @@ def delete_project(
                 db.query(Comment).filter(Comment.revision_id.in_(revision_ids)).delete(synchronize_session=False)
                 db.query(Revision).filter(Revision.id.in_(revision_ids)).delete(synchronize_session=False)
             db.query(Document).filter(Document.id.in_(document_ids)).delete(synchronize_session=False)
+        db.query(DocumentReviewer).filter(DocumentReviewer.mdr_id.in_(mdr_ids)).delete(synchronize_session=False)
         db.query(MDRRecord).filter(MDRRecord.id.in_(mdr_ids)).delete(synchronize_session=False)
 
     db.query(ProjectReference).filter(ProjectReference.project_id == project_id).delete()

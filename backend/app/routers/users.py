@@ -20,6 +20,7 @@ from app.deps import (
     require_user_manager,
 )
 from app.models import (
+    DocumentReviewer,
     Comment,
     CommentStatus,
     CompanyType,
@@ -293,6 +294,7 @@ def clear_project_data(
         )
 
     db.query(Document).delete(synchronize_session=False)
+    db.query(DocumentReviewer).delete(synchronize_session=False)
     db.query(MDRRecord).delete(synchronize_session=False)
     db.query(ProjectReference).delete(synchronize_session=False)
     db.query(ReviewMatrixMember).delete(synchronize_session=False)

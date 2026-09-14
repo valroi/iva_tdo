@@ -241,6 +241,31 @@ class ReviewMatrixMember(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class DocumentReviewer(Base):
+    """Ревьювер, добавленный на КОНКРЕТНЫЙ документ сверх матрицы назначений.
+
+    Матрица задаёт состав по «категории + разделу» для всего проекта; по
+    отдельным документам его бывает мало. LR документа добавляет R, админ —
+    R или LR, из участников проекта со стороны заказчика. Назначение действует
+    на текущий круг рассмотрения и все следующие; закрытые круги не трогает
+    (та же отсечка по created_at, что у строк матрицы).
+
+    Удаление мягкое (removed_at): в истории остаётся, кто и когда подключал
+    и снимал человека.
+    """
+
+    __tablename__ = "document_reviewers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    mdr_id: Mapped[int] = mapped_column(ForeignKey("mdr_records.id"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    state: Mapped[str] = mapped_column(String(2), nullable=False, default="R")
+    added_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    removed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, index=True)
+    removed_by_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+
 class MDRRecord(Base):
     __tablename__ = "mdr_records"
 

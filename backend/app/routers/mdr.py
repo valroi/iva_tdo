@@ -15,6 +15,7 @@ from openpyxl import Workbook, load_workbook
 from app.database import get_db
 from app.deps import get_current_user, has_permission, require_permissions
 from app.models import (
+    DocumentReviewer,
     CarryOverDecision,
     Comment,
     CommentAttachment,
@@ -38,6 +39,9 @@ from app.schemas import (
     CipherTemplateRead,
     CipherTemplateUpsert,
     MDRChildCreate,
+    MDRMovePayload,
+    MDRMovePreview,
+    MDRMovePreviewRevision,
     MDRCreate,
     MDRRead,
     MDRUpdate,
@@ -529,6 +533,178 @@ def _next_serial(value: str) -> str:
     return f"{raw}1" if raw else "1"
 
 
+# Статусы, при которых у документа идёт работа по ревизии: перенос в это
+# время меняет состав ревьюверов прямо посреди круга — предупреждаем.
+_ACTIVE_REVISION_STATUSES = {
+    "UPLOADED_WAITING_TDO",
+    "UNDER_REVIEW",
+    "SUBMITTED",
+    "OWNER_COMMENTS_SENT",
+    "CONTRACTOR_REPLY_I",
+    "CONTRACTOR_REPLY_A",
+}
+
+
+def _load_move(db: Session, *, mdr_id: int, parent_id: int | None, current_user: User) -> tuple[MDRRecord, MDRRecord | None]:
+    """Проверки переноса документа между уровнями структуры проекта."""
+    if current_user.role.value != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Переносить документы между уровнями структуры может только администратор",
+        )
+    mdr = db.query(MDRRecord).filter(MDRRecord.id == mdr_id).first()
+    if mdr is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Документ не найден")
+    if parent_id is None:
+        return mdr, None
+    if parent_id == mdr.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Нельзя вложить документ сам в себя")
+    target = db.query(MDRRecord).filter(MDRRecord.id == parent_id).first()
+    if target is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Головной документ не найден")
+    if target.project_code != mdr.project_code:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Документы из разных проектов — перенос между проектами не поддерживается",
+        )
+    if target.parent_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{target.doc_number} сам является вложенным — вложенность только в один уровень",
+        )
+    children = db.query(MDRRecord.id).filter(MDRRecord.parent_id == mdr.id).count()
+    if children:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"У {mdr.doc_number} есть вложенные документы ({children}) — "
+                f"сначала вынесите их на верхний уровень"
+            ),
+        )
+    return mdr, target
+
+
+def _reviewer_labels(db: Session, *, project: Project | None, mdr: MDRRecord) -> list[str]:
+    if project is None:
+        return []
+    from app.routers.documents import _document_reviewers
+
+    items = _document_reviewers(db, project_id=project.id, mdr=mdr)
+    users = {u.id: u for u in db.query(User).filter(User.id.in_([i.user_id for i in items])).all()} if items else {}
+    labels = [
+        f"{(users[i.user_id].full_name or users[i.user_id].email)} — {i.state}"
+        for i in sorted(items, key=lambda it: (it.state != "LR", it.user_id))
+        if i.user_id in users
+    ]
+    return labels
+
+
+@router.get("/{mdr_id}/move-preview", response_model=MDRMovePreview)
+def preview_mdr_move(
+    mdr_id: int,
+    parent_id: int | None = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Что изменится при переносе: активные ревизии и состав ревьюверов
+    до и после — показывается админу перед подтверждением."""
+    mdr, target = _load_move(db, mdr_id=mdr_id, parent_id=parent_id, current_user=current_user)
+    project = db.query(Project).filter(Project.code == mdr.project_code).first()
+    current_parent = db.query(MDRRecord).filter(MDRRecord.id == mdr.parent_id).first() if mdr.parent_id else None
+
+    active: list[MDRMovePreviewRevision] = []
+    document = db.query(Document).filter(Document.mdr_id == mdr.id).first()
+    if document is not None:
+        latest = (
+            db.query(Revision)
+            .filter(Revision.document_id == document.id)
+            .order_by(Revision.id.desc())
+            .first()
+        )
+        if latest is not None and latest.status in _ACTIVE_REVISION_STATUSES and latest.review_code is None:
+            active.append(MDRMovePreviewRevision(revision_code=latest.revision_code, status=latest.status))
+
+    before = _reviewer_labels(db, project=project, mdr=mdr)
+    original_parent = mdr.parent_id
+    # Состав «после» считаем на лету, не записывая перенос в базу.
+    with db.no_autoflush:
+        mdr.parent_id = target.id if target is not None else None
+        after = _reviewer_labels(db, project=project, mdr=mdr)
+        mdr.parent_id = original_parent
+
+    warnings: list[str] = []
+    if target is not None:
+        warnings.append(
+            f"Документ станет вложенным в {target.doc_number} и будет рассматриваться составом головного документа."
+        )
+    else:
+        warnings.append(
+            "Документ станет самостоятельным: рассматривать его будет состав по его собственной категории и разделу."
+        )
+    if active and before != after:
+        warnings.append(
+            "По документу идёт работа (ревизия "
+            + ", ".join(f"{r.revision_code}" for r in active)
+            + ") — текущий круг сразу перейдёт к новому составу ревьюверов."
+        )
+    if not any(label.endswith("— LR") for label in after):
+        warnings.append("После переноса у документа не будет LR — согласовать его и отправить CRS будет некому.")
+    warnings.append("Шифр документа не меняется.")
+
+    return MDRMovePreview(
+        mdr_id=mdr.id,
+        doc_number=mdr.doc_number,
+        from_parent=current_parent.doc_number if current_parent else None,
+        to_parent=target.doc_number if target else None,
+        active_revisions=active,
+        reviewers_before=before,
+        reviewers_after=after,
+        warnings=warnings,
+    )
+
+
+@router.post("/{mdr_id}/move", response_model=MDRRead)
+def move_mdr(
+    mdr_id: int,
+    payload: MDRMovePayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Перенос документа во вложенные к другому документу или на верхний уровень.
+
+    Шифр не меняется: он уже фигурирует в выпущенных ТРМ, CRS и переписке.
+    Меняется только привязка к головному документу, а с ней — состав
+    ревьюверов (у вложенного он берётся от головного, см. _matrix_source).
+    """
+    mdr, target = _load_move(db, mdr_id=mdr_id, parent_id=payload.parent_id, current_user=current_user)
+    new_parent_id = target.id if target is not None else None
+    if mdr.parent_id == new_parent_id:
+        return mdr
+    old_parent = db.query(MDRRecord).filter(MDRRecord.id == mdr.parent_id).first() if mdr.parent_id else None
+
+    dates_payload = dict(mdr.dates or {})
+    history = list(dates_payload.get("update_history") or [])
+    history.append(
+        {
+            "updated_at": datetime.utcnow().isoformat(),
+            "updated_by": current_user.email,
+            "changed_fields": {
+                "parent_id": {
+                    "from": old_parent.doc_number if old_parent else None,
+                    "to": target.doc_number if target else None,
+                }
+            },
+        }
+    )
+    dates_payload["update_history"] = history
+    mdr.dates = dates_payload
+    mdr.parent_id = new_parent_id
+    db.add(mdr)
+    db.commit()
+    db.refresh(mdr)
+    return mdr
+
+
 @router.post("/{parent_id}/child", response_model=MDRRead, status_code=status.HTTP_201_CREATED)
 def create_child_mdr(
     parent_id: int,
@@ -859,6 +1035,10 @@ def _purge_mdr_tree(db: Session, root: MDRRecord) -> list[str]:
     # Контекстные уведомления по шифрам (без revision_id).
     if doc_numbers:
         db.query(Notification).filter(Notification.document_num.in_(doc_numbers)).delete(synchronize_session=False)
+
+    # Ревьюверы, добавленные на документ, ссылаются на mdr_records — без этой
+    # зачистки Postgres отобьёт удаление ForeignKeyViolation (см. Подводные камни).
+    db.query(DocumentReviewer).filter(DocumentReviewer.mdr_id.in_(mdr_ids)).delete(synchronize_session=False)
 
     # Сначала вложенные, потом родитель — parent_id ссылается на mdr_records.
     db.query(MDRRecord).filter(MDRRecord.parent_id == root.id).delete(synchronize_session=False)

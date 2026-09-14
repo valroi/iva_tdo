@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.auth import TokenError, decode_token
 from app.config import get_settings
 from app.database import get_db
-from app.models import CompanyType, ReviewMatrixMember, User, UserRole
+from app.models import CompanyType, ReviewMatrixMember, User, UserRole, DocumentReviewer
 
 bearer_scheme = HTTPBearer(auto_error=False)
 settings = get_settings()
@@ -133,6 +133,15 @@ def matrix_permission_grants(db: Session, user: User) -> dict[str, bool]:
         row[0]
         for row in db.query(ReviewMatrixMember.state)
         .filter(ReviewMatrixMember.user_id == user.id, ReviewMatrixMember.level == 1)
+        .all()
+    }
+    # Ревьювер, добавленный на отдельный документ, должен получить те же
+    # права, что и назначенный по матрице, — иначе кнопки замечаний у него
+    # не появятся. Какие именно документы ему доступны, проверяют эндпоинты.
+    states |= {
+        row[0]
+        for row in db.query(DocumentReviewer.state)
+        .filter(DocumentReviewer.user_id == user.id, DocumentReviewer.removed_at.is_(None))
         .all()
     }
     if not states:

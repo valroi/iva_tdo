@@ -26,7 +26,6 @@ from app.models import (
     MDRRecord,
     Notification,
     ReviewEvent,
-    ReviewMatrixMember,
     Revision,
     RevisionReviewerState,
 )
@@ -36,12 +35,6 @@ logger = logging.getLogger("deadline_reminders")
 # На владельческой стороне ревизия ещё «живая» для рассмотрения.
 _OPEN_OWNER_STATUSES = {"UNDER_REVIEW", "OWNER_COMMENTS_SENT", "CONTRACTOR_REPLY_I"}
 _REMIND_WITHIN_DAYS = 1  # напоминаем, когда осталось 0..1 день
-
-
-def _matrix_discipline(mdr: MDRRecord) -> str | None:
-    if (mdr.category or "").upper() == "SE":
-        return "SE"
-    return mdr.discipline_code
 
 
 def scan_and_notify(db: Session) -> int:
@@ -77,18 +70,13 @@ def scan_and_notify(db: Session) -> int:
         if project is None:
             continue
         project_id = project.id
-        discipline = _matrix_discipline(mdr)
+        # Состав — из единого помощника: учитывает пару «категория + раздел»,
+        # головной документ у вложенных, ревьюверов, добавленных на документ,
+        # и отсечку по дате назначения. Раньше здесь был свой поиск только по
+        # разделу, и PF-ревьюверы получали напоминания по SE-документам.
+        from app.routers.documents import _document_reviewers
 
-        members = (
-            db.query(ReviewMatrixMember)
-            .filter(
-                ReviewMatrixMember.project_id == project_id,
-                ReviewMatrixMember.discipline_code == discipline,
-                ReviewMatrixMember.level == 1,
-                ReviewMatrixMember.state.in_(["LR", "R"]),
-            )
-            .all()
-        )
+        members = _document_reviewers(db, project_id=project_id, mdr=mdr, revision=revision)
         for member in members:
             # Задача закрыта этим ревьюером? (нет замечаний / оставил замечание)
             state = (

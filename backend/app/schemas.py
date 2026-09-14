@@ -245,6 +245,28 @@ class MDRChildCreate(BaseModel):
     doc_type: str | None = None
 
 
+class MDRMovePayload(BaseModel):
+    """Перенос документа: parent_id — головной документ; None — верхний уровень."""
+
+    parent_id: int | None = None
+
+
+class MDRMovePreviewRevision(BaseModel):
+    revision_code: str
+    status: str
+
+
+class MDRMovePreview(BaseModel):
+    mdr_id: int
+    doc_number: str
+    from_parent: str | None = None
+    to_parent: str | None = None
+    active_revisions: list[MDRMovePreviewRevision] = Field(default_factory=list)
+    reviewers_before: list[str] = Field(default_factory=list)
+    reviewers_after: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class MDRUpdate(BaseModel):
     # Поля шифра: редактируемы, чтобы можно было исправить ошибочно
     # созданный документ (шифр пересобирается на фронте, бэк проверяет
@@ -839,6 +861,32 @@ class ReviewerStateRead(BaseModel):
     no_comments: bool
     has_comments: bool
     decided_at: datetime | None = None
+    # matrix — назначен матрицей; added — добавлен на документ LR/админом.
+    source: str = "matrix"
+    assignment_id: int | None = None
+    added_by_name: str | None = None
+    can_remove: bool = False
+
+
+class DocumentReviewerCandidate(BaseModel):
+    user_id: int
+    full_name: str
+    email: str
+    member_role: str | None = None
+
+
+class DocumentReviewerManageRead(BaseModel):
+    revision_id: int
+    document_num: str
+    can_add: bool
+    # LR документа может добавить только R; админ — R или LR.
+    allowed_states: list[str]
+    candidates: list[DocumentReviewerCandidate]
+
+
+class DocumentReviewerAdd(BaseModel):
+    user_id: int
+    state: str = Field(default="R", pattern="^(LR|R)$")
 
 
 class RevisionReviewerSummary(BaseModel):

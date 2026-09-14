@@ -17,6 +17,7 @@ import {
   importMdr,
   updateMdr,
 } from "../api";
+import MoveDocumentModal from "../components/MoveDocumentModal";
 import type { CipherTemplateField, MDRRecord, ProjectItem, ProjectReference, ReviewMatrixMember, User } from "../types";
 import { formatDateRu } from "../utils/datetime";
 
@@ -82,6 +83,8 @@ export default function MdrPage({
     [mdr, deletingMdrId],
   );
   const [childParent, setChildParent] = useState<MDRRecord | null>(null);
+  // Перенос во вложенные / на верхний уровень — только админ.
+  const [movingDoc, setMovingDoc] = useState<MDRRecord | null>(null);
   const [childSubmitting, setChildSubmitting] = useState(false);
   const [search, setSearch] = useState("");
   // Реестр сужается двумя способами: клик по узлу дерева (документ + его
@@ -392,6 +395,11 @@ export default function MdrPage({
                     }}
                   >
                     + Вложенный
+                  </Button>
+                )}
+                {isAdmin && (
+                  <Button size="small" onClick={() => setMovingDoc(row)}>
+                    Переместить
                   </Button>
                 )}
                 {isAdmin && (
@@ -1196,6 +1204,13 @@ export default function MdrPage({
           </Form.Item>
         </Form>
       </Modal>
+      <MoveDocumentModal
+        open={movingDoc !== null}
+        doc={movingDoc}
+        projectDocs={mdr}
+        onClose={() => setMovingDoc(null)}
+        onMoved={onCreated}
+      />
     </>
   );
 }

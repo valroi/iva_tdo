@@ -224,6 +224,30 @@ export function createChildMdr(
   });
 }
 
+export interface MdrMovePreview {
+  mdr_id: number;
+  doc_number: string;
+  from_parent: string | null;
+  to_parent: string | null;
+  active_revisions: Array<{ revision_code: string; status: string }>;
+  reviewers_before: string[];
+  reviewers_after: string[];
+  warnings: string[];
+}
+
+/** Что изменится при переносе документа (parentId = null — верхний уровень). */
+export function previewMdrMove(mdrId: number, parentId: number | null): Promise<MdrMovePreview> {
+  const qs = parentId == null ? "" : `?parent_id=${parentId}`;
+  return request<MdrMovePreview>(`/mdr/${mdrId}/move-preview${qs}`);
+}
+
+export function moveMdr(mdrId: number, parentId: number | null): Promise<MDRRecord> {
+  return request<MDRRecord>(`/mdr/${mdrId}/move`, {
+    method: "POST",
+    body: JSON.stringify({ parent_id: parentId }),
+  });
+}
+
 export function updateMdr(mdrId: number, payload: Record<string, unknown>): Promise<MDRRecord> {
   return request<MDRRecord>(`/mdr/${mdrId}`, {
     method: "PUT",
@@ -419,6 +443,44 @@ export interface ReviewerStateItem {
   no_comments: boolean;
   has_comments: boolean;
   decided_at: string | null;
+  /** matrix — назначен матрицей; added — добавлен на документ LR/админом. */
+  source?: "matrix" | "added";
+  assignment_id?: number | null;
+  added_by_name?: string | null;
+  can_remove?: boolean;
+}
+
+export interface DocumentReviewerCandidate {
+  user_id: number;
+  full_name: string;
+  email: string;
+  member_role?: string | null;
+}
+
+export interface DocumentReviewerManage {
+  revision_id: number;
+  document_num: string;
+  can_add: boolean;
+  allowed_states: Array<"R" | "LR">;
+  candidates: DocumentReviewerCandidate[];
+}
+
+export function getReviewerManagement(revisionId: number): Promise<DocumentReviewerManage> {
+  return request<DocumentReviewerManage>(`/revisions/${revisionId}/reviewers/manage`);
+}
+
+export function addDocumentReviewer(
+  revisionId: number,
+  payload: { user_id: number; state: "R" | "LR" },
+): Promise<RevisionReviewerSummary> {
+  return request<RevisionReviewerSummary>(`/revisions/${revisionId}/reviewers`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function removeDocumentReviewer(revisionId: number, assignmentId: number): Promise<RevisionReviewerSummary> {
+  return request<RevisionReviewerSummary>(`/revisions/${revisionId}/reviewers/${assignmentId}`, { method: "DELETE" });
 }
 
 export interface RevisionReviewerSummary {

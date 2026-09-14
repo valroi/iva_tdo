@@ -21,6 +21,7 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
 import { formatDateTimeRu } from "../utils/datetime";
+import MoveDocumentModal from "../components/MoveDocumentModal";
 
 import {
   addProjectMember,
@@ -169,6 +170,8 @@ export default function ProjectsPage({
   // Фильтр таблицы документов по клику в дереве проекта (item 5).
   const [treeFilter, setTreeFilter] = useState<DocumentsTreeFilter>(null);
   const isAdmin = currentUser.role === "admin";
+  // Перенос документа, начатый перетаскиванием в дереве структуры проекта.
+  const [treeMove, setTreeMove] = useState<{ doc: MDRRecord; parentId: number | null } | null>(null);
   const canManageMatrix = isAdmin || currentUser.permissions.can_manage_review_matrix;
   const canEditReferences = isAdmin || currentUser.permissions.can_edit_project_references;
   const canManageMembers =
@@ -736,10 +739,41 @@ export default function ProjectsPage({
           />
         </Space>
         <Divider style={{ margin: "0 0 12px 0" }} />
+        {isAdmin && (
+          <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
+            Перетащите документ на другой документ — он станет вложенным; в промежуток между документами
+            верхнего уровня — вынесется на верхний уровень. Перед переносом покажем, что изменится.
+          </Typography.Paragraph>
+        )}
         <Tree
           defaultExpandAll
           treeData={hierarchyTree}
           style={{ marginBottom: 16 }}
+          draggable={
+            // Только узлы документов (mdr-<id>): корень «Реестр документов» (mdr-root)
+            // и категории перетаскивать нельзя.
+            isAdmin ? { icon: false, nodeDraggable: (node) => /^mdr-\d+$/.test(String(node.key)) } : false
+          }
+          onDrop={(info) => {
+            const dragKey = String(info.dragNode.key);
+            if (!/^mdr-\d+$/.test(dragKey)) return;
+            const doc = projectMdr.find((row) => row.id === Number(dragKey.slice(4)));
+            if (!doc) return;
+            const dropKey = String(info.node.key);
+            const dropDoc = /^mdr-\d+$/.test(dropKey) ? projectMdr.find((row) => row.id === Number(dropKey.slice(4))) : null;
+            let parentId: number | null;
+            if (dropDoc && !info.dropToGap) {
+              // Бросили на документ: вкладываем в него (на вложенный — к его головному).
+              parentId = dropDoc.parent_id ?? dropDoc.id;
+            } else if (dropDoc) {
+              // Бросили в промежуток: среди вложенных — к их головному, иначе верхний уровень.
+              parentId = dropDoc.parent_id ?? null;
+            } else {
+              parentId = null; // на категорию или корень — верхний уровень
+            }
+            if ((doc.parent_id ?? null) === parentId) return;
+            setTreeMove({ doc, parentId });
+          }}
           onSelect={(selectedKeys) => {
             // Клик в дереве фильтрует таблицу документов во вкладке «Ревизии и
             // комментарии» (item 5): по дисциплине/категории — её документы;
@@ -773,6 +807,14 @@ export default function ProjectsPage({
             });
             setActiveTabKey("documents");
           }}
+        />
+        <MoveDocumentModal
+          open={treeMove !== null}
+          doc={treeMove?.doc ?? null}
+          projectDocs={projectMdr}
+          presetParentId={treeMove ? treeMove.parentId : undefined}
+          onClose={() => setTreeMove(null)}
+          onMoved={onReload}
         />
         <Tabs
           activeKey={activeTabKey}

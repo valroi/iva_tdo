@@ -77,6 +77,7 @@ export default function DashboardPage({
     NEW_REVISION_FOR_TDO: "Новая ревизия в очереди ТДО",
     DOC_OVERDUE_PLAN_START: "Просрочка старта разработки",
     OWNER_REVIEW_PENDING: "Требуется отработка замечаний до отправки CRS",
+    REVIEWER_ADDED: "Вас добавили ревьювером на документ",
   };
   useEffect(() => {
     if (!currentUser.permissions.can_process_tdo_queue) return;
