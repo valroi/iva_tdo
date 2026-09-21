@@ -3070,6 +3070,144 @@ def review_actions_report_xlsx(
     )
 
 
+# Русские названия статусов ревизии для выгрузок. В UI тот же список живёт в
+# utils/revisionHints.ts — при добавлении статуса поправить оба места.
+_EXPORT_STATUS_LABELS = {
+    "REVISION_CREATED": "Ревизия создана",
+    "UPLOADED_WAITING_TDO": "Загружен PDF — ждёт ТДО",
+    "CANCELLED_BY_TDO": "Возвращена ТДО",
+    "SUBMITTED": "Передана заказчику",
+    "UNDER_REVIEW": "На рассмотрении заказчиком",
+    "OWNER_COMMENTS_SENT": "Замечания направлены подрядчику",
+    "CONTRACTOR_REPLY_I": "Замечания обсуждаются (I)",
+    "CONTRACTOR_REPLY_A": "Ответ подрядчика — принято (A)",
+}
+
+
+@router.get("/reports/documents-registry.xlsx")
+def export_documents_registry_xlsx(
+    project_code: str | None = Query(default=None),
+    category: str | None = Query(default=None),
+    discipline_code: str | None = Query(default=None),
+    document_title: str | None = Query(default=None),
+    release_status: str | None = Query(default=None),
+    revision_status: str | None = Query(default=None),
+    comments_scope: str | None = Query(default=None, pattern="^(ANY|OPEN|NONE)$"),
+    overdue_only: bool = Query(default=False),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Выгрузка реестра документов в Excel по тем же фильтрам, что на экране.
+
+    Данные берём из list_documents_registry — то же место, что рисует таблицу,
+    поэтому фильтры, права и видимость для наблюдателя считаются одинаково в
+    файле и в интерфейсе. Лист «Документы» — строка на документ, лист
+    «Ревизии» — строка на каждую ревизию с её замечаниями.
+    """
+    rows = list_documents_registry(
+        project_code=project_code,
+        category=category,
+        discipline_code=discipline_code,
+        document_title=document_title,
+        release_status=release_status,
+        revision_status=revision_status,
+        comments_scope=comments_scope,
+        overdue_only=overdue_only,
+        for_reporting=False,
+        db=db,
+        current_user=current_user,
+    )
+
+    from io import BytesIO
+
+    from fastapi.responses import StreamingResponse
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+
+    def fmt(value) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, datetime):
+            return value.strftime("%d.%m.%Y %H:%M")
+        if isinstance(value, date):
+            return value.strftime("%d.%m.%Y")
+        return str(value)
+
+    def code(value) -> str:
+        return value.value if hasattr(value, "value") else (value or "")
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Документы"
+    doc_headers = [
+        "Проект", "Категория", "Дисциплина", "Шифр документа", "Название",
+        "Последняя ревизия", "Этап рассмотрения", "Цель выпуска", "Статус выпуска",
+        "Автор", "План выпуска ревизии A", "Факт первой загрузки", "Просрочка",
+        "Замечаний всего", "Открытых замечаний", "Ревизий",
+    ]
+    ws.append(doc_headers)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+    for item in rows:
+        ws.append([
+            item.project_code,
+            item.category,
+            item.discipline_code,
+            item.document_num,
+            item.document_title,
+            item.latest_revision_code or "",
+            _EXPORT_STATUS_LABELS.get(item.latest_revision_status or "", item.latest_revision_status or ""),
+            item.latest_issue_purpose or "",
+            code(item.latest_review_code),
+            item.latest_author_name or "",
+            fmt(item.planned_dev_start),
+            fmt(item.first_upload_date),
+            "Да" if item.is_overdue else "",
+            item.total_comments_count,
+            item.open_comments_count,
+            len(item.revisions),
+        ])
+    for index, width in enumerate([10, 12, 12, 30, 40, 16, 26, 14, 14, 22, 20, 20, 10, 16, 18, 10], start=1):
+        ws.column_dimensions[ws.cell(row=1, column=index).column_letter].width = width
+
+    ws2 = wb.create_sheet("Ревизии")
+    rev_headers = [
+        "Проект", "Шифр документа", "Название", "Ревизия", "Цель выпуска",
+        "Этап рассмотрения", "Код замечаний", "TRM", "Автор", "Создана",
+        "Замечаний", "Открытых",
+    ]
+    ws2.append(rev_headers)
+    for cell in ws2[1]:
+        cell.font = Font(bold=True)
+    for item in rows:
+        for revision in item.revisions:
+            ws2.append([
+                item.project_code,
+                item.document_num,
+                item.document_title,
+                revision.revision_code,
+                revision.issue_purpose,
+                _EXPORT_STATUS_LABELS.get(revision.status or "", revision.status or ""),
+                code(revision.review_code),
+                revision.trm_number or "",
+                revision.author_name or "",
+                fmt(revision.created_at),
+                revision.comments_count,
+                revision.open_comments_count,
+            ])
+    for index, width in enumerate([10, 30, 40, 10, 14, 26, 14, 24, 22, 18, 12, 12], start=1):
+        ws2.column_dimensions[ws2.cell(row=1, column=index).column_letter].width = width
+
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=documents-registry.xlsx"},
+    )
+
+
 @router.get("/reports/comments-export.xlsx")
 def export_comments_xlsx(
     project_code: str | None = Query(default=None),

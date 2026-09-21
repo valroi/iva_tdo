@@ -1344,6 +1344,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack, onOp
                                 comment.parent_id === null &&
                                 comment.contractor_status === "I" &&
                                 comment.backlog_status !== "LR_FINAL_CONFIRM" && (
+                                <Tooltip title="Заказчик не согласен с ответом подрядчика: замечание остаётся обязательным — подрядчик должен исправить и ответить «принято» (A)">
                                 <Button
                                   size="small"
                                   type="primary"
@@ -1351,20 +1352,21 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack, onOp
                                   onClick={async () => {
                                     try {
                                       setBusyCommentId(comment.id);
-                                      message.loading({ content: "Финальное подтверждение...", key: `final_${comment.id}` });
+                                      message.loading({ content: "Фиксируем: замечание остаётся...", key: `final_${comment.id}` });
                                       await ownerCommentDecision(comment.id, { action: "FINAL_CONFIRM" });
-                                      message.success({ content: "LR финально подтвердил замечание", key: `final_${comment.id}` });
+                                      message.success({ content: "Замечание оставлено — подрядчик должен исправить", key: `final_${comment.id}` });
                                       await loadCard();
                                     } catch (error: unknown) {
-                                      const text = error instanceof Error ? error.message : "Не удалось финально подтвердить";
+                                      const text = error instanceof Error ? error.message : "Не удалось оставить замечание в работе";
                                       message.error({ content: text, key: `final_${comment.id}` });
                                     } finally {
                                       setBusyCommentId(null);
                                     }
                                   }}
                                 >
-                                  Подтвердить (LR)
+                                  Не согласен — исправить
                                 </Button>
+                                </Tooltip>
                               )}
                               {/* После «I»-ответа подрядчика LR может либо
                                   финально подтвердить (директивно вернуть в
@@ -1376,6 +1378,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack, onOp
                                 comment.contractor_status === "I" &&
                                 comment.backlog_status !== "LR_FINAL_CONFIRM" &&
                                 comment.status !== "REJECTED" && (
+                                <Tooltip title="Заказчик согласен с ответом подрядчика: замечание снимается, исправлять его не нужно">
                                 <Button
                                   size="small"
                                   danger
@@ -1385,7 +1388,7 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack, onOp
                                       setBusyCommentId(comment.id);
                                       message.loading({ content: "Отклонение замечания...", key: `withdraw_i_${comment.id}` });
                                       await ownerCommentDecision(comment.id, { action: "REJECT", note: "LR согласился с подрядчиком" });
-                                      message.success({ content: "Замечание снято (LR согласился)", key: `withdraw_i_${comment.id}` });
+                                      message.success({ content: "Замечание отклонено — исправлять не нужно", key: `withdraw_i_${comment.id}` });
                                       await loadCard();
                                     } catch (error: unknown) {
                                       const text = error instanceof Error ? error.message : "Не удалось отклонить замечание";
@@ -1395,8 +1398,9 @@ export default function RevisionCardPage({ revisionId, currentUser, onBack, onOp
                                     }
                                   }}
                                 >
-                                  Согласиться (отклонить)
+                                  Отклонить замечание
                                 </Button>
+                                </Tooltip>
                               )}
                             </Space>
                           ),

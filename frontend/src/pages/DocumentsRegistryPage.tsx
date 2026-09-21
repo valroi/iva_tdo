@@ -3,7 +3,7 @@ import { Button, Card, Input, Select, Space, Table, Tag, Tooltip, Typography, Ap
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
 
-import { downloadRevisionAttachmentsArchive, listDocumentsRegistry } from "../api";
+import { downloadDocumentsRegistryExport, downloadRevisionAttachmentsArchive, listDocumentsRegistry } from "../api";
 import ProcessHint from "../components/ProcessHint";
 import type { DocumentRegistryItem, RegistryRevisionItem, User } from "../types";
 import { formatDateRu, formatDateTimeRu } from "../utils/datetime";
@@ -39,6 +39,7 @@ export default function DocumentsRegistryPage({ currentUser, onOpenRevision, onO
   const [rows, setRows] = useState<DocumentRegistryItem[]>([]);
   const [filters, setFilters] = useState<Filters>({ comments_scope: "ANY" });
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const loadData = async (nextFilters: Filters) => {
     setLoading(true);
@@ -280,8 +281,8 @@ export default function DocumentsRegistryPage({ currentUser, onOpenRevision, onO
           />
           <Select
             allowClear
-            placeholder="Шаг воркфлоу"
-            style={{ width: 180 }}
+            placeholder="Этап рассмотрения документа"
+            style={{ width: 230 }}
             options={["REVISION_CREATED", "UPLOADED_WAITING_TDO", "UNDER_REVIEW", "CANCELLED_BY_TDO", "SUBMITTED"].map((value) => ({ value, label: getRuStatusLabel(value) }))}
             onChange={(value) => setFilters((prev) => ({ ...prev, revision_status: value ?? undefined }))}
           />
@@ -309,6 +310,26 @@ export default function DocumentsRegistryPage({ currentUser, onOpenRevision, onO
           <Tooltip title="Обновить реестр с выбранными фильтрами">
             <Button type="primary" onClick={() => void loadData(filters)}>
               Применить фильтр
+            </Button>
+          </Tooltip>
+          <Tooltip title="Выгрузить в Excel документы и их ревизии — ровно те, что отобраны фильтрами">
+            <Button
+              loading={exporting}
+              onClick={async () => {
+                setExporting(true);
+                try {
+                  // В запрос уходят те же фильтры, что и в таблицу, — файл и
+                  // экран всегда показывают одно и то же.
+                  await downloadDocumentsRegistryExport(filters);
+                  message.success("Реестр выгружен в Excel");
+                } catch (error) {
+                  message.error(error instanceof Error ? error.message : "Не удалось выгрузить реестр");
+                } finally {
+                  setExporting(false);
+                }
+              }}
+            >
+              Выгрузить в Excel
             </Button>
           </Tooltip>
         </Space>

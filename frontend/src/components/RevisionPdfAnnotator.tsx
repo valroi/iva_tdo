@@ -776,30 +776,33 @@ export default function RevisionPdfAnnotator({
                           </Button>
                         )}
                         {active.contractor_status === "I" && active.backlog_status !== "LR_FINAL_CONFIRM" && (
+                          <Tooltip title="Заказчик не согласен с ответом подрядчика: замечание остаётся обязательным — подрядчик должен исправить и ответить «принято» (A)">
                           <Button
                             size="small"
                             type="primary"
                             onClick={async () => {
                               await ownerCommentDecision(active.id, { action: "FINAL_CONFIRM" });
-                              message.success("LR подтвердил замечание директивно — подрядчику доступен только статус A");
+                              message.success("Замечание оставлено — подрядчик должен исправить (ответ только «принято»)");
                               await onCreated();
                             }}
                           >
-                            Подтвердить (LR)
+                            Не согласен — исправить
                           </Button>
+                          </Tooltip>
                         )}
                         {/* После «I»-ответа LR может также согласиться с
                             подрядчиком и снять замечание. */}
                         {active.contractor_status === "I" &&
                           active.backlog_status !== "LR_FINAL_CONFIRM" &&
                           active.status !== "REJECTED" && (
+                          <Tooltip title="Заказчик согласен с ответом подрядчика: замечание снимается, исправлять его не нужно">
                           <Button
                             size="small"
                             danger
                             onClick={async () => {
                               try {
                                 await ownerCommentDecision(active.id, { action: "REJECT", note: "LR согласился с подрядчиком" });
-                                message.success("Замечание снято — LR согласился с подрядчиком");
+                                message.success("Замечание отклонено — исправлять не нужно");
                                 await onCreated();
                               } catch (error: unknown) {
                                 const text = error instanceof Error ? error.message : "Не удалось снять замечание";
@@ -807,8 +810,9 @@ export default function RevisionPdfAnnotator({
                               }
                             }}
                           >
-                            Согласиться (отклонить)
+                            Отклонить замечание
                           </Button>
+                          </Tooltip>
                         )}
                       </>
                     );

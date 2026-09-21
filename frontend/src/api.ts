@@ -329,6 +329,32 @@ export function listDocuments(): Promise<DocumentItem[]> {
   return request<DocumentItem[]>("/documents");
 }
 
+export interface DocumentsRegistryFilters {
+  project_code?: string;
+  category?: string;
+  discipline_code?: string;
+  document_title?: string;
+  release_status?: string;
+  revision_status?: string;
+  comments_scope?: "ANY" | "OPEN" | "NONE";
+  overdue_only?: boolean;
+}
+
+/** Выгрузка реестра документов в Excel по тем же фильтрам, что на экране. */
+export async function downloadDocumentsRegistryExport(filters?: DocumentsRegistryFilters): Promise<void> {
+  const search = new URLSearchParams();
+  if (filters?.project_code) search.set("project_code", filters.project_code);
+  if (filters?.category) search.set("category", filters.category);
+  if (filters?.discipline_code) search.set("discipline_code", filters.discipline_code);
+  if (filters?.document_title) search.set("document_title", filters.document_title);
+  if (filters?.release_status) search.set("release_status", filters.release_status);
+  if (filters?.revision_status) search.set("revision_status", filters.revision_status);
+  if (filters?.comments_scope) search.set("comments_scope", filters.comments_scope);
+  if (filters?.overdue_only) search.set("overdue_only", "true");
+  const blob = await requestBlob(`/reports/documents-registry.xlsx?${search.toString()}`);
+  downloadBlob(blob, "documents-registry.xlsx");
+}
+
 export function listDocumentsRegistry(filters?: {
   project_code?: string;
   category?: string;
