@@ -40,8 +40,10 @@ import {
   revokeUserSession,
   getAdminReviewSlaSettings,
   updateAdminReviewSlaSettings,
+  getAdminAnnouncement,
   getMatrixGapEmails,
   getReviewFlags,
+  updateAdminAnnouncement,
   updateMatrixGapEmails,
   updateReviewFlags,
   clearAllNotifications,
@@ -162,6 +164,13 @@ const permissionPresets: Record<
   },
 };
 
+/** naive UTC с бэкенда → значение поля datetime-local по Москве. */
+function utcToMskInput(value: string): string {
+  const hasTz = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(value);
+  const ms = new Date(hasTz ? value : `${value}Z`).getTime() + 3 * 60 * 60 * 1000;
+  return new Date(ms).toISOString().slice(0, 16);
+}
+
 export default function AdminPage({ currentUser, onGlobalReload }: Props): JSX.Element {
   const [users, setUsers] = useState<User[]>([]);
   const [requests, setRequests] = useState<RegistrationRequest[]>([]);
@@ -170,6 +179,11 @@ export default function AdminPage({ currentUser, onGlobalReload }: Props): JSX.E
   // Кому (кроме админов) уходит сигнал «подрядчик создаёт документ без LR».
   const [matrixGapEmails, setMatrixGapEmails] = useState("");
   const [savingGapEmails, setSavingGapEmails] = useState(false);
+  // Объявление для всех пользователей: дедлайн вводится по Москве.
+  const [announcementEnabled, setAnnouncementEnabled] = useState(false);
+  const [announcementDeadline, setAnnouncementDeadline] = useState("");
+  const [announcementText, setAnnouncementText] = useState("");
+  const [savingAnnouncement, setSavingAnnouncement] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -238,6 +252,10 @@ export default function AdminPage({ currentUser, onGlobalReload }: Props): JSX.E
         setNcLocksCommenting(flags.nc_locks_commenting);
         const gapEmails = await getMatrixGapEmails();
         setMatrixGapEmails(gapEmails.emails);
+        const announcement = await getAdminAnnouncement();
+        setAnnouncementEnabled(announcement.enabled);
+        setAnnouncementText(announcement.text);
+        setAnnouncementDeadline(announcement.deadline ? utcToMskInput(announcement.deadline) : "");
       } catch {
         // ignore for non-main admins
       }
@@ -596,6 +614,67 @@ export default function AdminPage({ currentUser, onGlobalReload }: Props): JSX.E
                     Сохранить SLA
                   </Button>
                 </Form>
+                <Card size="small" style={{ marginTop: 16 }} title="Объявление для всех пользователей">
+                  <Typography.Text type="secondary">
+                    Баннер с обратным отсчётом вверху экрана у всех пользователей, включая экран входа.
+                    Время — по Москве. После срока баннер остаётся и сообщает, что срок истёк.
+                  </Typography.Text>
+                  <Space direction="vertical" style={{ width: "100%", marginTop: 12 }}>
+                    <Space wrap>
+                      <Switch
+                        checked={announcementEnabled}
+                        disabled={!isMainAdmin}
+                        onChange={(checked) => setAnnouncementEnabled(checked)}
+                      />
+                      <Typography.Text>{announcementEnabled ? "Показывается" : "Скрыто"}</Typography.Text>
+                      <Input
+                        type="datetime-local"
+                        style={{ width: 230 }}
+                        value={announcementDeadline}
+                        disabled={!isMainAdmin}
+                        onChange={(event) => setAnnouncementDeadline(event.target.value)}
+                      />
+                      <Typography.Text type="secondary">МСК</Typography.Text>
+                    </Space>
+                    <Input.TextArea
+                      rows={2}
+                      maxLength={255}
+                      showCount
+                      value={announcementText}
+                      disabled={!isMainAdmin}
+                      placeholder="Например: проект будет заморожен — скачайте нужные документы заранее"
+                      onChange={(event) => setAnnouncementText(event.target.value)}
+                    />
+                    <Button
+                      type="primary"
+                      loading={savingAnnouncement}
+                      disabled={!isMainAdmin}
+                      onClick={async () => {
+                        if (announcementEnabled && !announcementDeadline) {
+                          message.error("Укажите дату и время окончания отсчёта");
+                          return;
+                        }
+                        setSavingAnnouncement(true);
+                        try {
+                          const saved = await updateAdminAnnouncement({
+                            enabled: announcementEnabled,
+                            // Поле datetime-local без таймзоны — явно помечаем как Москву.
+                            deadline: announcementDeadline ? `${announcementDeadline}:00+03:00` : null,
+                            text: announcementText,
+                          });
+                          setAnnouncementDeadline(saved.deadline ? utcToMskInput(saved.deadline) : "");
+                          message.success(saved.enabled ? "Объявление показывается всем пользователям" : "Объявление скрыто");
+                        } catch (error) {
+                          message.error(error instanceof Error ? error.message : "Не удалось сохранить объявление");
+                        } finally {
+                          setSavingAnnouncement(false);
+                        }
+                      }}
+                    >
+                      Сохранить объявление
+                    </Button>
+                  </Space>
+                </Card>
                 <Card size="small" style={{ marginTop: 16 }} title="Документы без назначенного LR">
                   <Typography.Text type="secondary">
                     Если подрядчик пытается создать документ по разделу, где в матрице нет

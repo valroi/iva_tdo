@@ -1617,3 +1617,35 @@ export function getFeedSettings(): Promise<{ ai_enabled: boolean; ai_configured:
 export function setFeedSettings(aiEnabled: boolean): Promise<{ ai_enabled: boolean; ai_configured: boolean }> {
   return request(`/feed/settings`, { method: "PUT", body: JSON.stringify({ ai_enabled: aiEnabled }) });
 }
+
+// ---------- Объявление для всех пользователей (баннер с обратным отсчётом)
+export interface Announcement {
+  enabled: boolean;
+  /** naive UTC */
+  deadline: string | null;
+  text: string;
+}
+
+/** Без авторизации — баннер показывается и на экране входа. */
+export function getAnnouncement(): Promise<Announcement> {
+  return request<Announcement>("/auth/announcement");
+}
+
+export function getAdminAnnouncement(): Promise<Announcement> {
+  return request<Announcement>("/users/admin-settings/announcement");
+}
+
+export function updateAdminAnnouncement(payload: { enabled: boolean; deadline: string | null; text: string }): Promise<Announcement> {
+  return request<Announcement>("/users/admin-settings/announcement", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+/** Полная выгрузка проекта (админ): файлы по папкам + реестр Excel. */
+export async function downloadProjectExport(projectId: number, projectCode: string): Promise<void> {
+  const blob = await requestBlob(`/projects/${projectId}/export.zip`);
+  const stamp = new Date().toISOString().slice(0, 10);
+  downloadBlob(blob, `${projectCode}_выгрузка_${stamp}.zip`);
+}
+

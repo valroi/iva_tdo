@@ -26,6 +26,7 @@ import {
 } from "./api";
 import ChangePasswordModal from "./components/ChangePasswordModal";
 import LoginForm from "./components/LoginForm";
+import AnnouncementBanner from "./components/AnnouncementBanner";
 import DashboardPage from "./pages/DashboardPage";
 import HelpPage from "./pages/HelpPage";
 import NotificationsPage from "./pages/NotificationsPage";
@@ -410,7 +411,12 @@ function MainApp(): JSX.Element {
   };
 
   if (!authenticated) {
-    return <LoginForm onLoggedIn={() => setAuthenticated(true)} />;
+    return (
+      <>
+        <AnnouncementBanner floating />
+        <LoginForm onLoggedIn={() => setAuthenticated(true)} />
+      </>
+    );
   }
 
   return (
@@ -466,6 +472,7 @@ function MainApp(): JSX.Element {
         </Sider>
 
         <Layout className="app-main-layout">
+          <AnnouncementBanner />
           <Header className="app-header">
             <Space style={{ justifyContent: "space-between", width: "100%", alignItems: "center" }}>
               <div style={{ lineHeight: 1 }}>

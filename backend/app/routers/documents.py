@@ -3084,6 +3084,172 @@ _EXPORT_STATUS_LABELS = {
 }
 
 
+def _xl_fmt(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.strftime("%d.%m.%Y %H:%M")
+    if isinstance(value, date):
+        return value.strftime("%d.%m.%Y")
+    return str(value)
+
+
+def _xl_code(value) -> str:
+    return value.value if hasattr(value, "value") else (value or "")
+
+
+def _write_registry_sheets(
+    wb,
+    rows: list,
+    *,
+    extra_doc_columns: list[str] | None = None,
+    extra_doc_values: dict[int, list[str]] | None = None,
+    extra_rev_columns: list[str] | None = None,
+    extra_rev_values: dict[int, list[str]] | None = None,
+) -> None:
+    """Листы «Документы» и «Ревизии» по строкам list_documents_registry.
+
+    Общие для кнопки «Выгрузить в Excel» в реестре и полной выгрузки проекта.
+    extra_* — дополнительные колонки справа (например, путь к папке в архиве):
+    ключ — document_id для документов и revision.id для ревизий.
+    """
+    from openpyxl.styles import Font
+
+    extra_doc_columns = extra_doc_columns or []
+    extra_rev_columns = extra_rev_columns or []
+    extra_doc_values = extra_doc_values or {}
+    extra_rev_values = extra_rev_values or {}
+
+    ws = wb.active
+    ws.title = "Документы"
+    ws.append([
+        "Проект", "Категория", "Дисциплина", "Шифр документа", "Название",
+        "Последняя ревизия", "Этап рассмотрения", "Цель выпуска", "Статус выпуска",
+        "Автор", "План выпуска ревизии A", "Факт первой загрузки", "Просрочка",
+        "Замечаний всего", "Открытых замечаний", "Ревизий",
+    ] + extra_doc_columns)
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+    for item in rows:
+        ws.append([
+            item.project_code,
+            item.category,
+            item.discipline_code,
+            item.document_num,
+            item.document_title,
+            item.latest_revision_code or "",
+            _EXPORT_STATUS_LABELS.get(item.latest_revision_status or "", item.latest_revision_status or ""),
+            item.latest_issue_purpose or "",
+            _xl_code(item.latest_review_code),
+            item.latest_author_name or "",
+            _xl_fmt(item.planned_dev_start),
+            _xl_fmt(item.first_upload_date),
+            "Да" if item.is_overdue else "",
+            item.total_comments_count,
+            item.open_comments_count,
+            len(item.revisions),
+        ] + extra_doc_values.get(item.document_id, [""] * len(extra_doc_columns)))
+    doc_widths = [10, 12, 12, 30, 40, 16, 26, 14, 14, 22, 20, 20, 10, 16, 18, 10] + [40] * len(extra_doc_columns)
+    for index, width in enumerate(doc_widths, start=1):
+        ws.column_dimensions[ws.cell(row=1, column=index).column_letter].width = width
+
+    ws2 = wb.create_sheet("Ревизии")
+    ws2.append([
+        "Проект", "Шифр документа", "Название", "Ревизия", "Цель выпуска",
+        "Этап рассмотрения", "Код замечаний", "TRM", "Автор", "Создана",
+        "Замечаний", "Открытых",
+    ] + extra_rev_columns)
+    for cell in ws2[1]:
+        cell.font = Font(bold=True)
+    for item in rows:
+        for revision in item.revisions:
+            ws2.append([
+                item.project_code,
+                item.document_num,
+                item.document_title,
+                revision.revision_code,
+                revision.issue_purpose,
+                _EXPORT_STATUS_LABELS.get(revision.status or "", revision.status or ""),
+                _xl_code(revision.review_code),
+                revision.trm_number or "",
+                revision.author_name or "",
+                _xl_fmt(revision.created_at),
+                revision.comments_count,
+                revision.open_comments_count,
+            ] + extra_rev_values.get(revision.id, [""] * len(extra_rev_columns)))
+    rev_widths = [10, 30, 40, 10, 14, 26, 14, 24, 22, 18, 12, 12] + [50] * len(extra_rev_columns)
+    for index, width in enumerate(rev_widths, start=1):
+        ws2.column_dimensions[ws2.cell(row=1, column=index).column_letter].width = width
+
+
+def _write_comments_sheet(db: Session, ws, records: list) -> None:
+    """Таблица «замечания и ответы»: строка на каждое замечание и каждый ответ.
+
+    Общая для кнопки выгрузки замечаний и полной выгрузки проекта — колонки
+    совпадают. records — кортежи (Comment, Revision, Document, MDRRecord, User).
+    Шапка пишется следом за тем, что уже есть на листе (над ней может стоять
+    «форма» с реквизитами документа).
+    """
+    from openpyxl.styles import Font
+
+    status_label = {
+        "OPEN": "Открыто",
+        "IN_PROGRESS": "В работе",
+        "RESOLVED": "Устранено",
+        "REJECTED": "Отклонено",
+    }
+    contractor_label = {"A": "Согласен (A)", "I": "Не согласен (I)"}
+    side_label = {"owner": "Заказчик", "contractor": "Подрядчик", "admin": "Администратор"}
+    att_counts = _comment_attachment_counts(db, [c for c, *_ in records])
+
+    headers = [
+        "Проект", "Документ", "Ревизия", "Тип", "№ замечания", "ID", "Родит. ID",
+        "Автор (ФИО)", "Сторона", "Текст", "Код замечания", "Статус",
+        "Ответ подрядчика", "Файл", "В CRS", "№ CRS", "Опубл. подрядчику",
+        "Дата создания", "Дата решения",
+    ]
+    ws.append(headers)
+    # Номер строки шапки берём ПОСЛЕ append: на пустом листе openpyxl пишет
+    # в строку 1, а max_row до записи тоже 1 — раньше жирным выделялась
+    # первая строка данных вместо шапки.
+    header_row_idx = ws.max_row
+    for cell in ws[header_row_idx]:
+        cell.font = Font(bold=True)
+
+    def fmt(dt) -> str:
+        return dt.strftime("%Y-%m-%d %H:%M") if dt else ""
+
+    for comment, revision, document, mdr, author in records:
+        is_reply = comment.parent_id is not None
+        author_name = (author.full_name or author.email) if author else "—"
+        side = side_label.get(author.company_type.value, "—") if author and author.company_type else "—"
+        ws.append([
+            mdr.project_code,
+            document.document_num,
+            revision.revision_code,
+            "Ответ" if is_reply else "Замечание",
+            comment.remark_number or "",
+            comment.id,
+            comment.parent_id or "",
+            author_name,
+            side,
+            comment.text or "",
+            (comment.review_code.value if comment.review_code else ""),
+            status_label.get(comment.status.value if comment.status else "", ""),
+            contractor_label.get(comment.contractor_status.value if comment.contractor_status else "", ""),
+            "Да" if att_counts.get(comment.id) else "",
+            "Да" if comment.in_crs else "",
+            comment.crs_number or "",
+            "Да" if comment.is_published_to_contractor else "",
+            fmt(comment.created_at),
+            fmt(comment.resolved_at),
+        ])
+
+    widths = [10, 26, 8, 12, 16, 8, 10, 26, 14, 60, 14, 12, 18, 7, 8, 14, 16, 18, 18]
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[ws.cell(row=header_row_idx, column=i).column_letter].width = w
+
+
 @router.get("/reports/documents-registry.xlsx")
 def export_documents_registry_xlsx(
     project_code: str | None = Query(default=None),
@@ -3124,79 +3290,8 @@ def export_documents_registry_xlsx(
     from openpyxl import Workbook
     from openpyxl.styles import Font
 
-    def fmt(value) -> str:
-        if value is None:
-            return ""
-        if isinstance(value, datetime):
-            return value.strftime("%d.%m.%Y %H:%M")
-        if isinstance(value, date):
-            return value.strftime("%d.%m.%Y")
-        return str(value)
-
-    def code(value) -> str:
-        return value.value if hasattr(value, "value") else (value or "")
-
     wb = Workbook()
-    ws = wb.active
-    ws.title = "Документы"
-    doc_headers = [
-        "Проект", "Категория", "Дисциплина", "Шифр документа", "Название",
-        "Последняя ревизия", "Этап рассмотрения", "Цель выпуска", "Статус выпуска",
-        "Автор", "План выпуска ревизии A", "Факт первой загрузки", "Просрочка",
-        "Замечаний всего", "Открытых замечаний", "Ревизий",
-    ]
-    ws.append(doc_headers)
-    for cell in ws[1]:
-        cell.font = Font(bold=True)
-    for item in rows:
-        ws.append([
-            item.project_code,
-            item.category,
-            item.discipline_code,
-            item.document_num,
-            item.document_title,
-            item.latest_revision_code or "",
-            _EXPORT_STATUS_LABELS.get(item.latest_revision_status or "", item.latest_revision_status or ""),
-            item.latest_issue_purpose or "",
-            code(item.latest_review_code),
-            item.latest_author_name or "",
-            fmt(item.planned_dev_start),
-            fmt(item.first_upload_date),
-            "Да" if item.is_overdue else "",
-            item.total_comments_count,
-            item.open_comments_count,
-            len(item.revisions),
-        ])
-    for index, width in enumerate([10, 12, 12, 30, 40, 16, 26, 14, 14, 22, 20, 20, 10, 16, 18, 10], start=1):
-        ws.column_dimensions[ws.cell(row=1, column=index).column_letter].width = width
-
-    ws2 = wb.create_sheet("Ревизии")
-    rev_headers = [
-        "Проект", "Шифр документа", "Название", "Ревизия", "Цель выпуска",
-        "Этап рассмотрения", "Код замечаний", "TRM", "Автор", "Создана",
-        "Замечаний", "Открытых",
-    ]
-    ws2.append(rev_headers)
-    for cell in ws2[1]:
-        cell.font = Font(bold=True)
-    for item in rows:
-        for revision in item.revisions:
-            ws2.append([
-                item.project_code,
-                item.document_num,
-                item.document_title,
-                revision.revision_code,
-                revision.issue_purpose,
-                _EXPORT_STATUS_LABELS.get(revision.status or "", revision.status or ""),
-                code(revision.review_code),
-                revision.trm_number or "",
-                revision.author_name or "",
-                fmt(revision.created_at),
-                revision.comments_count,
-                revision.open_comments_count,
-            ])
-    for index, width in enumerate([10, 30, 40, 10, 14, 26, 14, 24, 22, 18, 12, 12], start=1):
-        ws2.column_dimensions[ws2.cell(row=1, column=index).column_letter].width = width
+    _write_registry_sheets(wb, rows)
 
     buffer = BytesIO()
     wb.save(buffer)
@@ -3251,26 +3346,6 @@ def export_comments_xlsx(
         q = q.filter(MDRRecord.project_code.in_(list(allowed_codes) or ["__none__"]))
     records = q.order_by(MDRRecord.project_code, Document.document_num, Revision.id, Comment.id).all()
 
-    # ФИО автора родительского замечания (для строк-ответов).
-    parent_ids = {c.parent_id for c, *_ in records if c.parent_id}
-    parents = {c.id: c for c in db.query(Comment).filter(Comment.id.in_(parent_ids)).all()} if parent_ids else {}
-    parent_author_ids = {p.author_id for p in parents.values()}
-    parent_authors = (
-        {u.id: u for u in db.query(User).filter(User.id.in_(parent_author_ids)).all()} if parent_author_ids else {}
-    )
-
-    status_label = {
-        "OPEN": "Открыто",
-        "IN_PROGRESS": "В работе",
-        "RESOLVED": "Устранено",
-        "REJECTED": "Отклонено",
-    }
-    contractor_label = {"A": "Согласен (A)", "I": "Не согласен (I)"}
-    side_label = {"owner": "Заказчик", "contractor": "Подрядчик", "admin": "Администратор"}
-
-    # Признак наличия файла у замечания (item 3) — по всем замечаниям выборки.
-    att_counts = _comment_attachment_counts(db, [c for c, *_ in records])
-
     wb = Workbook()
     ws = wb.active
     ws.title = "Замечания"
@@ -3297,49 +3372,7 @@ def export_comments_xlsx(
             ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
         ws.append([])  # пустая строка-разделитель
 
-    header_row_idx = ws.max_row + 1
-    headers = [
-        "Проект", "Документ", "Ревизия", "Тип", "№ замечания", "ID", "Родит. ID",
-        "Автор (ФИО)", "Сторона", "Текст", "Код замечания", "Статус",
-        "Ответ подрядчика", "Файл", "В CRS", "№ CRS", "Опубл. подрядчику",
-        "Дата создания", "Дата решения",
-    ]
-    ws.append(headers)
-    for cell in ws[header_row_idx]:
-        cell.font = Font(bold=True)
-
-    def fmt(dt) -> str:
-        return dt.strftime("%Y-%m-%d %H:%M") if dt else ""
-
-    for comment, revision, document, mdr, author in records:
-        is_reply = comment.parent_id is not None
-        author_name = (author.full_name or author.email) if author else "—"
-        side = side_label.get(author.company_type.value, "—") if author and author.company_type else "—"
-        ws.append([
-            mdr.project_code,
-            document.document_num,
-            revision.revision_code,
-            "Ответ" if is_reply else "Замечание",
-            comment.remark_number or "",
-            comment.id,
-            comment.parent_id or "",
-            author_name,
-            side,
-            comment.text or "",
-            (comment.review_code.value if comment.review_code else ""),
-            status_label.get(comment.status.value if comment.status else "", ""),
-            contractor_label.get(comment.contractor_status.value if comment.contractor_status else "", ""),
-            "Да" if att_counts.get(comment.id) else "",
-            "Да" if comment.in_crs else "",
-            comment.crs_number or "",
-            "Да" if comment.is_published_to_contractor else "",
-            fmt(comment.created_at),
-            fmt(comment.resolved_at),
-        ])
-
-    widths = [10, 26, 8, 12, 16, 8, 10, 26, 14, 60, 14, 12, 18, 7, 8, 14, 16, 18, 18]
-    for i, w in enumerate(widths, start=1):
-        ws.column_dimensions[ws.cell(row=header_row_idx, column=i).column_letter].width = w
+    _write_comments_sheet(db, ws, records)
 
     safe_doc = re.sub(r"[^A-Za-z0-9._-]+", "_", document_num) if document_num else None
     filename = f"comments-{safe_doc}.xlsx" if safe_doc else "comments-export.xlsx"

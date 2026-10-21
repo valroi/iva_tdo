@@ -16,7 +16,7 @@ import {
   Tag,
   Tree,
   Typography,
-  message,
+  App,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
@@ -37,6 +37,7 @@ import {
   listProjectMembers,
   listProjectReferences,
   listReviewMatrix,
+  downloadProjectExport,
   listUsers,
   getCipherTemplate,
   composeMdrCipher,
@@ -121,6 +122,10 @@ export default function ProjectsPage({
   onReload,
   onOpenRemark,
 }: Props): JSX.Element {
+  // Статический message из antd здесь не отображается (нет контекста темы —
+  // предупреждение «Static function can not consume context»): все тосты
+  // страницы были невидимы. Берём экземпляр из App.
+  const { message } = App.useApp();
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(projects[0]?.id ?? null);
   const [members, setMembers] = useState<ProjectMember[]>([]);
   const [references, setReferences] = useState<ProjectReference[]>([]);
@@ -170,6 +175,7 @@ export default function ProjectsPage({
   // Фильтр таблицы документов по клику в дереве проекта (item 5).
   const [treeFilter, setTreeFilter] = useState<DocumentsTreeFilter>(null);
   const isAdmin = currentUser.role === "admin";
+  const [exportingProject, setExportingProject] = useState(false);
   // Перенос документа, начатый перетаскиванием в дереве структуры проекта.
   const [treeMove, setTreeMove] = useState<{ doc: MDRRecord; parentId: number | null } | null>(null);
   const canManageMatrix = isAdmin || currentUser.permissions.can_manage_review_matrix;
@@ -724,7 +730,32 @@ export default function ProjectsPage({
         </Space>
       </Space>
 
-      <Card title={`Карточка проекта: ${selectedProjectId ?? "—"}`} className="hrp-card">
+      <Card
+        title={`Карточка проекта: ${selectedProjectId ?? "—"}`}
+        className="hrp-card"
+        extra={
+          isAdmin && selectedProject ? (
+            <Button
+              loading={exportingProject}
+              onClick={async () => {
+                setExportingProject(true);
+                const key = "project-export";
+                message.loading({ content: "Собираем архив проекта — это может занять минуту…", key, duration: 0 });
+                try {
+                  await downloadProjectExport(selectedProject.id, selectedProject.code);
+                  message.success({ content: "Архив проекта скачан", key });
+                } catch (error) {
+                  message.error({ content: error instanceof Error ? error.message : "Не удалось выгрузить проект", key });
+                } finally {
+                  setExportingProject(false);
+                }
+              }}
+            >
+              Выгрузить проект целиком (ZIP)
+            </Button>
+          ) : null
+        }
+      >
         <Space style={{ marginBottom: 12 }}>
           <Typography.Text strong>Текущий проект:</Typography.Text>
           <Select

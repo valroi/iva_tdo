@@ -9,6 +9,7 @@ from app.auth import get_password_hash, verify_password
 from app.config import get_settings
 from app.database import get_db
 from app.seed import seed_default_data
+from app.services import announcement as announcement_service
 from app.services import matrix_gap
 from app.services.notification_email import send_welcome_email
 from app.deps import (
@@ -47,6 +48,8 @@ from app.schemas import (
     RegistrationRequestRead,
     AdminReviewSlaSettingsRead,
     AdminReviewSlaSettingsUpdate,
+    AnnouncementRead,
+    AnnouncementUpdate,
     MatrixGapEmailsRead,
     MatrixGapEmailsUpdate,
     ReviewFlagsRead,
@@ -202,6 +205,27 @@ def get_review_flags(
     item = db.query(SystemSetting).filter(SystemSetting.key == "review_nc_locks_commenting").first()
     locks = True if item is None else str(item.value).strip().lower() in ("1", "true", "yes", "on")
     return ReviewFlagsRead(nc_locks_commenting=locks)
+
+
+@router.get("/admin-settings/announcement", response_model=AnnouncementRead)
+def get_announcement_settings(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_main_admin),
+):
+    return AnnouncementRead(**announcement_service.read(db))
+
+
+@router.put("/admin-settings/announcement", response_model=AnnouncementRead)
+def update_announcement_settings(
+    payload: AnnouncementUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_main_admin),
+):
+    if payload.enabled and payload.deadline is None:
+        raise HTTPException(status_code=400, detail="Для включённого объявления укажите дату и время окончания отсчёта")
+    return AnnouncementRead(
+        **announcement_service.write(db, enabled=payload.enabled, deadline=payload.deadline, text=payload.text)
+    )
 
 
 @router.get("/admin-settings/matrix-gap-emails", response_model=MatrixGapEmailsRead)

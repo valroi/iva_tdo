@@ -898,6 +898,19 @@ class RevisionReviewerSummary(BaseModel):
     my_locked: bool
 
 
+class AnnouncementRead(BaseModel):
+    enabled: bool = False
+    # naive UTC; фронт показывает по Москве
+    deadline: datetime | None = None
+    text: str = ""
+
+
+class AnnouncementUpdate(BaseModel):
+    enabled: bool
+    deadline: datetime | None = None
+    text: str = Field(default="", max_length=255)
+
+
 class ReviewFlagsRead(BaseModel):
     nc_locks_commenting: bool
 

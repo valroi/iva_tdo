@@ -20,7 +20,8 @@ from app.config import get_settings
 from app.database import get_db
 from app.deps import get_current_user, get_effective_permissions, require_main_admin
 from app.models import Notification, RegistrationRequest, RegistrationRequestStatus, User, UserSession
-from app.schemas import LoginRequest, RefreshRequest, RegisterRequest, TokenPair, UserRead, UserSessionRead
+from app.schemas import AnnouncementRead, LoginRequest, RefreshRequest, RegisterRequest, TokenPair, UserRead, UserSessionRead
+from app.services import announcement as announcement_service
 
 router = APIRouter()
 settings = get_settings()
@@ -51,6 +52,13 @@ def _login_register_fail(ip: str, email: str) -> None:
     # Не даём словарю расти бесконечно.
     if len(_login_fails) > 10_000:
         _login_fails.clear()
+
+
+@router.get("/announcement", response_model=AnnouncementRead)
+def get_announcement(db: Session = Depends(get_db)):
+    """Объявление для всех — без авторизации: баннер показывается и на
+    экране входа, чтобы предупреждение увидели все, а не только вошедшие."""
+    return AnnouncementRead(**announcement_service.read(db))
 
 
 @router.post("/login", response_model=TokenPair)
